@@ -1,5 +1,5 @@
 
-# LexiGen ecDNA (placeholder)
+# eccDNA (placeholder)
 
 **LexiGen ecDNA** is an innovative project leveraging Natural Language Processing (NLP) to interpret and analyze patterns in extrachromosomal DNA (ecDNA). Currently, this project is in the early stages of planning and development.
 
