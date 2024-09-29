@@ -53,35 +53,64 @@ class EccDNAWrapper:
         xecc_fa = "custom_xecc.fa"
         self.ringmaster.run(blast_results, circular_sequences, mecc_fa, cecc_fa, xecc_fa)
 
-    def run_sieve(self):
+    def run_sieve(self, input_fasta=None, read_list=None, output_file=None):
         """Extract unselected reads for further analysis."""
-        read_list = f"{self.output_prefix}.read_list.csv"
-        unsel_fa = "unSel.fa"
-        self.sieve.run(self.input_fasta, read_list, unsel_fa)
-        return unsel_fa
+        if input_fasta is None:
+            input_fasta = self.input_fasta
+        if read_list is None:
+            read_list = f"{self.output_prefix}.read_list.csv"
+        if output_file is None:
+            output_file = "unSel.fa"
+        self.sieve.run(input_fasta, read_list, output_file)
+        return output_file
+
+    def create_fasta_index(self, fasta_file):
+        """Create an index for the FASTA file using samtools."""
+        subprocess.run(["samtools", "faidx", fasta_file], check=True)
+
+    def run_juggler(self, blast_results, fasta_index):
+        """Run eccDNA_Juggler.py for additional analysis."""
+        output_file = f"{self.output_prefix}.tecc_analysis_results.csv"
+        read_classification = f"{self.output_prefix}.read_classification.csv"
+        num_linr = f"{self.output_prefix}.Num_LinR.csv"
+        
+        subprocess.run([
+            "python", "eccDNA_Juggler.py",
+            "-i", blast_results,
+            "-f", fasta_index,
+            "-n", num_linr,
+            "-o", output_file,
+            "-r", read_classification
+        ], check=True)
 
     def run_pipeline(self):
         """Execute the complete eccDNA analysis pipeline."""
-        # Steps 1-6: Run individual components of the pipeline
         # Step 1: Run TideHunter
         self.run_tidehunter()
 
         # Step 2: Run Carousel
-        circular_sequences = self.run_carousel()
+        carousel_output, read_list, circular_sequences = self.run_carousel()
 
         # Step 3: Run BLASTN on circular sequences
-        blast_results = f"{self.output_prefix}.results_100_50_99.txt"
-        self.run_blastn(circular_sequences, blast_results)
+        blast_results = self.run_blastn(circular_sequences, f"{self.output_prefix}.results_100_50_99.txt")
 
         # Step 4: Run Ringmaster
         self.run_ringmaster(blast_results, circular_sequences)
 
-        # Step 5: Run Sieve
-        unsel_fa = self.run_sieve()
+        # Step 5: Run Sieve on original input
+        unselected_fasta = self.run_sieve(self.input_fasta, read_list, "unSel.fa")
 
-        # Step 6: Run BLASTN on unSel.fa
-        unsel_blast_results = f"unSel.{self.output_prefix}.results_99.txt"
-        self.run_blastn(unsel_fa, unsel_blast_results)
+        # Step 6: Run BLASTN on unselected sequences
+        unsel_blast_results = self.run_blastn(unselected_fasta, f"{self.output_prefix}.unSel.results_99.txt")
+
+        # Step 7: Create index for unselected sequences
+        self.create_fasta_index(unselected_fasta)
+
+        # Step 8: Run Juggler
+        self.run_juggler(unsel_blast_results, f"{unselected_fasta}.fai")
+
+        # Step 9: Run Sieve on unselected sequences
+        self.run_sieve(unselected_fasta, "read_classification.csv", "End_unSel.fa")
 
 def main():
     """Parse command-line arguments and run the eccDNA pipeline."""
