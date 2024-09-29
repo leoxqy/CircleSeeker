@@ -52,7 +52,7 @@ def process_group(group):
 
 def process_Uecc(df):
     Uecc_df = df[df['eClass'] == 'Uecc'].copy()
-    columns = ['query_id', 'subject_id', 's_start', 's_end', 'strand', 'consLen', 'copyNum', 'Gap_Percentage', 'eClass', 'gap_Length', 'readName']
+    columns = ['query_id', 'subject_id', 's_start', 's_end', 'strand', 'consLen', 'copyNum', 'Gap_Percentage', 'eClass', 'gap_Length', 'readName', 'q_start', 'q_end']
     Uecc_df = Uecc_df[columns].copy()
 
     column_mapping = {
@@ -76,7 +76,7 @@ def process_Uecc(df):
     Uecc_df['eEnd'] = Uecc_df['eEnd'].astype(int)
     Uecc_df['eName'] = Uecc_df['eChr'] + "-" + Uecc_df['eStart'].astype(str) + "-" + Uecc_df['eEnd'].astype(str)
 
-    result_columns = ['eName', 'eChr', 'eStart', 'eEnd', 'eStrand', 'eLength', 'eRepeatNum', 'MatDegree', 'eClass', 'eReads', 'query_id']
+    result_columns = ['eName', 'eChr', 'eStart', 'eEnd', 'eStrand', 'eLength', 'eRepeatNum', 'MatDegree', 'eClass', 'eReads', 'query_id', 'q_start', 'q_end']
     return Uecc_df[result_columns].copy()
 
 def generate_align_region(row):
@@ -129,25 +129,40 @@ def extract_query_ids(Uecc_df, mecc_df, Cecc_df):
     Cecc_ids = set(Cecc_df['query_id'])
     return Uecc_ids, mecc_ids, Cecc_ids
 
-def process_sequences(input_fasta, Uecc_ids, mecc_ids, Cecc_ids, mecc_df, Cecc_df, mecc_fa='MeccDNA.fa', cecc_fa='CeccDNA.fa', xecc_fa='XeccDNA.fa'):
+def process_sequences(input_fasta, Uecc_ids, mecc_ids, Cecc_ids, mecc_df, Cecc_df, Uecc_df, uecc_fa='UeccDNA.fa', mecc_fa='MeccDNA.fa', cecc_fa='CeccDNA.fa', xecc_fa='XeccDNA.fa'):
+    # Check if necessary columns exist
+    if 'q_start' not in Uecc_df.columns or 'q_end' not in Uecc_df.columns:
+        raise KeyError("Uecc_df is missing 'q_start' or 'q_end' columns")
+    if 'q_start' not in mecc_df.columns or 'q_end' not in mecc_df.columns:
+        raise KeyError("mecc_df is missing 'q_start' or 'q_end' columns")
+    if 'q_start' not in Cecc_df.columns or 'q_end' not in Cecc_df.columns:
+        raise KeyError("Cecc_df is missing 'q_start' or 'q_end' columns")
+
     tpm_Uecc = []
     tpm_mecc = []
     tpm_Cecc = []
     xecc_dna = []
     mecc_mapped = []
     Cecc_mapped = []
+    Uecc_mapped = []
 
-    # 从mecc_df获取q_start和q_end信息
+    # Get q_start and q_end information from mecc_df, Cecc_df, and Uecc_df
     mecc_info = dict(zip(mecc_df['query_id'], zip(mecc_df['q_start'], mecc_df['q_end'])))
     Cecc_info = dict(zip(Cecc_df['query_id'], zip(Cecc_df['q_start'], Cecc_df['q_end'])))
+    Uecc_info = dict(zip(Uecc_df['query_id'], zip(Uecc_df['q_start'], Uecc_df['q_end'])))
 
     for record in SeqIO.parse(input_fasta, "fasta"):
         if record.id in Uecc_ids:
-            tpm_Uecc.append(record)
+            if record.id in Uecc_info:
+                start, end = Uecc_info[record.id]
+                sub_record = record[start-1:end]  # Adjust to 0-based index
+                sub_record.id = record.id
+                sub_record.description = record.description
+                Uecc_mapped.append(sub_record)
         elif record.id in mecc_ids:
             if record.id in mecc_info:
                 start, end = mecc_info[record.id]
-                sub_record = record[start-1:end]  # 调整为0基索引
+                sub_record = record[start-1:end]  # Adjust to 0-based index
                 sub_record.id = record.id
                 sub_record.description = record.description
                 mecc_mapped.append(sub_record)
@@ -159,27 +174,28 @@ def process_sequences(input_fasta, Uecc_ids, mecc_ids, Cecc_ids, mecc_df, Cecc_d
                 sub_record.description = record.description
                 tpm_Cecc.append(sub_record)
         else:
-            # 只保留序列的前一半
+            # Keep only the first half of the sequence
             half_length = len(record.seq) // 2
             sub_record = record[:half_length]
             sub_record.id = record.id
             sub_record.description = record.description
             xecc_dna.append(sub_record)
 
-    # 写入序列到文件
+    # Write sequences to files
+    SeqIO.write(Uecc_mapped, uecc_fa, "fasta")
     SeqIO.write(mecc_mapped, mecc_fa, "fasta")
     SeqIO.write(tpm_Cecc, cecc_fa, "fasta")
     SeqIO.write(xecc_dna, xecc_fa, "fasta")
 
 def process_other_blast_rows(df):
-    # 筛选既不是Uecc也不是Mecc的行
+    # Select rows that are neither Uecc nor Mecc
     other_df = df[~df['eClass'].isin(['Uecc', 'Mecc'])].copy()
 
-    # 按照 query_id 分组，删除行数超过100的组
+    # Group by query_id and remove groups with more than 100 rows
     group_sizes = other_df.groupby('query_id').size()
     query_ids_to_remove = group_sizes[group_sizes > 100].index
 
-    # 删除这些 query_id
+    # Remove these query_ids
     other_df = other_df[~other_df['query_id'].isin(query_ids_to_remove)]
 
     return other_df
@@ -232,15 +248,15 @@ def analyze_group(group):
         end_q_end = Prelist['q_end'].max()
         pre_length = end_q_end - start_q_start + 1
 
-        # 只保留符合条件的Prelist
+        # Only keep Prelist that meets the conditions
         if pre_length > cons_len and len(Prelist) > 1:
-            # 将第一行移到最后
+            # Move the first row to the end
             Prelist = pd.concat([Prelist.iloc[1:], Prelist.iloc[:1]]).reset_index(drop=True)
 
             Prelist['Prelist_ID'] = len(Prelists) + 1
             Prelists.append(Prelist)
 
-            # 创建Prelist摘要
+            # Create Prelist summary
             summary = {
                 'query_id': query_id,
                 'Prelist_ID': len(Prelists),
@@ -258,29 +274,29 @@ def analyze_group(group):
         return pd.DataFrame(), pd.DataFrame()
 
 def process_detailed_results(df):
-    # 根据 query_id 和 Prelist_ID 分组
+    # Group by query_id and Prelist_ID
     grouped = df.groupby(['query_id', 'Prelist_ID'])
 
     results = []
 
     for (query_id, prelist_id), group in grouped:
-        # 标记 s_start 重复的行
+        # Mark rows with duplicate s_start
         group['Repeat1'] = group.duplicated(subset=['s_start'], keep=False)
 
-        # 标记 s_end 重复的行
+        # Mark rows with duplicate s_end
         group['Repeat2'] = group.duplicated(subset=['s_end'], keep=False)
 
-        # 提取被标记为 Repeat1 或 Repeat2 的行
+        # Extract rows marked as Repeat1 or Repeat2
         repeated_rows = group[(group['Repeat1'] | group['Repeat2'])].copy()
 
         if not repeated_rows.empty:
-            # 为每个组创建 LocNum
+            # Create LocNum for each group
             repeated_rows.loc[:, 'LocNum'] = range(1, len(repeated_rows) + 1)
 
-            # 计算 s_length
+            # Calculate s_length
             repeated_rows.loc[:, 's_length'] = repeated_rows['s_end'] - repeated_rows['s_start'] + 1
 
-            # 选择需要的列
+            # Select columns
             selected_columns = ['Prelist_ID', 'query_id', 'q_start', 'q_end', 'consLen', 'LocNum',
                                 'identity', 'alignment_length', 'subject_id', 's_start', 's_end',
                                 's_length', 'strand', 'readName', 'repN', 'copyNum']
@@ -294,65 +310,65 @@ def process_detailed_results(df):
         return pd.DataFrame()
 
 def process_detailed_results_further(df):
-    # 按 query_id 和 Prelist_ID 分组
+    # Group by query_id and Prelist_ID
     grouped = df.groupby(['query_id', 'Prelist_ID'])
 
     results = []
 
     for (query_id, prelist_id), group in grouped:
-        # 如果组内行数小于等于2，直接跳过这个组
+        # If the number of rows in a group is less than or equal to 2, skip this group
         if len(group) <= 2:
             continue
 
-        # 删除最后两行
+        # Remove the last two rows
         group = group.iloc[:-2]
 
-        # 按 s_start 和 s_end 去重
+        # Remove duplicates based on s_start and s_end
         group = group.drop_duplicates(subset=['s_start', 's_end'])
 
-        # 计算 s_length 总和
+        # Calculate the sum of s_length
         total_s_length = group['s_length'].sum()
 
-        # 获取 consLen（假设每个组内 consLen 相同）
+        # Get consLen (assuming consLen is the same for all rows in a group)
         cons_len = group['consLen'].iloc[0]
 
-        # 计算比率
+        # Calculate the ratio
         ratio = total_s_length / cons_len
 
-        # 如果比率在 0.8-1.2 之间，保留这个组
+        # If the ratio is between 0.8 and 1.2, keep this group
         if 0.8 <= ratio <= 1.2:
-            # 添加比率列
+            # Add the ratio column
             group['ratio'] = ratio
             results.append(group)
 
     if results:
         final_df = pd.concat(results, ignore_index=True)
 
-        # 计算每个 query_id 对应的 Prelist_ID 数量
+        # Count the number of Prelist_ID for each query_id
         prelist_counts = final_df.groupby('query_id')['Prelist_ID'].nunique()
 
-        # 更新 eClass 列
+        # Update the eClass column
         final_df['eClass'] = final_df.apply(lambda row: 'Cecc' if prelist_counts[row['query_id']] == 1 else 'Ceccm', axis=1)
 
         return final_df
     else:
         return pd.DataFrame()
 
-def main(input_file, Uecc_output_csv, mecc_output_csv, Cecc_output_csv, input_fasta, mecc_fa, cecc_fa, xecc_fa):
-    # 读取和处理数据
+def main(input_file, Uecc_output_csv, mecc_output_csv, Cecc_output_csv, input_fasta, uecc_fa, mecc_fa, cecc_fa, xecc_fa):
+    # Read and process data
     df = read_blast_results(input_file)
     df = process_query_id(df)
     df = add_calculated_columns(df)
 
-    # 过滤低Gap百分比的数据
+    # Filter data with low Gap percentage
     low_gap_df = filter_low_gap_percentage(df)
 
-    # 添加新列
+    # Add new columns
     low_gap_df['occurrence_count'] = low_gap_df.groupby('query_id')['query_id'].transform('count')
     low_gap_df['eClass'] = ''
     low_gap_df.loc[low_gap_df['occurrence_count'] == 1, 'eClass'] = 'Uecc'
 
-    # 处理重复组
+    # Process duplicate groups
     duplicate_mask = low_gap_df['occurrence_count'] > 1
     duplicate_groups = low_gap_df[duplicate_mask].groupby('query_id')
 
@@ -364,35 +380,35 @@ def main(input_file, Uecc_output_csv, mecc_output_csv, Cecc_output_csv, input_fa
         else:
             results.append((name, eclass, group.index.tolist()))
 
-    # 更新eClass并过滤数据
+    # Update eClass and filter data
     for name, eclass, indices in results:
         low_gap_df.loc[low_gap_df['query_id'] == name, 'eClass'] = eclass
         if eclass == 'Uecc':
             low_gap_df = low_gap_df[~((low_gap_df['query_id'] == name) & (~low_gap_df.index.isin(indices)))]
 
-    # 删除不需要的列
+    # Remove unnecessary columns
     low_gap_df = low_gap_df.drop('occurrence_count', axis=1)
 
-    # 将 eClass 信息合并回原始的 df
+    # Merge eClass information back to the original df
     eClass_mapping = low_gap_df[['query_id', 'eClass']].drop_duplicates()
     df = df.merge(eClass_mapping, on='query_id', how='left')
 
-    # 处理Uecc和Mecc数据
+    # Process Uecc and Mecc data
     Uecc_results = process_Uecc(low_gap_df)
     Uecc_results.to_csv(Uecc_output_csv, index=False)
 
     mecc_results = process_mecc(low_gap_df)
     mecc_results.to_csv(mecc_output_csv, index=False)
 
-    # 处理其他blast行，使用合并了 eClass 的原始 df
+    # Process other blast rows, using the original df merged with eClass
     other_results = process_other_blast_rows(df)
 
-    # 如果other_results为空，保留所有不是Uecc和Mecc的行
+    # If other_results is empty, keep all rows that are not Uecc and Mecc
     if other_results.empty:
-        print("其他BLAST结果为空。")
+        print("Other BLAST results are empty.")
         Cecc_results = pd.DataFrame()
     else:
-        # 分析other_results，生成CeccDNA数据
+        # Analyze other_results to generate CeccDNA data
         detailed_results_list = []
         summary_results_list = []
 
@@ -417,16 +433,16 @@ def main(input_file, Uecc_output_csv, mecc_output_csv, Cecc_output_csv, input_fa
         else:
             Cecc_results = pd.DataFrame()
 
-    # 处理序列
+    # Process sequences
     if not Cecc_results.empty:
         Cecc_ids = set(Cecc_results['query_id'])
     else:
         Cecc_ids = set()
 
     Uecc_ids, mecc_ids, Cecc_ids = extract_query_ids(Uecc_results, mecc_results, Cecc_results)
-    process_sequences(input_fasta, Uecc_ids, mecc_ids, Cecc_ids, mecc_results, Cecc_results, mecc_fa, cecc_fa, xecc_fa)
+    process_sequences(input_fasta, Uecc_ids, mecc_ids, Cecc_ids, mecc_results, Cecc_results, Uecc_results, uecc_fa, mecc_fa, cecc_fa, xecc_fa)
 
-    print(f"处理完成。输出文件：{Uecc_output_csv}、{mecc_output_csv}、{Cecc_output_csv}、{mecc_fa}、{cecc_fa} 和 {xecc_fa}")
+    print(f"Processing complete. Output files: {Uecc_output_csv}, {mecc_output_csv}, {Cecc_output_csv}, {uecc_fa}, {mecc_fa}, {cecc_fa}, and {xecc_fa}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='处理BLAST结果并生成输出文件')
@@ -435,10 +451,11 @@ if __name__ == "__main__":
     parser.add_argument('-u', '--Uecc_output_csv', default='UeccDNA.csv', help='Uecc输出CSV文件路径')
     parser.add_argument('-m', '--Mecc_output_csv', default='MeccDNA.csv', help='Mecc输出CSV文件路径')
     parser.add_argument('-c', '--Cecc_output_csv', default='CeccDNA.csv', help='Cecc输出CSV文件路径')
+    parser.add_argument('--uecc_fa', default='UeccDNA.fa', help='Uecc输出FASTA文件路径')
     parser.add_argument('--mecc_fa', default='MeccDNA.fa', help='Mecc输出FASTA文件路径')
     parser.add_argument('--cecc_fa', default='CeccDNA.fa', help='Cecc输出FASTA文件路径')
     parser.add_argument('--xecc_fa', default='XeccDNA.fa', help='Xecc输出FASTA文件路径')
 
     args = parser.parse_args()
 
-    main(args.input, args.Uecc_output_csv, args.Mecc_output_csv, args.Cecc_output_csv, args.input_fasta, args.mecc_fa, args.cecc_fa, args.xecc_fa)
+    main(args.input, args.Uecc_output_csv, args.Mecc_output_csv, args.Cecc_output_csv, args.input_fasta, args.uecc_fa, args.mecc_fa, args.cecc_fa, args.xecc_fa)

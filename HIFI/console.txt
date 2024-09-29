@@ -1,11 +1,19 @@
 TideHunter -f 2 -t 18 -k 16 -w 1 -p 100 -P 2000000 -e 0.1 extracted_10000_reads.fasta > extracted_10000.TH.cons.out.0.1.txt
 
-    time python eccDNA_Carousel.py -i extracted_10000.TH.cons.out.0.1.txt -o 10k.processed_results.csv -r 10k.read_list.csv -c circular_sequences.fasta
-    
-    time blastn -db /dssg/home/acct-xyzltt/xyzltt/TGS/ref/hg38/hg38_db -query circular_sequences.fasta -out 10k.results_100_50_99.txt -num_threads 18 -word_size 100 -evalue 1e-50 -perc_identity 99 -outfmt 6 &
+time python eccDNA_Carousel.py -i extracted_10000.TH.cons.out.0.1.txt -o 10k.processed_results.csv -r 10k.read_list.csv -c circular_sequences.fasta
 
-    time python eccDNA_Ringmaster.py -i 10k.results_100_50_99.txt -fa circular_sequences.fasta --mecc_fa custom_mecc.fa --cecc_fa custom_cecc.fa --xecc_fa custom_xecc.fa
+time blastn -db /dssg/home/acct-xyzltt/xyzltt/TGS/ref/hg38/hg38_db -query circular_sequences.fasta -out 10k.results_100_50_99.txt -num_threads 18 -word_size 100 -evalue 1e-50 -perc_identity 99 -outfmt 6 &
 
-    python eccDNA_Sieve.py -i extracted_10000_reads.fasta -c 10k.read_list.csv -u unSel.fa
+time python eccDNA_Ringmaster.py -i 10k.results_100_50_99.txt -fa circular_sequences.fasta --mecc_fa custom_mecc.fa --cecc_fa custom_cecc.fa --xecc_fa custom_xecc.fa
 
-    time blastn -db /dssg/home/acct-xyzltt/xyzltt/TGS/ref/hg38/hg38_db -query unSel.fa -out unSel.10k.results_99.txt -num_threads 18 -word_size 100 -evalue 1e-50 -perc_identity 99 -outfmt 6 &
+python eccDNA_Sieve.py -i extracted_10000_reads.fasta -c 10k.read_list.csv -u unSel.fa
+
+time blastn -db /dssg/home/acct-xyzltt/xyzltt/TGS/ref/hg38/hg38_db -query unSel.fa -out unSel.10k.results_99.txt -num_threads 18 -word_size 100 -evalue 1e-50 -perc_identity 99 -outfmt 6 &
+
+time blastn -db /data5/home/yxzhang2/2eccDNA/HIFI/Demo/hg38_db -query unSel.fa -out unSel.10k.results_99.txt -num_threads 18 -word_size 100 -evalue 1e-50 -perc_identity 99 -outfmt 6 &
+
+samtools faidx unSel.fa
+
+python eccDNA_Juggler.py -i unSel.10k.results_99.txt -f unSel.fa.fai -n Num_LinR.csv -o tecc_analysis_results.csv -r read_classification.csv
+
+python eccDNA_Sieve.py -i unSel.fa -c read_classification.csv -u End_unSel.fa
