@@ -1,95 +1,98 @@
+# CircleSeeker: Advanced Circular DNA Analysis Tool
 
-# eccDNA (placeholder)
+CircleSeeker is a specialized bioinformatics tool designed for advanced circular DNA analysis using PacBio HiFi sequencing data. This comprehensive software processes high-throughput long-read sequences to efficiently identify and characterize various types of extrachromosomal circular DNA (eccDNA) structures, leveraging the high accuracy and long read lengths of PacBio HiFi technology.
 
-**LexiGen ecDNA** is an innovative project leveraging Natural Language Processing (NLP) to interpret and analyze patterns in extrachromosomal DNA (ecDNA). Currently, this project is in the early stages of planning and development.
+## Features
 
-## Project Overview (template)
+- Efficient processing of PacBio HiFi sequencing data
+- Identification and classification of various eccDNA types (UeccDNA, MeccDNA, CeccDNA, XeccDNA)
+- Integration with popular bioinformatics tools (TideHunter, BLAST, minimap2, samtools)
+- Multi-threaded processing for improved performance
+- Comprehensive analysis report generation
 
-**Project Description**:
-LexiGen ecDNA aims to revolutionize the understanding of ecDNA by applying advanced NLP techniques to genomic data. This approach will facilitate novel insights and accelerate research in genomics.
+## Installation
 
-**Project Goals**:
-- [Placeholder for project goals]
+CircleSeeker can be installed using conda:
 
-## Table of Contents (template)
+```bash
+conda install -c bioconda circle_seeker
+```
 
-- [Project Overview](#project-overview)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Features](#features)
-- [Contributing](#contributing)
-- [License](#license)
-- [Contact](#contact)
+Alternatively, you can install it from source:
 
-## Installation (template)
+```bash
+git clone https://github.com/leoxqy/CircleSeeker.git
+cd CircleSeeker
+pip install .
+```
 
-**Prerequisites**:
-- [List prerequisites]
+## Dependencies
 
-**Installation Steps**:
-1. Clone the repository:
-   \`\`\`bash
-   git clone https://github.com/yourusername/lexigen-ecDNA.git
-   \`\`\`
-2. Navigate to the project directory:
-   \`\`\`bash
-   cd lexigen-ecDNA
-   \`\`\`
-3. Install dependencies:
-   \`\`\`bash
-   [Placeholder for installation command]
-   \`\`\`
+CircleSeeker requires the following tools and libraries:
 
-## Usage (template)
+- Python 3.6+
+- numpy >=1.22
+- pandas
+- pysam
+- biopython
+- minimap2
+- samtools
+- BLAST
+- bedtools
+- seqkit
+- TideHunter
+- pbtk
 
-**Basic Usage**:
-- [Placeholder for basic usage instructions]
+These dependencies are automatically managed when installing via conda.
 
-**Examples**:
-- [Placeholder for example scripts and use cases]
+## Usage
 
-## Features (template)
+Basic usage of CircleSeeker:
 
-- **NLP-Based Genomic Analysis**: 
-  - [Placeholder for feature details]
-- **DNA Fragment Reconstruction**: 
-  - [Placeholder for feature details]
-- **Fragment Classification**: 
-  - [Placeholder for feature details]
-- **Automated Pattern Recognition**: 
-  - [Placeholder for feature details]
-- **Data Visualization**: 
-  - [Placeholder for feature details]
-- **TBD...**: 
-  - [Placeholder for feature details]
+```bash
+CircleSeeker -i <input_fasta> -p <output_prefix> -r <reference_genome> [-o <output_folder>] [-t <num_threads>]
+```
 
-## Contributing (template)
+Arguments:
+- `-i, --input`: Input FASTA file (required)
+- `-p, --prefix`: Prefix for all generated files (required)
+- `-r, --reference`: Reference genome FASTA file (required)
+- `-o, --output`: Output folder (optional)
+- `-t, --num_threads`: Number of threads to use (default: 8)
 
-We welcome contributions from the research community. Please refer to our [contribution guidelines](CONTRIBUTING.md) to get started.
+For a detailed workflow, please refer to the [CircleSeeker Tutorial](CircleSeeker完整工作流程教程.md).
 
-1. Fork the repository.
-2. Create a new branch:
-   \`\`\`bash
-   git checkout -b feature/your-feature-name
-   \`\`\`
-3. Commit your changes:
-   \`\`\`bash
-   git commit -m 'Add some feature'
-   \`\`\`
-4. Push to the branch:
-   \`\`\`bash
-   git push origin feature/your-feature-name
-   \`\`\`
-5. Open a pull request.
+## Output
+
+CircleSeeker generates several output files, including:
+
+- Confirmed eccDNA sequences (UeccDNA, MeccDNA, CeccDNA, XeccDNA)
+- CSV files with detailed information about identified eccDNA
+- A comprehensive analysis report
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+CircleSeeker is licensed under the GNU General Public License v2 (GPLv2).
 
-## Contact
+## Authors
 
-**Collaborators**:
-- [uid1](https://github.com/uid1)
-- [uid1](https://github.com/uid2)
+- Yaoxin Zhang (yxzhang@ncgr.com)
+- Leo Xinqi Yu (leoxqy@hotmail.com)
 
-For more information, please contact us at [your-email@example.com].
+## Citation
+
+If you use CircleSeeker in your research, please cite:
+
+[Placeholder for citation information]
+
+## Support
+
+For issues, bug reports, or feature requests, please use the [GitHub issue tracker](https://github.com/leoxqy/CircleSeeker/issues).
+
+## Contributing
+
+We welcome contributions to CircleSeeker. Please refer to our [contribution guidelines](CONTRIBUTING.md) for more information.
+
+## Acknowledgments
+
+We would like to thank the developers of the tools and libraries that CircleSeeker depends on, as well as the research community for their valuable feedback and support.

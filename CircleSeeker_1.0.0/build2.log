@@ -1,0 +1,638 @@
+usage: conda [-h] [-v] [--no-plugins] [-V] COMMAND ...
+conda: error: argument COMMAND: invalid choice: 'activate' (choose from 'clean', 'compare', 'config', 'create', 'info', 'init', 'install', 'list', 'notices', 'package', 'remove', 'uninstall', 'rename', 'run', 'search', 'update', 'upgrade', 'build', 'convert', 'debug', 'develop', 'doctor', 'index', 'inspect', 'metapackage', 'render', 'skeleton', 'env', 'verify')
+WARNING: No numpy version specified in conda_build_config.yaml.  Falling back to default numpy value of 1.22
+Adding in variants from internal_defaults
+Attempting to finalize metadata for circle_seeker
+Collecting package metadata (repodata.json): ...working... done
+Solving environment: ...working... done
+Collecting package metadata (repodata.json): ...working... done
+Solving environment: ...working... done
+BUILD START: ['circle_seeker-1.0.0-py_0.tar.bz2']
+Collecting package metadata (repodata.json): ...working... done
+Solving environment: ...working... done
+
+## Package Plan ##
+
+  environment location: /dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placeh
+
+
+The following NEW packages will be INSTALLED:
+
+    _libgcc_mutex:           0.1-conda_forge            conda-forge
+    _openmp_mutex:           4.5-2_gnu                  conda-forge
+    bedtools:                2.31.1-hf5e1c6e_2          bioconda   
+    biopython:               1.83-py38h01eb140_0        conda-forge
+    blast:                   2.16.0-hc155240_2          bioconda   
+    bzip2:                   1.0.8-h4bc722e_7           conda-forge
+    c-ares:                  1.34.1-heb4867d_0          conda-forge
+    ca-certificates:         2024.8.30-hbcca054_0       conda-forge
+    curl:                    8.10.1-hbbe4b11_0          conda-forge
+    entrez-direct:           22.4-he881be0_0            bioconda   
+    gettext:                 0.22.5-he02047a_3          conda-forge
+    gettext-tools:           0.22.5-he02047a_3          conda-forge
+    htslib:                  1.21-h5efdd21_0            bioconda   
+    k8:                      1.2-h6618dc6_1             bioconda   
+    kernel-headers_linux-64: 3.10.0-he073ed8_17         conda-forge
+    keyutils:                1.6.1-h166bdaf_0           conda-forge
+    krb5:                    1.21.3-h659f571_0          conda-forge
+    ld_impl_linux-64:        2.43-h712a8e2_1            conda-forge
+    libasprintf:             0.22.5-he8f35ee_3          conda-forge
+    libasprintf-devel:       0.22.5-he8f35ee_3          conda-forge
+    libblas:                 3.9.0-24_linux64_openblas  conda-forge
+    libcblas:                3.9.0-24_linux64_openblas  conda-forge
+    libcurl:                 8.10.1-hbbe4b11_0          conda-forge
+    libdeflate:              1.21-h4bc722e_0            conda-forge
+    libedit:                 3.1.20191231-he28a2e2_2    conda-forge
+    libev:                   4.33-hd590300_2            conda-forge
+    libffi:                  3.4.2-h7f98852_5           conda-forge
+    libgcc:                  14.1.0-h77fa898_1          conda-forge
+    libgcc-ng:               14.1.0-h69a702a_1          conda-forge
+    libgettextpo:            0.22.5-he02047a_3          conda-forge
+    libgettextpo-devel:      0.22.5-he02047a_3          conda-forge
+    libgfortran:             14.1.0-h69a702a_1          conda-forge
+    libgfortran-ng:          14.1.0-h69a702a_1          conda-forge
+    libgfortran5:            14.1.0-hc5f4f2c_1          conda-forge
+    libgomp:                 14.1.0-h77fa898_1          conda-forge
+    libidn2:                 2.3.7-hd590300_0           conda-forge
+    liblapack:               3.9.0-24_linux64_openblas  conda-forge
+    libnghttp2:              1.58.0-h47da74e_1          conda-forge
+    libnsl:                  2.0.1-hd590300_0           conda-forge
+    libopenblas:             0.3.27-pthreads_hac2b453_1 conda-forge
+    libsqlite:               3.46.1-hadc24fc_0          conda-forge
+    libssh2:                 1.11.0-h0841786_0          conda-forge
+    libstdcxx:               14.1.0-hc0a3c3a_1          conda-forge
+    libstdcxx-ng:            14.1.0-h4852527_1          conda-forge
+    libunistring:            0.9.10-h7f98852_0          conda-forge
+    libuuid:                 2.38.1-h0b41bf4_0          conda-forge
+    libxcrypt:               4.4.36-hd590300_1          conda-forge
+    libzlib:                 1.3.1-hb9d3cd8_2           conda-forge
+    minimap2:                2.28-he4a0461_3            bioconda   
+    ncbi-vdb:                3.1.1-h4ac6f70_2           bioconda   
+    ncurses:                 6.5-he02047a_1             conda-forge
+    numpy:                   1.24.4-py38h59b608b_0      conda-forge
+    openssl:                 3.3.2-hb9d3cd8_0           conda-forge
+    pandas:                  2.0.3-py38h01efb38_1       conda-forge
+    perl:                    5.32.1-7_hd590300_perl5    conda-forge
+    perl-archive-tar:        2.40-pl5321hdfd78af_0      bioconda   
+    perl-carp:               1.50-pl5321hd8ed1ab_0      conda-forge
+    perl-common-sense:       3.75-pl5321hd8ed1ab_0      conda-forge
+    perl-compress-raw-bzip2: 2.201-pl5321h166bdaf_0     conda-forge
+    perl-compress-raw-zlib:  2.202-pl5321h166bdaf_0     conda-forge
+    perl-encode:             3.21-pl5321hb9d3cd8_1      conda-forge
+    perl-exporter:           5.74-pl5321hd8ed1ab_0      conda-forge
+    perl-exporter-tiny:      1.002002-pl5321hd8ed1ab_0  conda-forge
+    perl-extutils-makemaker: 7.70-pl5321hd8ed1ab_0      conda-forge
+    perl-io-compress:        2.201-pl5321hdbdd923_2     bioconda   
+    perl-io-zlib:            1.14-pl5321hdfd78af_0      bioconda   
+    perl-json:               4.10-pl5321hdfd78af_1      bioconda   
+    perl-json-xs:            4.03-pl5321h4ac6f70_3      bioconda   
+    perl-list-moreutils:     0.430-pl5321hdfd78af_0     bioconda   
+    perl-list-moreutils-xs:  0.430-pl5321h031d066_2     bioconda   
+    perl-parent:             0.241-pl5321hd8ed1ab_0     conda-forge
+    perl-pathtools:          3.75-pl5321h166bdaf_0      conda-forge
+    perl-scalar-list-utils:  1.63-pl5321h166bdaf_0      conda-forge
+    perl-storable:           3.15-pl5321hb9d3cd8_0      conda-forge
+    perl-types-serialiser:   1.01-pl5321hdfd78af_0      bioconda   
+    pip:                     24.2-pyh8b19718_1          conda-forge
+    pysam:                   0.22.1-py38h2d19e03_2      bioconda   
+    python:                  3.8.20-h4a871b0_2_cpython  conda-forge
+    python-dateutil:         2.9.0-pyhd8ed1ab_0         conda-forge
+    python-tzdata:           2024.2-pyhd8ed1ab_0        conda-forge
+    python_abi:              3.8-5_cp38                 conda-forge
+    pytz:                    2024.2-pyhd8ed1ab_0        conda-forge
+    readline:                8.2-h8228510_1             conda-forge
+    rpsbproc:                0.5.0-h6a68c12_0           bioconda   
+    samtools:                1.21-h50ea8bc_0            bioconda   
+    seqkit:                  2.8.2-h9ee0642_1           bioconda   
+    setuptools:              75.1.0-pyhd8ed1ab_0        conda-forge
+    six:                     1.16.0-pyh6c4a22f_0        conda-forge
+    sysroot_linux-64:        2.17-h4a8ded7_17           conda-forge
+    tidehunter:              1.5.5-h43eeafb_2           bioconda   
+    tk:                      8.6.13-noxft_h4845f30_101  conda-forge
+    tzdata:                  2024b-hc8b5060_0           conda-forge
+    wget:                    1.21.4-hda4d442_0          conda-forge
+    wheel:                   0.44.0-pyhd8ed1ab_0        conda-forge
+    xz:                      5.2.6-h166bdaf_0           conda-forge
+    zlib:                    1.3.1-hb9d3cd8_2           conda-forge
+    zstd:                    1.5.6-ha6fb4c9_0           conda-forge
+
+Preparing transaction: ...working... done
+Verifying transaction: ...working... done
+Executing transaction: ...working... done
+Collecting package metadata (repodata.json): ...working... done
+Solving environment: ...working... done
+  Running command python setup.py egg_info
+  running egg_info
+  creating /tmp/pip-pip-egg-info-g2qnbsoz/circle_seeker.egg-info
+  writing /tmp/pip-pip-egg-info-g2qnbsoz/circle_seeker.egg-info/PKG-INFO
+  writing dependency_links to /tmp/pip-pip-egg-info-g2qnbsoz/circle_seeker.egg-info/dependency_links.txt
+  writing entry points to /tmp/pip-pip-egg-info-g2qnbsoz/circle_seeker.egg-info/entry_points.txt
+  writing requirements to /tmp/pip-pip-egg-info-g2qnbsoz/circle_seeker.egg-info/requires.txt
+  writing top-level names to /tmp/pip-pip-egg-info-g2qnbsoz/circle_seeker.egg-info/top_level.txt
+  writing manifest file '/tmp/pip-pip-egg-info-g2qnbsoz/circle_seeker.egg-info/SOURCES.txt'
+  reading manifest file '/tmp/pip-pip-egg-info-g2qnbsoz/circle_seeker.egg-info/SOURCES.txt'
+  writing manifest file '/tmp/pip-pip-egg-info-g2qnbsoz/circle_seeker.egg-info/SOURCES.txt'
+  Running command python setup.py bdist_wheel
+  running bdist_wheel
+  running build
+  running build_py
+  creating build/lib/circle_seeker
+  copying circle_seeker/Astrologer.py -> build/lib/circle_seeker
+  copying circle_seeker/Cleaner.py -> build/lib/circle_seeker
+  copying circle_seeker/Juggler.py -> build/lib/circle_seeker
+  copying circle_seeker/CircleSeeker.py -> build/lib/circle_seeker
+  copying circle_seeker/__init__.py -> build/lib/circle_seeker
+  copying circle_seeker/TreatOther.py -> build/lib/circle_seeker
+  copying circle_seeker/Ringmaster.py -> build/lib/circle_seeker
+  copying circle_seeker/Carousel.py -> build/lib/circle_seeker
+  copying circle_seeker/Sieve.py -> build/lib/circle_seeker
+  copying circle_seeker/ReportGenerator.py -> build/lib/circle_seeker
+  copying circle_seeker/MergeUecc.py -> build/lib/circle_seeker
+  copying circle_seeker/MergeMecc.py -> build/lib/circle_seeker
+  copying circle_seeker/Tamer.py -> build/lib/circle_seeker
+  running egg_info
+  creating circle_seeker.egg-info
+  writing circle_seeker.egg-info/PKG-INFO
+  writing dependency_links to circle_seeker.egg-info/dependency_links.txt
+  writing entry points to circle_seeker.egg-info/entry_points.txt
+  writing requirements to circle_seeker.egg-info/requires.txt
+  writing top-level names to circle_seeker.egg-info/top_level.txt
+  writing manifest file 'circle_seeker.egg-info/SOURCES.txt'
+  reading manifest file 'circle_seeker.egg-info/SOURCES.txt'
+  writing manifest file 'circle_seeker.egg-info/SOURCES.txt'
+  /dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placeh/lib/python3.8/site-packages/setuptools/command/build_py.py:218: _Warning: Package 'circle_seeker.test' is absent from the `packages` configuration.
+  !!
+
+          ********************************************************************************
+          ############################
+          # Package would be ignored #
+          ############################
+          Python recognizes 'circle_seeker.test' as an importable package[^1],
+          but it is absent from setuptools' `packages` configuration.
+
+          This leads to an ambiguous overall configuration. If you want to distribute this
+          package, please make sure that 'circle_seeker.test' is explicitly added
+          to the `packages` configuration field.
+
+          Alternatively, you can also rely on setuptools' discovery methods
+          (for example by using `find_namespace_packages(...)`/`find_namespace:`
+          instead of `find_packages(...)`/`find:`).
+
+          You can read more about "package discovery" on setuptools documentation page:
+
+          - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+
+          If you don't want 'circle_seeker.test' to be distributed and are
+          already explicitly excluding 'circle_seeker.test' via
+          `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+          you can try to use `exclude_package_data`, or `include-package-data=False` in
+          combination with a more fine grained `package-data` configuration.
+
+          You can read more about "package data files" on setuptools documentation page:
+
+          - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+
+
+          [^1]: For Python, any directory (with suitable naming) can be imported,
+                even if it does not contain any `.py` files.
+                On the other hand, currently there is no concept of package data
+                directory, all directories are treated like packages.
+          ********************************************************************************
+
+  !!
+    check.warn(importable)
+  creating build/lib/circle_seeker/test
+  copying circle_seeker/test/DNA_2k.fasta -> build/lib/circle_seeker/test
+  copying circle_seeker/test/ref_db.fa -> build/lib/circle_seeker/test
+  warning: build_py: byte-compiling is disabled, skipping.
+
+  /dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placeh/lib/python3.8/site-packages/setuptools/_distutils/cmd.py:66: SetuptoolsDeprecationWarning: setup.py install is deprecated.
+  !!
+
+          ********************************************************************************
+          Please avoid running ``setup.py`` directly.
+          Instead, use pypa/build, pypa/installer or other
+          standards-based tools.
+
+          See https://blog.ganssle.io/articles/2021/10/setup-py-deprecated.html for details.
+          ********************************************************************************
+
+  !!
+    self.initialize_options()
+  installing to build/bdist.linux-x86_64/wheel
+  running install
+  running install_lib
+  creating build/bdist.linux-x86_64/wheel
+  creating build/bdist.linux-x86_64/wheel/circle_seeker
+  copying build/lib/circle_seeker/Astrologer.py -> build/bdist.linux-x86_64/wheel/./circle_seeker
+  copying build/lib/circle_seeker/Cleaner.py -> build/bdist.linux-x86_64/wheel/./circle_seeker
+  copying build/lib/circle_seeker/Juggler.py -> build/bdist.linux-x86_64/wheel/./circle_seeker
+  copying build/lib/circle_seeker/CircleSeeker.py -> build/bdist.linux-x86_64/wheel/./circle_seeker
+  copying build/lib/circle_seeker/__init__.py -> build/bdist.linux-x86_64/wheel/./circle_seeker
+  copying build/lib/circle_seeker/TreatOther.py -> build/bdist.linux-x86_64/wheel/./circle_seeker
+  copying build/lib/circle_seeker/Ringmaster.py -> build/bdist.linux-x86_64/wheel/./circle_seeker
+  copying build/lib/circle_seeker/Carousel.py -> build/bdist.linux-x86_64/wheel/./circle_seeker
+  copying build/lib/circle_seeker/Sieve.py -> build/bdist.linux-x86_64/wheel/./circle_seeker
+  copying build/lib/circle_seeker/ReportGenerator.py -> build/bdist.linux-x86_64/wheel/./circle_seeker
+  creating build/bdist.linux-x86_64/wheel/circle_seeker/test
+  copying build/lib/circle_seeker/test/ref_db.fa -> build/bdist.linux-x86_64/wheel/./circle_seeker/test
+  copying build/lib/circle_seeker/test/DNA_2k.fasta -> build/bdist.linux-x86_64/wheel/./circle_seeker/test
+  copying build/lib/circle_seeker/MergeUecc.py -> build/bdist.linux-x86_64/wheel/./circle_seeker
+  copying build/lib/circle_seeker/MergeMecc.py -> build/bdist.linux-x86_64/wheel/./circle_seeker
+  copying build/lib/circle_seeker/Tamer.py -> build/bdist.linux-x86_64/wheel/./circle_seeker
+  warning: install_lib: byte-compiling is disabled, skipping.
+
+  running install_egg_info
+  Copying circle_seeker.egg-info to build/bdist.linux-x86_64/wheel/./circle_seeker-1.0.0-py3.8.egg-info
+  running install_scripts
+  creating build/bdist.linux-x86_64/wheel/circle_seeker-1.0.0.dist-info/WHEEL
+  creating '/tmp/pip-wheel-3rwa44q5/circle_seeker-1.0.0-py3-none-any.whl' and adding 'build/bdist.linux-x86_64/wheel' to it
+  adding 'circle_seeker/Astrologer.py'
+  adding 'circle_seeker/Carousel.py'
+  adding 'circle_seeker/CircleSeeker.py'
+  adding 'circle_seeker/Cleaner.py'
+  adding 'circle_seeker/Juggler.py'
+  adding 'circle_seeker/MergeMecc.py'
+  adding 'circle_seeker/MergeUecc.py'
+  adding 'circle_seeker/ReportGenerator.py'
+  adding 'circle_seeker/Ringmaster.py'
+  adding 'circle_seeker/Sieve.py'
+  adding 'circle_seeker/Tamer.py'
+  adding 'circle_seeker/TreatOther.py'
+  adding 'circle_seeker/__init__.py'
+  adding 'circle_seeker/test/DNA_2k.fasta'
+  adding 'circle_seeker/test/ref_db.fa'
+  adding 'circle_seeker-1.0.0.dist-info/METADATA'
+  adding 'circle_seeker-1.0.0.dist-info/WHEEL'
+  adding 'circle_seeker-1.0.0.dist-info/entry_points.txt'
+  adding 'circle_seeker-1.0.0.dist-info/top_level.txt'
+  adding 'circle_seeker-1.0.0.dist-info/RECORD'
+  removing build/bdist.linux-x86_64/wheel
+Copying /dssg/home/acct-xyzltt/sjtu1226216/CircleSeeker2 to /dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/work/
+
+Rendered as:
+```yaml
+package:
+  name: circle_seeker
+  version: 1.0.0
+source:
+  path: /dssg/home/acct-xyzltt/sjtu1226216/CircleSeeker2
+build:
+  noarch: python
+  script: /dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placeh/bin/python
+    -m pip install . --no-deps -vv
+requirements:
+  host:
+    - seqkit 2.8.2 h9ee0642_1
+    - _libgcc_mutex 0.1 conda_forge
+    - ca-certificates 2024.8.30 hbcca054_0
+    - kernel-headers_linux-64 3.10.0 he073ed8_17
+    - ld_impl_linux-64 2.43 h712a8e2_1
+    - python_abi 3.8 5_cp38
+    - tzdata 2024b hc8b5060_0
+    - libgomp 14.1.0 h77fa898_1
+    - sysroot_linux-64 2.17 h4a8ded7_17
+    - _openmp_mutex 4.5 2_gnu
+    - libgcc 14.1.0 h77fa898_1
+    - c-ares 1.34.1 heb4867d_0
+    - libgcc-ng 14.1.0 h69a702a_1
+    - libgfortran5 14.1.0 hc5f4f2c_1
+    - libstdcxx 14.1.0 hc0a3c3a_1
+    - libzlib 1.3.1 hb9d3cd8_2
+    - openssl 3.3.2 hb9d3cd8_0
+    - bzip2 1.0.8 h4bc722e_7
+    - gettext-tools 0.22.5 he02047a_3
+    - keyutils 1.6.1 h166bdaf_0
+    - libdeflate 1.21 h4bc722e_0
+    - libev 4.33 hd590300_2
+    - libffi 3.4.2 h7f98852_5
+    - libgettextpo 0.22.5 he02047a_3
+    - libgfortran 14.1.0 h69a702a_1
+    - libnsl 2.0.1 hd590300_0
+    - libsqlite 3.46.1 hadc24fc_0
+    - libssh2 1.11.0 h0841786_0
+    - libstdcxx-ng 14.1.0 h4852527_1
+    - libunistring 0.9.10 h7f98852_0
+    - libuuid 2.38.1 h0b41bf4_0
+    - libxcrypt 4.4.36 hd590300_1
+    - ncbi-vdb 3.1.1 h4ac6f70_2
+    - ncurses 6.5 he02047a_1
+    - tk 8.6.13 noxft_h4845f30_101
+    - xz 5.2.6 h166bdaf_0
+    - zlib 1.3.1 hb9d3cd8_2
+    - bedtools 2.31.1 hf5e1c6e_2
+    - k8 1.2 h6618dc6_1
+    - libasprintf 0.22.5 he8f35ee_3
+    - libedit 3.1.20191231 he28a2e2_2
+    - libgettextpo-devel 0.22.5 he02047a_3
+    - libgfortran-ng 14.1.0 h69a702a_1
+    - libnghttp2 1.58.0 h47da74e_1
+    - perl 5.32.1 7_hd590300_perl5
+    - readline 8.2 h8228510_1
+    - rpsbproc 0.5.0 h6a68c12_0
+    - tidehunter 1.5.5 h43eeafb_2
+    - zstd 1.5.6 ha6fb4c9_0
+    - krb5 1.21.3 h659f571_0
+    - libasprintf-devel 0.22.5 he8f35ee_3
+    - libopenblas 0.3.27 pthreads_hac2b453_1
+    - minimap2 2.28 he4a0461_3
+    - perl-common-sense 3.75 pl5321hd8ed1ab_0
+    - perl-compress-raw-bzip2 2.201 pl5321h166bdaf_0
+    - perl-compress-raw-zlib 2.202 pl5321h166bdaf_0
+    - perl-exporter 5.74 pl5321hd8ed1ab_0
+    - perl-exporter-tiny 1.002002 pl5321hd8ed1ab_0
+    - perl-extutils-makemaker 7.70 pl5321hd8ed1ab_0
+    - perl-io-zlib 1.14 pl5321hdfd78af_0
+    - perl-list-moreutils-xs 0.430 pl5321h031d066_2
+    - perl-parent 0.241 pl5321hd8ed1ab_0
+    - perl-scalar-list-utils 1.63 pl5321h166bdaf_0
+    - perl-storable 3.15 pl5321hb9d3cd8_0
+    - python 3.8.20 h4a871b0_2_cpython
+    - gettext 0.22.5 he02047a_3
+    - libblas 3.9.0 24_linux64_openblas
+    - libcurl 8.10.1 hbbe4b11_0
+    - perl-carp 1.50 pl5321hd8ed1ab_0
+    - perl-encode 3.21 pl5321hb9d3cd8_1
+    - perl-list-moreutils 0.430 pl5321hdfd78af_0
+    - perl-types-serialiser 1.01 pl5321hdfd78af_0
+    - python-tzdata 2024.2 pyhd8ed1ab_0
+    - pytz 2024.2 pyhd8ed1ab_0
+    - setuptools 75.1.0 pyhd8ed1ab_0
+    - six 1.16.0 pyh6c4a22f_0
+    - wheel 0.44.0 pyhd8ed1ab_0
+    - curl 8.10.1 hbbe4b11_0
+    - htslib 1.21 h5efdd21_0
+    - libcblas 3.9.0 24_linux64_openblas
+    - libidn2 2.3.7 hd590300_0
+    - liblapack 3.9.0 24_linux64_openblas
+    - perl-io-compress 2.201 pl5321hdbdd923_2
+    - perl-json-xs 4.03 pl5321h4ac6f70_3
+    - perl-pathtools 3.75 pl5321h166bdaf_0
+    - pip 24.2 pyh8b19718_1
+    - pysam 0.22.1 py38h2d19e03_2
+    - python-dateutil 2.9.0 pyhd8ed1ab_0
+    - numpy 1.24.4 py38h59b608b_0
+    - perl-archive-tar 2.40 pl5321hdfd78af_0
+    - perl-json 4.10 pl5321hdfd78af_1
+    - samtools 1.21 h50ea8bc_0
+    - wget 1.21.4 hda4d442_0
+    - biopython 1.83 py38h01eb140_0
+    - entrez-direct 22.4 he881be0_0
+    - pandas 2.0.3 py38h01efb38_1
+    - blast 2.16.0 hc155240_2
+  run:
+    - bioconda::bedtools
+    - pysam
+    - bioconda::minimap2
+    - bioconda::samtools
+    - biopython
+    - python
+    - numpy >=1.22
+    - pandas
+    - bioconda::tidehunter
+    - bioconda::seqkit
+    - bioconda::blast
+test:
+  commands:
+    - CircleSeeker --help
+    - CircleSeeker -i test/DNA_2k.fasta -o test -r test/ref_db.fa
+  imports:
+    - circle_seeker
+about:
+  description: 'This comprehensive software processes high-throughput long-read sequences
+    to efficiently identify and characterize various types of extrachromosomal circular
+    DNA (eccDNA) structures, leveraging the high accuracy and long read lengths of
+    PacBio HiFi technology.
+
+    '
+  home: https://github.com/leoxqy/CircleSeeker
+  license: GPL-2.0
+  license_family: GPL
+  summary: 'Circle-Seeker: A specialized bioinformatics tool for circular DNA analysis.'
+extra:
+  copy_test_source_files: true
+  final: true
+  recipe-maintainers:
+    - leoxqy
+    - YxZhang-XHCY
+```
+
+source tree in: /dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/work
+export PREFIX=/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placeh
+export BUILD_PREFIX=/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/_build_env
+export SRC_DIR=/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/work
+Using pip 24.2 from $PREFIX/lib/python3.8/site-packages/pip (python 3.8)
+Non-user install because user site-packages disabled
+Disabling truststore because Python version isn't 3.10+
+Ignoring indexes: https://pypi.org/simple
+Created temporary directory: /tmp/pip-build-tracker-uocqv1cv
+Initialized build tracking at /tmp/pip-build-tracker-uocqv1cv
+Created build tracker: /tmp/pip-build-tracker-uocqv1cv
+Entered build tracker: /tmp/pip-build-tracker-uocqv1cv
+Created temporary directory: /tmp/pip-install-o3zxllst
+Created temporary directory: /tmp/pip-ephem-wheel-cache-rlujrber
+Processing $SRC_DIR
+  Added file://$SRC_DIR to build tracker '/tmp/pip-build-tracker-uocqv1cv'
+  Running setup.py (path:$SRC_DIR/setup.py) egg_info for package from file://$SRC_DIR
+  Created temporary directory: /tmp/pip-pip-egg-info-g2qnbsoz
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+  Source in $SRC_DIR has version 1.0.0, which satisfies requirement circle_seeker==1.0.0 from file://$SRC_DIR
+  Removed circle_seeker==1.0.0 from file://$SRC_DIR from build tracker '/tmp/pip-build-tracker-uocqv1cv'
+Created temporary directory: /tmp/pip-unpack-kw3y3blk
+Building wheels for collected packages: circle_seeker
+  Created temporary directory: /tmp/pip-wheel-3rwa44q5
+  Building wheel for circle_seeker (setup.py): started
+  Destination directory: /tmp/pip-wheel-3rwa44q5
+  Building wheel for circle_seeker (setup.py): finished with status 'done'
+  Created wheel for circle_seeker: filename=circle_seeker-1.0.0-py3-none-any.whl size=883300393 sha256=bd98aac63c6c5c9bcd9e9edd8e246ded9503e055087077f5ea186aa7502d0782
+  Stored in directory: /tmp/pip-ephem-wheel-cache-rlujrber/wheels/01/6d/82/25b8921ffb9e41d015e545b4574d2b9844662a2de2d647205a
+Successfully built circle_seeker
+Installing collected packages: circle_seeker
+
+  changing mode of $PREFIX/bin/CircleSeeker to 775
+Successfully installed circle_seeker-1.0.0
+Removed build tracker: '/tmp/pip-build-tracker-uocqv1cv'
+
+Resource usage statistics from building circle_seeker:
+   Process count: 4
+   CPU time: Sys=0:00:04.0, User=0:09:52.4
+   Memory: 3.9G
+   Disk usage: 8.9M
+   Time elapsed: 0:10:05.8
+
+
+Packaging circle_seeker
+Packaging circle_seeker-1.0.0-py_0
+number of files: 24
+Fixing permissions
+INFO :: Time taken to mark (prefix)
+        0 replacements in 0 files was 6.22 seconds
+Files containing CONDA_PREFIX
+-----------------------------
+python-scripts/CircleSeeker (text): Patching
+TEST START: /dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/noarch/circle_seeker-1.0.0-py_0.tar.bz2
+Renaming /dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/_build_env prefix directory '/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/_build_env' to '/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/build_prefix_moved_circle_seeker-1.0.0-py_0_linux-64'
+shutil.move(/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/_build_env prefix)=/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/_build_env, dest=/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/build_prefix_moved_circle_seeker-1.0.0-py_0_linux-64)
+Renaming work directory '/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/work' to '/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/work_moved_circle_seeker-1.0.0-py_0_noarch'
+shutil.move(work)=/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/work, dest=/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/work_moved_circle_seeker-1.0.0-py_0_noarch)
+Collecting package metadata (repodata.json): ...working... done
+Solving environment: ...working... done
+
+## Package Plan ##
+
+  environment location: /dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/_test_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_p
+
+
+The following NEW packages will be INSTALLED:
+
+    _libgcc_mutex:           0.1-conda_forge            conda-forge
+    _openmp_mutex:           4.5-2_gnu                  conda-forge
+    bedtools:                2.31.1-hf5e1c6e_2          bioconda   
+    biopython:               1.84-py312h9a8786e_0       conda-forge
+    blast:                   2.16.0-hc155240_2          bioconda   
+    bzip2:                   1.0.8-h4bc722e_7           conda-forge
+    c-ares:                  1.34.1-heb4867d_0          conda-forge
+    ca-certificates:         2024.8.30-hbcca054_0       conda-forge
+    circle_seeker:           1.0.0-py_0                 local      
+    curl:                    8.10.1-hbbe4b11_0          conda-forge
+    entrez-direct:           22.4-he881be0_0            bioconda   
+    gettext:                 0.22.5-he02047a_3          conda-forge
+    gettext-tools:           0.22.5-he02047a_3          conda-forge
+    htslib:                  1.21-h5efdd21_0            bioconda   
+    k8:                      1.2-h6618dc6_3             bioconda   
+    kernel-headers_linux-64: 3.10.0-he073ed8_17         conda-forge
+    keyutils:                1.6.1-h166bdaf_0           conda-forge
+    krb5:                    1.21.3-h659f571_0          conda-forge
+    ld_impl_linux-64:        2.43-h712a8e2_1            conda-forge
+    libasprintf:             0.22.5-he8f35ee_3          conda-forge
+    libasprintf-devel:       0.22.5-he8f35ee_3          conda-forge
+    libblas:                 3.9.0-24_linux64_openblas  conda-forge
+    libcblas:                3.9.0-24_linux64_openblas  conda-forge
+    libcurl:                 8.10.1-hbbe4b11_0          conda-forge
+    libdeflate:              1.21-h4bc722e_0            conda-forge
+    libedit:                 3.1.20191231-he28a2e2_2    conda-forge
+    libev:                   4.33-hd590300_2            conda-forge
+    libexpat:                2.6.3-h5888daf_0           conda-forge
+    libffi:                  3.4.2-h7f98852_5           conda-forge
+    libgcc:                  14.1.0-h77fa898_1          conda-forge
+    libgcc-ng:               14.1.0-h69a702a_1          conda-forge
+    libgettextpo:            0.22.5-he02047a_3          conda-forge
+    libgettextpo-devel:      0.22.5-he02047a_3          conda-forge
+    libgfortran:             14.1.0-h69a702a_1          conda-forge
+    libgfortran-ng:          14.1.0-h69a702a_1          conda-forge
+    libgfortran5:            14.1.0-hc5f4f2c_1          conda-forge
+    libgomp:                 14.1.0-h77fa898_1          conda-forge
+    libidn2:                 2.3.7-hd590300_0           conda-forge
+    liblapack:               3.9.0-24_linux64_openblas  conda-forge
+    libnghttp2:              1.58.0-h47da74e_1          conda-forge
+    libnsl:                  2.0.1-hd590300_0           conda-forge
+    libopenblas:             0.3.27-pthreads_hac2b453_1 conda-forge
+    libsqlite:               3.46.1-hadc24fc_0          conda-forge
+    libssh2:                 1.11.0-h0841786_0          conda-forge
+    libstdcxx:               14.1.0-hc0a3c3a_1          conda-forge
+    libstdcxx-ng:            14.1.0-h4852527_1          conda-forge
+    libunistring:            0.9.10-h7f98852_0          conda-forge
+    libuuid:                 2.38.1-h0b41bf4_0          conda-forge
+    libxcrypt:               4.4.36-hd590300_1          conda-forge
+    libzlib:                 1.3.1-hb9d3cd8_2           conda-forge
+    minimap2:                2.28-he4a0461_3            bioconda   
+    ncbi-vdb:                3.1.1-h4ac6f70_2           bioconda   
+    ncurses:                 6.5-he02047a_1             conda-forge
+    numpy:                   2.1.2-py312h58c1407_0      conda-forge
+    openssl:                 3.3.2-hb9d3cd8_0           conda-forge
+    pandas:                  2.2.3-py312hf9745cd_1      conda-forge
+    perl:                    5.32.1-7_hd590300_perl5    conda-forge
+    perl-archive-tar:        2.40-pl5321hdfd78af_0      bioconda   
+    perl-carp:               1.50-pl5321hd8ed1ab_0      conda-forge
+    perl-common-sense:       3.75-pl5321hd8ed1ab_0      conda-forge
+    perl-compress-raw-bzip2: 2.201-pl5321h166bdaf_0     conda-forge
+    perl-compress-raw-zlib:  2.202-pl5321h166bdaf_0     conda-forge
+    perl-encode:             3.21-pl5321hb9d3cd8_1      conda-forge
+    perl-exporter:           5.74-pl5321hd8ed1ab_0      conda-forge
+    perl-exporter-tiny:      1.002002-pl5321hd8ed1ab_0  conda-forge
+    perl-extutils-makemaker: 7.70-pl5321hd8ed1ab_0      conda-forge
+    perl-io-compress:        2.201-pl5321hdbdd923_2     bioconda   
+    perl-io-zlib:            1.14-pl5321hdfd78af_0      bioconda   
+    perl-json:               4.10-pl5321hdfd78af_1      bioconda   
+    perl-json-xs:            4.03-pl5321h4ac6f70_3      bioconda   
+    perl-list-moreutils:     0.430-pl5321hdfd78af_0     bioconda   
+    perl-list-moreutils-xs:  0.430-pl5321h031d066_2     bioconda   
+    perl-parent:             0.241-pl5321hd8ed1ab_0     conda-forge
+    perl-pathtools:          3.75-pl5321h166bdaf_0      conda-forge
+    perl-scalar-list-utils:  1.63-pl5321h166bdaf_0      conda-forge
+    perl-storable:           3.15-pl5321hb9d3cd8_0      conda-forge
+    perl-types-serialiser:   1.01-pl5321hdfd78af_0      bioconda   
+    pip:                     24.2-pyh8b19718_1          conda-forge
+    pysam:                   0.22.1-py312hcfdcdd7_2     bioconda   
+    python:                  3.12.7-hc5c86c4_0_cpython  conda-forge
+    python-dateutil:         2.9.0-pyhd8ed1ab_0         conda-forge
+    python-tzdata:           2024.2-pyhd8ed1ab_0        conda-forge
+    python_abi:              3.12-5_cp312               conda-forge
+    pytz:                    2024.1-pyhd8ed1ab_0        conda-forge
+    readline:                8.2-h8228510_1             conda-forge
+    rpsbproc:                0.5.0-h6a68c12_0           bioconda   
+    samtools:                1.21-h50ea8bc_0            bioconda   
+    seqkit:                  2.8.2-h9ee0642_1           bioconda   
+    setuptools:              75.1.0-pyhd8ed1ab_0        conda-forge
+    six:                     1.16.0-pyh6c4a22f_0        conda-forge
+    sysroot_linux-64:        2.17-h4a8ded7_17           conda-forge
+    tidehunter:              1.5.5-h43eeafb_2           bioconda   
+    tk:                      8.6.13-noxft_h4845f30_101  conda-forge
+    tzdata:                  2024b-hc8b5060_0           conda-forge
+    wget:                    1.21.4-hda4d442_0          conda-forge
+    wheel:                   0.44.0-pyhd8ed1ab_0        conda-forge
+    xz:                      5.2.6-h166bdaf_0           conda-forge
+    zlib:                    1.3.1-hb9d3cd8_2           conda-forge
+    zstd:                    1.5.6-ha6fb4c9_0           conda-forge
+
+Preparing transaction: ...working... done
+Verifying transaction: ...working... done
+Executing transaction: ...working... done
++ CircleSeeker --help
++ CircleSeeker -i test/DNA_2k.fasta -o test -r test/ref_db.fa
+BLAST options error: File test/ref_db.fa does not exist
+Traceback (most recent call last):
+  File "/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/_test_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_p/bin/CircleSeeker", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/_test_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_p/lib/python3.12/site-packages/circle_seeker/CircleSeeker.py", line 515, in main
+    wrapper.run_pipeline()
+  File "/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/_test_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_p/lib/python3.12/site-packages/circle_seeker/CircleSeeker.py", line 406, in run_pipeline
+    self.create_blast_db()
+  File "/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/_test_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_p/lib/python3.12/site-packages/circle_seeker/CircleSeeker.py", line 112, in create_blast_db
+    subprocess.run(command, shell=True, check=True)
+  File "/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/_test_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_p/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command 'makeblastdb -in test/ref_db.fa -dbtype nucl -out test_blast_db' returned non-zero exit status 1.
+WARNING: Tests failed for circle_seeker-1.0.0-py_0.tar.bz2 - moving package to /dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/broken
+
+CondaBuildUserError: TESTS FAILED: circle_seeker-1.0.0-py_0.tar.bz2
+
+export PREFIX=/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/_test_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_p
+export SRC_DIR=/dssg/home/acct-xyzltt/sjtu1226216/miniconda3/envs/CircleSeeker/conda-bld/circle_seeker_1728646850029/test_tmp
+import: 'circle_seeker'
+import: 'circle_seeker'
+usage: CircleSeeker [-h] -i INPUT -o OUTPUT_PREFIX -r REFERENCE [-d DB]
+
+Wrapper script for eccDNA analysis pipeline
+
+options:
+  -h, --help            show this help message and exit
+  -i INPUT, --input INPUT
+                        Input FASTA file
+  -o OUTPUT_PREFIX, --output_prefix OUTPUT_PREFIX
+                        Output prefix for all generated files
+  -r REFERENCE, --reference REFERENCE
+                        Reference genome FASTA file
+  -d DB, --db DB        Existing BLAST database name (optional)
+
+
+Building a new DB, current time: 10/11/2024 20:42:37
+New DB name:   $SRC_DIR/test_blast_db
+New DB title:  test/ref_db.fa
+Sequence type: Nucleotide
+Keep MBits: T
+Maximum file size: 3000000000B
+
+> Step 1/19 - Creating BLAST database - Elapsed time: 0.00 seconds
