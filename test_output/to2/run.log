@@ -1,0 +1,216 @@
+nohup: ignoring input
+
+
+Building a new DB, current time: 10/15/2024 18:31:40
+New DB name:   /tmp/circleseeker_3xcyg3c_/to2_blast_db
+New DB title:  ../../hg38.fa
+Sequence type: Nucleotide
+Keep MBits: T
+Maximum file size: 3000000000B
+Adding sequences from FASTA; added 455 sequences in 37.0488 seconds.
+
+
+[main] Real time: 114.769 sec; CPU: 2176.770 sec; Peak RSS: 42.289 GB
+Warning: [blastn] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 1-819] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 820-1962] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 1963-3196] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 3197-4055] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 4056-5055] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 5056-6407] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 6408-7732] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 7733-8558] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 8559-9545] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 9546-10895] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 10896-12306] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 12307-13186] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 13187-14211] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 14212-15564] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 15565-16971] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 16972-17814] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 17815-18799] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 18800-20112] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 20113-21605] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 21606-22448] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 22449-23439] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 23440-24641] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 24642-26221] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 26222-27029] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 27030-28004] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 28005-29127] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 29128-30852] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 30853-31664] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 31665-32618] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 32619-33828] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 33829-35600] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 35601-36194] Number of threads was reduced to 40 to match the number of available CPUs
+Created temporary directory: /tmp/circleseeker_3xcyg3c_
+
+> Step 1/19 - Creating BLAST database - Elapsed time: 0.00 seconds
+
+> Step 2/19 - Running TideHunter - Elapsed time: 40.25 seconds
+
+> Step 3/19 - Running Carousel - Elapsed time: 156.25 seconds
+Circularized 36194 sequences
+Wrote 36194 sequences to /tmp/circleseeker_3xcyg3c_/to2.carousel_circular_sequences.fasta
+Processing complete. Results saved to /tmp/circleseeker_3xcyg3c_/to2.carousel_processed_results.csv and /tmp/circleseeker_3xcyg3c_/to2.carousel_read_list.csv
+Total rows: 36194
+Number of classified reads: 36076
+Circularized sequences saved to /tmp/circleseeker_3xcyg3c_/to2.carousel_circular_sequences.fasta
+
+> Step 4/19 - Running BLASTN on circular sequences - Elapsed time: 161.74 seconds
+... Running BLASTN on 48 threads ...
+
+> Step 5/19 - Running Ringmaster - Elapsed time: 499.83 seconds
+Starting Ringmaster...
+Time for initial data processing: 46.03 seconds
+Data split into 744 chunks, each about 20000 rows.
+Warning: [blastn] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 1-441] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 442-893] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 894-1340] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 1341-1791] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 1792-2244] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 2245-2705] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 2706-3161] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 3162-3618] Number of threads was reduced to 40 to match the number of available CPUs
+Warning: [Query 3619-3718] Number of threads was reduced to 40 to match the number of available CPUs
+2024-10-15 18:44:36,705 - INFO - Read CSV file: /tmp/circleseeker_3xcyg3c_/to2.tecc_analysis_results.csv
+2024-10-15 18:44:36,904 - INFO - Read FASTA file: /tmp/circleseeker_3xcyg3c_/to2.sieve_1_output.txt
+2024-10-15 18:44:36,983 - INFO - Wrote 979 sequences to /tmp/circleseeker_3xcyg3c_/to2_uecc_part2.fa
+2024-10-15 18:44:36,993 - INFO - Wrote 52 sequences to /tmp/circleseeker_3xcyg3c_/to2_mecc_part2.fa
+[M::mm_idx_gen::40.380*1.64] collected minimizers
+[M::mm_idx_gen::47.931*2.36] sorted minimizers
+[M::main::47.932*2.36] loaded/built the index for 455 target sequence(s)
+[M::mm_mapopt_update::51.793*2.26] mid_occ = 144
+[M::mm_idx_stat] kmer size: 19; skip: 19; is_hpc: 0; #seq: 455
+[M::mm_idx_stat::56.157*2.16] distinct minimizers: 214834535 (90.55% are singletons); average occurrences: 1.424; average spacing: 10.491; total length: 3209286105
+[M::worker_pipeline::57.079*2.40] mapped 2712 sequences
+[M::main] Version: 2.28-r1209
+[M::main] CMD: minimap2 -t 48 -x map-hifi -a ../../hg38.fa /tmp/circleseeker_3xcyg3c_/to2.Final_unclassified.fa
+[M::main] Real time: 57.964 sec; CPU: 137.945 sec; Peak RSS: 16.529 GB
+2024-10-15 18:45:46,559 - INFO - Reading CSV files...
+2024-10-15 18:45:46,645 - INFO - Processing DataFrames...
+2024-10-15 18:45:46,949 - INFO - Processing final DataFrame...
+2024-10-15 18:45:47,775 - INFO - Processing CSV with start sorting...
+2024-10-15 18:45:49,974 - INFO - Processing CSV with end sorting...
+2024-10-15 18:45:52,148 - INFO - Saving processed CSV...
+2024-10-15 18:45:52,242 - INFO - Merging FASTA files...
+2024-10-15 18:45:53,161 - INFO - Updating FASTA sequence names...
+2024-10-15 18:45:54,092 - INFO - Removing duplicate sequences...
+2024-10-15 18:45:54,850 - INFO - Removed 9180 duplicate sequences by ID
+2024-10-15 18:45:54,861 - INFO - Deduplicated FASTA file contains 25500 unique sequences
+2024-10-15 18:45:54,861 - INFO - Filtering FASTA sequences based on CSV entries...
+2024-10-15 18:45:55,569 - INFO - Filtered FASTA file contains 23735 sequences
+2024-10-15 18:45:55,582 - INFO - Final filtered FASTA file contains 23735 sequences
+2024-10-15 18:45:55,617 - INFO - Process completed successfully.
+2024-10-15 18:45:55,624 - INFO - Reading CSV files...
+2024-10-15 18:45:55,647 - INFO - Processing MeccDNA_part1.csv...
+2024-10-15 18:45:56,402 - INFO - Processing tecc_analysis_results.csv...
+2024-10-15 18:45:56,412 - INFO - Merging DataFrames...
+2024-10-15 18:45:56,438 - INFO - Processing final DataFrame...
+2024-10-15 18:45:56,482 - INFO - Saving processed CSV...
+2024-10-15 18:45:56,490 - INFO - Merging FASTA files...
+2024-10-15 18:45:56,534 - INFO - Updating FASTA sequence names...
+2024-10-15 18:45:56,585 - INFO - Removing duplicate sequences...
+2024-10-15 18:45:56,625 - INFO - Removed 265 duplicate sequences
+2024-10-15 18:45:56,625 - INFO - Final FASTA file contains 1537 unique sequences
+2024-10-15 18:45:56,627 - INFO - Process completed successfully.
+2024-10-15 18:45:56,733 - INFO - Processing Xecc data...
+2024-10-15 18:45:56,762 - INFO - Xecc processing complete. Output files: /tmp/circleseeker_3xcyg3c_/to2_XeccDNA.Confirmed.csv, /tmp/circleseeker_3xcyg3c_/to2_XeccDNA.Confirmed.fa
+2024-10-15 18:45:56,762 - INFO - Processing Cecc data...
+2024-10-15 18:45:56,770 - INFO - Cecc processing complete. Output files: /tmp/circleseeker_3xcyg3c_/to2_CeccDNA.Confirmed.csv, /tmp/circleseeker_3xcyg3c_/to2_CeccDNA.Confirmed.fa
+2024-10-15 18:45:56,770 - INFO - Processing Uecc data...
+2024-10-15 18:45:56,777 - INFO - Uecc processing complete. Output file: /tmp/circleseeker_3xcyg3c_/to2_UeccDNA.Inferred.csv
+Time for processing Uecc: 0.22 seconds
+Time for processing Mecc: 3.36 seconds
+Time for processing other blast rows: 0.48 seconds
+other_results size: (2690, 21)
+Time for analyze_group: 3.46 seconds
+Time for processing detailed results: 0.55 seconds
+Time for processing sequences: 1.67 seconds
+Total execution time: 103.59 seconds
+Processing complete. Output files: /tmp/circleseeker_3xcyg3c_/to2_Uecc.csv, /tmp/circleseeker_3xcyg3c_/to2_Mecc.csv, /tmp/circleseeker_3xcyg3c_/to2_Cecc.csv, /tmp/circleseeker_3xcyg3c_/to2_UeccDNA.fa, /tmp/circleseeker_3xcyg3c_/to2_MeccDNA.fa, /tmp/circleseeker_3xcyg3c_/to2_CeccDNA.fa, and /tmp/circleseeker_3xcyg3c_/to2_XeccDNA.fa
+
+> Step 6/19 - Running Sieve on original input - Elapsed time: 607.75 seconds
+Counting total reads in input file...
+Extracting unmatched reads...
+Counting unmatched reads...
+Processing complete. Results:
+1. Unmatched reads file: /tmp/circleseeker_3xcyg3c_/to2.sieve_1_output.txt
+2. Total number of reads in the input fasta file: 39982
+3. Number of unmatched reads: 3718
+4. Percentage of unmatched reads: 9.30%
+
+> Step 7/19 - Running BLASTN on unselected sequences - Elapsed time: 609.25 seconds
+... Running BLASTN on 48 threads ...
+
+> Step 8/19 - Creating index for unselected sequences - Elapsed time: 749.89 seconds
+Created index for /tmp/circleseeker_3xcyg3c_/to2.sieve_1_output.txt
+
+> Step 9/19 - Running Juggler - Elapsed time: 750.20 seconds
+
+> Step 10/19 - Running Tamer - Elapsed time: 779.59 seconds
+
+> Step 11/19 - Running Sieve 2 to filter unclassified reads - Elapsed time: 779.89 seconds
+Counting total reads in input file...
+Extracting unmatched reads...
+Counting unmatched reads...
+Processing complete. Results:
+1. Unmatched reads file: /tmp/circleseeker_3xcyg3c_/to2.Final_unclassified.fa
+2. Total number of reads in the input fasta file: 3718
+3. Number of unmatched reads: 2712
+4. Percentage of unmatched reads: 72.94%
+
+> Step 12/19 - Running final alignment with minimap2 - Elapsed time: 780.40 seconds
+... Running minimap2 on 48 threads ...
+Minimap2 alignment completed. Output saved to /tmp/circleseeker_3xcyg3c_/to2_Final_unclassified.sam
+
+> Step 13/19 - Sorting and indexing final alignment results - Elapsed time: 838.62 seconds
+Sorting SAM file...
+Sorted BAM file saved to /tmp/circleseeker_3xcyg3c_/to2_Final_unclassified_sorted.bam
+Indexing sorted BAM file...
+Index created for /tmp/circleseeker_3xcyg3c_/to2_Final_unclassified_sorted.bam
+
+> Step 14/19 - Running Astrologer for final analysis and scoring - Elapsed time: 839.28 seconds
+Astrologer analysis completed. Results saved to /tmp/circleseeker_3xcyg3c_/to2_circular_dna_results_scored.csv
+
+> Step 15/19 - Merging UeccDNA results - Elapsed time: 849.45 seconds
+UeccDNA results merged. CSV saved to /tmp/circleseeker_3xcyg3c_/to2_UeccDNA.Confirmed.csv, FASTA saved to /tmp/circleseeker_3xcyg3c_/to2_UeccDNA.Confirmed.fa
+
+> Step 16/19 - Merging MeccDNA results - Elapsed time: 858.51 seconds
+MeccDNA results merged. CSV saved to /tmp/circleseeker_3xcyg3c_/to2_MeccDNA.Confirmed.csv, FASTA saved to /tmp/circleseeker_3xcyg3c_/to2_MeccDNA.Confirmed.fa
+
+> Step 17/19 - Processing other eccDNA types - Elapsed time: 859.52 seconds
+Other eccDNA types processed. XeccDNA results saved to /tmp/circleseeker_3xcyg3c_/to2_XeccDNA.Confirmed.csv, CeccDNA results saved to /tmp/circleseeker_3xcyg3c_/to2_CeccDNA.Confirmed.csv, UeccDNA inferred results saved to /tmp/circleseeker_3xcyg3c_/to2_UeccDNA.Inferred.csv
+
+> Step 18/19 - Generating final analysis report - Elapsed time: 859.67 seconds
+Report has been generated and saved to /tmp/circleseeker_3xcyg3c_/to2_eccDNA_analysis_report.txt
+Final analysis report generated and saved to /tmp/circleseeker_3xcyg3c_/to2_eccDNA_analysis_report.txt
+
+> Step 19/19 - Saving final results and cleaning up - Elapsed time: 861.16 seconds
+Saved final result: ../../test_output/to2/to2_UeccDNA.Confirmed.csv
+Saved final result: ../../test_output/to2/to2_UeccDNA.Confirmed.fa
+Saved final result: ../../test_output/to2/to2_MeccDNA.Confirmed.csv
+Saved final result: ../../test_output/to2/to2_MeccDNA.Confirmed.fa
+Saved final result: ../../test_output/to2/to2_XeccDNA.Confirmed.csv
+Saved final result: ../../test_output/to2/to2_XeccDNA.Confirmed.fa
+Saved final result: ../../test_output/to2/to2_CeccDNA.Confirmed.csv
+Saved final result: ../../test_output/to2/to2_CeccDNA.Confirmed.fa
+Saved final result: ../../test_output/to2/to2_UeccDNA.Inferred.csv
+Saved final result: ../../test_output/to2/to2_eccDNA_analysis_report.txt
+Cleaned up temporary directory: /tmp/circleseeker_3xcyg3c_
+
+> Pipeline completed in 861.61 seconds
+Final results saved in: ../../test_output/to2
+Saved files:
+ - to2_UeccDNA.Confirmed.csv
+ - to2_UeccDNA.Confirmed.fa
+ - to2_MeccDNA.Confirmed.csv
+ - to2_MeccDNA.Confirmed.fa
+ - to2_XeccDNA.Confirmed.csv
+ - to2_XeccDNA.Confirmed.fa
+ - to2_CeccDNA.Confirmed.csv
+ - to2_CeccDNA.Confirmed.fa
+ - to2_UeccDNA.Inferred.csv
+ - to2_eccDNA_analysis_report.txt
