@@ -1,0 +1,5 @@
+eName,eLength,eRepeatNum,eClass,eState,eReads,LocNum,Identity,Alignment_length,Chr,Start,End,Strand
+Cecc|Confirmed|1,661,25.0,Cecc,Confirmed-eccDNA,m84074_240804_073425_s4/46468165/ccs,1,99.487,195,chr17,53313190,53313384,+
+Cecc|Confirmed|1,661,25.0,Cecc,Confirmed-eccDNA,m84074_240804_073425_s4/46468165/ccs,2,99.375,480,chr17,53312664,53313143,+
+Cecc|Confirmed|2,1019,17.0,Cecc,Confirmed-eccDNA,m84074_240804_073425_s4/90638807/ccs,1,98.947,190,chr12,11874220,11874409,+
+Cecc|Confirmed|2,1019,17.0,Cecc,Confirmed-eccDNA,m84074_240804_073425_s4/90638807/ccs,2,100.0,830,chr12,11872652,11873481,+

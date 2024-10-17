@@ -12,10 +12,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 class TreatOther:
     def __init__(self, xecc_fai, xecc_fa, cecc_csv, 
-                cecc_fa, uecc_csv, xecc_csv_output, 
-                cecc_csv_output, 
-                uecc_inferred_csv_output, xecc_fa_output, 
-                cecc_fa_output):
+                 cecc_fa, uecc_csv, xecc_csv_output, 
+                 cecc_csv_output, 
+                 uecc_inferred_csv_output, xecc_fa_output, 
+                 cecc_fa_output):
         self.xecc_fai = xecc_fai
         self.xecc_fa = xecc_fa
         self.cecc_csv = cecc_csv
