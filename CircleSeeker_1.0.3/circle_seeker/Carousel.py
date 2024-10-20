@@ -1,9 +1,13 @@
 import argparse
+import time
 import pandas as pd
 from itertools import combinations
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
+
+import time
+from tqdm import tqdm
 
 class Carousel:
     def __init__(self, input_file, output_file, read_list_file, circular_fasta_file):
@@ -16,6 +20,7 @@ class Carousel:
         self.process()
 
     def read_and_preprocess_data(self):
+        # print("Reading and preprocessing data...")
         # Define column names
         columns = [
             'readName', 'repN', 'copyNum', 'readLen', 'start', 'end', 
@@ -88,21 +93,40 @@ class Carousel:
             return pd.DataFrame([Carousel.combine_rows_data(best_combination)])
         return group
 
+
     def process_repeated_readnames(self, df):
-        # Process repeated readNames
+        # print("Starting process_repeated_readnames...")
+
+        # Find repeated readNames
         repeated_readnames = df['readName'].value_counts()[df['readName'].value_counts() > 1].index
         repeated_df = df[df['readName'].isin(repeated_readnames)]
-        
+        print(f"Found {len(repeated_readnames)} repeated readNames")
+
+        # Process repeated readNames
         processed_repeated = []
-        for name, group in repeated_df.groupby('readName'):
-            processed_group = self.combine_rows(group)
-            processed_repeated.append(processed_group)
+        skipped_reads = 0
+        
+        # Create a tqdm progress bar
+        with tqdm(total=len(repeated_readnames), desc="Processing repeated readNames") as pbar:
+            for name, group in repeated_df.groupby('readName'):
+                if len(group) <= 5:
+                    processed_group = self.combine_rows(group)
+                    processed_repeated.append(processed_group)
+                else:
+                    # Skip this group and add it to processed_repeated without combining
+                    processed_repeated.append(group)
+                    skipped_reads += 1
+                pbar.update(1)
         
         processed_repeated = pd.concat(processed_repeated, ignore_index=True)
-        
+        print(f"Processed {len(repeated_readnames)} repeated readNames")
+        print(f"Skipped {skipped_reads} reads with more than 5 repeated regions")
+
+        # Combine processed repeated and single occurrence readNames
         single_occurrence = df[~df['readName'].isin(repeated_readnames)]
         result_df = pd.concat([single_occurrence, processed_repeated], ignore_index=True)
-        
+
+        # print("process_repeated_readnames completed")
         return result_df
 
     @staticmethod
@@ -145,26 +169,35 @@ class Carousel:
                                         id=seq.id + "|circular", 
                                         description="")
             circular_sequences.append(circular_record)
-        print(f"Circularized {len(circular_sequences)} sequences")
+        # print(f"Circularized {len(circular_sequences)} sequences")
         return circular_sequences
 
     @staticmethod
     def write_fasta(sequences, output_file):
         # Write FASTA file
         SeqIO.write(sequences, output_file, "fasta")
-        print(f"Wrote {len(sequences)} sequences to {output_file}")
+        # print(f"Wrote {len(sequences)} sequences to {output_file}")
 
     def process(self):
+        overall_start_time = time.time()
+        
         # Read and preprocess data
+        start_time = time.time()
         df = self.read_and_preprocess_data()
+        # print(f"Read and preprocess data completed in {time.time() - start_time:.2f} seconds")
         
         # Process repeated readNames
+        start_time = time.time()
         result_df = self.process_repeated_readnames(df)
+        # print(f"Process repeated readNames completed in {time.time() - start_time:.2f} seconds")
         
         # Discard decimal part of copyNum
+        start_time = time.time()
         result_df['copyNum'] = result_df['copyNum'].astype(int)
+        # print(f"Discard decimal part of copyNum completed in {time.time() - start_time:.2f} seconds")
         
         # Add new column and adjust it to be the first column, including copyNum
+        start_time = time.time()
         result_df['readName|repN|consLen|copyNum'] = (
             result_df['readName'] + '|' + 
             result_df['repN'] + '|' + 
@@ -173,28 +206,40 @@ class Carousel:
         )
         columns = ['readName|repN|consLen|copyNum'] + [col for col in result_df.columns if col != 'readName|repN|consLen|copyNum']
         result_df = result_df[columns]
+        # print(f"Add new column and adjust columns completed in {time.time() - start_time:.2f} seconds")
         
         # Save processed results
+        start_time = time.time()
         result_df.to_csv(self.output_file, index=False)
+        # print(f"Save processed results completed in {time.time() - start_time:.2f} seconds")
         
         # Classify readNames
+        start_time = time.time()
         read_list_df = self.classify_readnames(result_df)
+        # print(f"Classify readNames completed in {time.time() - start_time:.2f} seconds")
         
         # Save read_list results
+        start_time = time.time()
         read_list_df.to_csv(self.read_list_file, index=False)
+        # print(f"Save read_list results completed in {time.time() - start_time:.2f} seconds")
         
         # Generate circularized FASTA file
+        start_time = time.time()
         sequences = [SeqRecord(Seq(row['consSeq']), id=row['readName|repN|consLen|copyNum'], description="") for _, row in result_df.iterrows()]
         circular_sequences = self.circularize_sequences(sequences)
+        # print(f"Generate circularized sequences completed in {time.time() - start_time:.2f} seconds")
         
         # Write circularized sequences
+        start_time = time.time()
         self.write_fasta(circular_sequences, self.circular_fasta_file)
+        # print(f"Write circularized sequences completed in {time.time() - start_time:.2f} seconds")
         
         # Print processing result information
-        print(f"Processing complete. Results saved to {self.output_file} and {self.read_list_file}")
-        print(f"Total rows: {len(result_df)}")
+        print(f"Carousel Processing complete")
+        print(f"Total reads: {len(result_df)}")
         print(f"Number of classified reads: {len(read_list_df)}")
-        print(f"Circularized sequences saved to {self.circular_fasta_file}")
+        
+        print(f"Total processing time: {time.time() - overall_start_time:.2f} seconds")
         
 def main():
     parser = argparse.ArgumentParser(description="Process eccDNA data using Carousel")
