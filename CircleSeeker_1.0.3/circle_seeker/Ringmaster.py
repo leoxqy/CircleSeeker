@@ -8,6 +8,7 @@ from Bio import SeqIO
 import os
 import time
 from multiprocessing import Pool
+from tqdm import tqdm
 
 class Ringmaster:
     def __init__(self, blast_results_file, circular_seq_fasta, Uecc_output_csv, Mecc_output_csv, Cecc_output_csv, uecc_fa, mecc_fa, cecc_fa, xecc_fa, num_threads=1):
@@ -492,7 +493,9 @@ class Ringmaster:
 
             t0 = time.time()
             grouped = other_results.groupby('query_id')
-            for name, group in grouped:
+            
+            # Add tqdm progress bar
+            for name, group in tqdm(grouped, total=len(grouped), desc="Analyzing groups"):
                 detailed, summary = self.analyze_group(group)
                 if not detailed.empty:
                     detailed_results_list.append(detailed)
@@ -539,3 +542,4 @@ if __name__ == "__main__":
     ringmaster = Ringmaster(args.input, args.input_fasta, args.Uecc_output_csv, args.Mecc_output_csv,
                             args.Cecc_output_csv, args.uecc_fa, args.mecc_fa, args.cecc_fa, args.xecc_fa, args.threads)
     ringmaster.run()
+
