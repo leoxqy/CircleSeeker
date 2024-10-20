@@ -1,0 +1,70 @@
+
+eccDNA Analysis Report
+======================
+
+1. Read Statistics:
+   Total Reads: 1000
+   Linear Reads (LinR): 4 (0.40%)
+   Circular Reads (CtcR): 934 (93.40%)
+
+2. CtcR Classification:
+   CtcR-multiple: 0 (0.00%)
+   CtcR-inversion: 16 (1.71%)
+   CtcR-perfect: 884 (94.65%)
+   CtcR-hybrid: 34 (3.64%)
+
+3. Confirmed eccDNA Analysis:
+   Total Confirmed eccDNA: 868
+
+   UeccDNA: 815
+     Shortest: 253 bp
+     Longest: 14305 bp
+     Average: 2443.03 bp
+     Median: 1905.00 bp
+     Mode: 1274 bp
+
+   MeccDNA: 31
+     Shortest: 449 bp
+     Longest: 8457 bp
+     Average: 1908.58 bp
+     Median: 1438.00 bp
+     Mode: 832 bp
+
+   XeccDNA: 20
+     Shortest: 647 bp
+     Longest: 5069 bp
+     Average: 2351.05 bp
+     Median: 2139.50 bp
+     Mode: 969 bp
+
+   CeccDNA: 2
+     Shortest: 661 bp
+     Longest: 1019 bp
+     Average: 840.00 bp
+     Median: 840.00 bp
+     Mode: 661 bp
+
+4. Inferred eccDNA Analysis:
+   Total Inferred UeccDNA: 2
+     Shortest: 5739 bp
+     Longest: 6286 bp
+     Average: 6012.50 bp
+     Median: 6012.50 bp
+     Mode: 5739 bp
+
+5. Overall eccDNA Statistics:
+   Total eccDNA (Confirmed + Inferred): 870
+
+   All Confirmed eccDNA:
+     Shortest: 253 bp
+     Longest: 14305 bp
+     Average: 2414.50 bp
+     Median: 1879.00 bp
+     Mode: 832 bp
+
+   All eccDNA (Confirmed + Inferred):
+     Shortest: 253 bp
+     Longest: 14305 bp
+     Average: 2422.75 bp
+     Median: 1880.00 bp
+     Mode: 832 bp
