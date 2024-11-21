@@ -10,7 +10,6 @@ class Astrologer:
     def __init__(self, input_bam, output_csv):
         self.input_bam = input_bam
         self.output_csv = output_csv
-        # 设置日志格式
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',

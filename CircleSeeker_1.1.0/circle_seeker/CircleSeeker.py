@@ -7,35 +7,19 @@ import tempfile
 import shutil
 from Bio import SeqIO
 # build
-# from circle_seeker.Carousel import Carousel
-# from circle_seeker.Ringmaster import Ringmaster
-# from circle_seeker.Sieve import Sieve
-# from circle_seeker.Juggler import Juggler
-# from circle_seeker.Tamer import Tamer
-# from circle_seeker.Astrologer import Astrologer
-# from circle_seeker.MergeUecc import MergeUecc
-# from circle_seeker.MergeMecc import MergeMecc
-# from circle_seeker.ReportGenerator import ReportGenerator
 
-# Debug
-from Carousel import Carousel
-from Ringmaster import Ringmaster
-from Sieve import Sieve
-from Juggler import Juggler
-from Tamer import Tamer
-from Astrologer import Astrologer
-from MergeUecc import MergeUecc
-from MergeMecc import MergeMecc
-from ReportGenerator import ReportGenerator
-
-# Remove TreatOther import and add new imports
-# from circle_seeker.TreatOther import TreatOther
-from MergeUeccInf import UeccProcessor
-from MergeCecc import CeccProcessor
-from MergeMecc import MergeMecc
-
-# Add import at the top with other imports
-from FAIProcessor import FAIProcessor
+from circle_seeker.Carousel import Carousel
+from circle_seeker.Ringmaster import Ringmaster
+from circle_seeker.Sieve import Sieve
+from circle_seeker.Juggler import Juggler
+from circle_seeker.Tamer import Tamer
+from circle_seeker.Astrologer import Astrologer
+from circle_seeker.MergeUecc import MergeUecc
+from circle_seeker.MergeMecc import MergeMecc
+from circle_seeker.ReportGenerator import ReportGenerator
+from circle_seeker.FAIProcessor import FAIProcessor
+from circle_seeker.MergeUeccInf import UeccProcessor
+from circle_seeker.MergeCecc import CeccProcessor
 
 class CircleSeeker:
     def __init__(self, input_fasta, output_prefix, reference_genome, num_threads=8, keep_tmp=False):
@@ -400,7 +384,6 @@ class CircleSeeker:
         # Define the files to be saved
         key_words = ["Confirmed", "Inferred", "eccDNA_analysis_report"]
         suffix = [".csv", ".html", ".fa", ".txt"]
-
 
         # Move files containing key words to the output directory
         saved_files = []
