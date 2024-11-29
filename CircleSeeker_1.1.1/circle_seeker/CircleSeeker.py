@@ -275,6 +275,9 @@ class CircleSeeker:
         if not os.path.exists(input_fai):
             subprocess.run(["samtools", "faidx", self.input_fasta], check=True)
 
+        # Get sample name from the output prefix
+        sample_name = os.path.basename(self.output_prefix)
+
         # Initialize ReportGenerator with all required parameters
         report_generator = ReportGenerator(
             fai=input_fai,
@@ -288,7 +291,8 @@ class CircleSeeker:
             uecc_inferred=self.uecc_inferred_output,
             output=self.final_report,
             summary_output=os.path.join(self.output_dir, f"{os.path.basename(self.output_prefix)}_summary.csv"),
-            html_output=os.path.join(self.output_dir, f"{os.path.basename(self.output_prefix)}_report.html")
+            html_output=os.path.join(self.output_dir, f"{os.path.basename(self.output_prefix)}_report.html"),
+            sample_name=sample_name
         )
 
         # Run report generation

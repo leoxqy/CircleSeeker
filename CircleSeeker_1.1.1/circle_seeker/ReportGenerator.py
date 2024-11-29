@@ -7,7 +7,7 @@ import logging
 
 class ReportGenerator:
     def __init__(self, fai, ctcr1, ctcr2, linr, uecc_fai, mecc_fai, cecc_fai=None, mcecc_fai=None, 
-                 uecc_inferred=None, output="report.txt", summary_output="summary.csv", html_output="report.html"):
+                 uecc_inferred=None, output="report.txt", summary_output="summary.csv", html_output="report.html", sample_name="SAMPLE_NAME"):
         self.fai = fai
         self.ctcr1 = ctcr1
         self.ctcr2 = ctcr2
@@ -20,6 +20,7 @@ class ReportGenerator:
         self.output = output
         self.summary_output = summary_output
         self.html_output = html_output
+        self.sample_name = sample_name
         
         # simplify logger initialization, only get logger instance
         self.logger = logging.getLogger(__name__)
@@ -419,8 +420,8 @@ class ReportGenerator:
     def save_text_report(self, stats):
         """Save report in text format with tables"""
         with open(self.output, 'w') as f:
-            f.write("eccDNA Analysis Report\n")
-            f.write("=====================\n\n")
+            f.write(f"eccDNA Analysis Report — {self.sample_name}\n")
+            f.write("=" * (27 + len(self.sample_name)) + "\n\n")
             
             f.write("1. Read Statistics\n")
             f.write(stats['read_stats'].to_string(index=False))
@@ -445,7 +446,7 @@ class ReportGenerator:
         html_template = """<!DOCTYPE html>
         <html>
         <head>
-            <title>eccDNA Analysis Report</title>
+            <title>eccDNA Analysis Report — {sample_name}</title>
             <style>
                 body {{
                     font-family: Arial, sans-serif;
@@ -507,7 +508,7 @@ class ReportGenerator:
         </head>
         <body>
             <div class="container">
-                <h1>eccDNA Analysis Report</h1>
+                <h1>eccDNA Analysis Report — {sample_name}</h1>
                 
                 <h2>1. Read Statistics</h2>
                 {read_stats}
@@ -527,8 +528,9 @@ class ReportGenerator:
         </body>
         </html>"""
                 
-        # Format the template with the tables
+        # Format the template with the tables and sample name
         html_content = html_template.format(
+            sample_name=self.sample_name,
             read_stats=stats['read_stats'].to_html(index=False, classes='dataframe'),
             ctcr_stats=stats['ctcr_stats'].to_html(index=False, classes='dataframe'),
             eccdna_stats=stats['eccdna_stats'].to_html(index=False, classes='dataframe'),
