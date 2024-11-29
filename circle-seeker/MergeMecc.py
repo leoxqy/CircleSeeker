@@ -27,6 +27,8 @@ class MergeMecc:
         rows = []
         for _, row in df.iterrows():
             align_regions = row['AlignRegion'].split(';')
+            if row['consLen'] < 100:
+                continue
             for region in align_regions:
                 mat_degree, location = region.split('|')
                 chr, start_end = location.split('-', 1)
@@ -46,6 +48,7 @@ class MergeMecc:
 
     def process_tecc_analysis(self, df):
         mecc_df = df[df['eClass'] == 'Mecc'].copy()
+        mecc_df = mecc_df[mecc_df['eLength'] >= 100]
         
         def get_query_id(group):
             longest_row = group.loc[group['eLength'].idxmax()]
