@@ -264,8 +264,8 @@ class Juggler:
                 'eClass': ['Tecc'],
                 'inversion': [inversion_flag],
                 'eReads': [group['qname'].iloc[0]],
-                'qstart': [qstart],  # New column
-                'qend': [qend]  # New column
+                'qstart': [qstart],  
+                'qend': [qend]  
             })
         return None
 
@@ -322,6 +322,7 @@ class Juggler:
 
         return output_df
 
+    # ========= 修改的部分开始 =========
     def filter_mecc_groups(self, output_df):
         # Filter rows where eClass is Mecc
         mecc_df = output_df[output_df['eClass'] == 'Mecc']
@@ -329,21 +330,20 @@ class Juggler:
         # Group by qname
         grouped = mecc_df.groupby('qname')
         
-        # Store groups to keep
+        # Store qname that meet the condition
         keep_groups = []
         
         for qname, group in grouped:
             eRepeatNums = group['eRepeatNum'].unique()
+            # 如果最大与最小 eRepeatNum 差距 < 2，则保留该 qname
             if max(eRepeatNums) - min(eRepeatNums) < 2:
                 keep_groups.append(qname)
         
-        # Keep Mecc groups that meet the condition and all non-Mecc rows
-        filtered_df = pd.concat([
-            output_df[output_df['qname'].isin(keep_groups)],
-            output_df[output_df['eClass'] != 'Mecc']
-        ])
+        # 只保留符合条件的 Mecc，其他全部丢弃
+        filtered_df = output_df[(output_df['qname'].isin(keep_groups)) & (output_df['eClass'] == 'Mecc')]
         
         return filtered_df
+    # ========= 修改的部分结束 =========
 
     def run(self):
         self.logger.info("Starting Juggler pipeline")
@@ -356,10 +356,12 @@ class Juggler:
         final_prectcrlist_df = self.merge_overlapping_lists(prectcrlist_df)
         output_df = self.process_final_prectcrlist(final_prectcrlist_df)
         output_df = self.generate_read_classification(output_df)
+        # 注意：下面这一步现在会只保留符合条件的 Mecc，其它所有行将被丢弃
         output_df = self.filter_mecc_groups(output_df)
         
         output_df.to_csv(self.output_tecc, index=False)
         self.logger.info("Pipeline completed successfully")
+
 
 def main():
     parser = argparse.ArgumentParser(description='Process BLAST and FASTA index files to analyze read alignments')
