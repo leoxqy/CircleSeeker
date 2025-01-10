@@ -62,7 +62,6 @@ pip install .
   - mosdepth
   - bcftools
   - TideHunter
-- The Astrologer module requires mosdepth, bcftools, tabix, and minimap2
 
 ## Dependencies
 
@@ -80,6 +79,7 @@ pip install .
 - mosdepth
 - bcftools
 - tabix
+- tqdm
 
 ### Optional Tools
 - bedtools (for certain coverage tasks)
