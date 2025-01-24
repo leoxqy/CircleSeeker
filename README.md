@@ -66,12 +66,12 @@ pip install .
 ## Dependencies
 
 ### Required Software
-- Python 3.6+
+- Python 3.8+ 
 - numpy (>=1.22)
 - pandas
 - pysam
 - biopython
-- minimap2
+- minimap2 (latest version required)
 - samtools
 - BLAST+
 - seqkit
