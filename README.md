@@ -1,197 +1,144 @@
-# CircleSeeker
-
-> Advanced Circular DNA Analysis Tool for PacBio HiFi Sequencing Data
+# CircleSeeker: Advanced Circular DNA Analysis for PacBio HiFi Data
 
 [![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
+[![Project Status: Active](https://img.shields.io/badge/status-active-success.svg)](https://github.com/leoxqy/CircleSeeker/)
+
+**CircleSeeker** is a specialized bioinformatics pipeline designed for the identification, classification, and characterization of extrachromosomal circular DNA (eccDNA) from PacBio HiFi long-read sequencing data.
+
+---
 
 ## Overview
 
-CircleSeeker is a specialized bioinformatics pipeline designed for the identification, classification, and characterization of extrachromosomal circular DNA (eccDNA) using PacBio HiFi long-read sequencing data. By leveraging the high accuracy and long read lengths of PacBio HiFi technology, CircleSeeker streamlines the detection of various eccDNA types (UeccDNA, MeccDNA, CeccDNA, XeccDNA) and integrates a mandatory coverage-based analysis (Astrologer) to further refine and confirm eccDNA. CircleSeeker orchestrates multiple third-party tools (e.g., TideHunter, BLAST, minimap2, samtools, mosdepth, bcftools, etc.) within a single cohesive pipeline, minimizing user overhead for command orchestration and data management.
+Traditional methods for eccDNA identification are often platform-specific. Approaches for Next-Generation Sequencing (NGS) data primarily rely on **Split-Read** reconstruction algorithms, while earlier methods for Nanopore long reads focused on directly identifying tandem repeat structures (**CTC reads**).
+
+**CircleSeeker** innovatively combines the strengths of these two strategies, specifically optimized for the unique advantages of PacBio HiFi data—long read lengths and high accuracy. It first identifies potential circular structures by detecting tandem repeats within reads and then employs a Split-Read based strategy to precisely reconstruct large eccDNAs (>20 kb). This hybrid approach ensures the accurate and efficient recovery of complete eccDNA sequences.
+
+Following identification, CircleSeeker automatically classifies each eccDNA based on its alignment pattern and chimerism, providing a powerful tool for investigating genome instability.
 
 ## Key Features
 
-### 1. Robust PacBio HiFi Data Processing
-- Processes large volumes of long-read sequences with multi-threading for high efficiency
-- Specialized modules handle tandem repeats, coverage analyses, and multi-step classification
-
-### 2. Mandatory Coverage Analysis (Astrologer)
-- CircleSeeker always runs Astrologer for coverage assessment, read-depth filtering, and local consensus generation using mosdepth and bcftools
-- This step refines detection of both confirmed and inferred eccDNA
-
-### 3. Classification of eccDNA Types
-- Discovers and categorizes:
-  - UeccDNA (Unique eccDNA)
-  - MeccDNA (Multiple-copy eccDNA)
-  - CeccDNA (Chimeric eccDNA)
-  - MCeccDNA
-  - XeccDNA
-- Based on alignment patterns and coverage information
-
-### 4. Modular Architecture
-- Scripts like `Juggler.py`, `Ringmaster.py`, `Carousel.py`, `Astrologer.py`, `Sieve.py`, `Tamer.py`, and various Merge modules each handle distinct tasks
-- Easy to debug or adapt specific modules while preserving the full pipeline's integrity
-
-### 5. Comprehensive Analysis Report
-- Automatically generates HTML and text summaries, final CSV listings, and FASTA files
-- Tracks read classifications, coverage profiles, duplication events, and more
-
-### 6. Checkpoint System
-- Creates checkpoint files for each completed major step
-- Enables pipeline resumption from the most recent step in case of interruption
+-   **Hybrid Detection Strategy**: Merges tandem repeat detection with Split-Read assembly, tailored to leverage the strengths of PacBio HiFi data for maximum recall and precision.
+-   **Comprehensive eccDNA Classification**: Sorts eccDNA into biologically meaningful categories:
+    -   **UeccDNA (Unique-locus eccDNA):** Originates from a single, contiguous genomic locus.
+    -   **MeccDNA (Multi-locus eccDNA):** Composed of repetitive sequences (e.g., tandem repeats) that map to multiple genomic locations, but lacks a chimeric structure.
+    -   **CeccDNA (Chimeric eccDNA):** A chimeric circle formed by the fusion of two or more distant, non-contiguous genomic segments.
+    -   **MCeccDNA (Multi-locus Chimeric eccDNA):** A hybrid circle exhibiting both multi-locus and chimeric features.
+    -   **XeccDNA:** Sequences that cannot be classified into the above categories, potentially representing contamination, other unknown circular molecules, or complex unclassified structures.
+-   **Automated & Efficient Pipeline**: Integrates multiple third-party tools (e.g., TideHunter, BLAST, minimap2, samtools) into a single, cohesive workflow with multi-threading support.
+-   **Checkpoint & Resumption**: Creates a checkpoint file after each major step, allowing the pipeline to be resumed from the last completed point in case of interruption.
+-   **Detailed Analysis Reports**: Automatically generates an HTML summary report, comprehensive CSV tables, and final FASTA files for easy interpretation and downstream analysis.
 
 ## Installation
 
-### Option 1: Via Conda (Recommended)
-```bash
-conda install -c bioconda circle_seeker
-```
+We currently recommend installing CircleSeeker by downloading a release package and installing it with Conda. More installation options will be available in the future.
 
-### Option 2: From Source
-```bash
-git clone https://github.com/leoxqy/CircleSeeker.git
-cd CircleSeeker
-pip install .
-```
+### Option 1: From Release File (Recommended)
 
-### Important Notes
-- Ensure the following tools are in your `$PATH`:
-  - minimap2
-  - samtools
-  - BLAST+
-  - seqkit
-  - mosdepth
-  - bcftools
-  - TideHunter
+1.  **Navigate to the Releases Page**: Visit the project's [Releases page](https://github.com/leoxqy/CircleSeeker/releases).
+2.  **Download the Package**: Download the latest `.tar.bz2` package (e.g., `circle_seeker-1.0.1-pyh2b07374_0.tar.bz2`).
+3.  **Install with Conda**: Open your terminal, navigate to the download directory, and run:
+    ```bash
+    # Replace the filename with the version you downloaded
+    conda install circle_seeker-1.0.1-pyh2b07374_0.tar.bz2
+    ```
 
-## Dependencies
+### Option 2: From Source (For Developers)
 
-### Required Software
-- Python 3.8+ 
-- numpy (>=1.22)
-- pandas
-- pysam
-- biopython
-- minimap2 (latest version required)
-- samtools
-- BLAST+
-- seqkit
-- TideHunter
-- mosdepth
-- bcftools
-- tabix
-- tqdm
-
-### Optional Tools
-- bedtools (for certain coverage tasks)
-- pbtk (environment-specific)
+1.  **Clone the Repository**:
+    ```bash
+    git clone [https://github.com/leoxqy/CircleSeeker.git](https://github.com/leoxqy/CircleSeeker.git)
+    cd CircleSeeker
+    ```
+2.  **Install with pip**:
+    ```bash
+    pip install .
+    ```
+    **Important**: If installing from source, ensure the following dependencies are in your system's `$PATH`:
+    `minimap2`, `samtools`, `blast+`, `seqkit`, `mosdepth`, `bcftools`, `tidehunter`.
 
 ## Usage
 
 ### Basic Command
 ```bash
 CircleSeeker \
-  -i <input_fasta> \
-  -p <output_prefix> \
-  -r <reference_genome> \
-  [-o <output_folder>] \
-  [-t <num_threads>] \
-  [--enable_X] \
-  [--force] \
-  [--start_from <step_num>]
+    -i <input.fasta> \
+    -p <output_prefix> \
+    -r <reference.fasta> \
+    -t <threads>
 ```
 
-### Required Arguments
-| Argument | Description |
-|----------|-------------|
-| `-i, --input` | Input FASTA file containing PacBio HiFi reads |
-| `-p, --prefix` | Prefix for output files |
-| `-r, --reference` | Reference genome FASTA file |
+### Arguments
 
-### Optional Arguments
-| Argument | Description | Default |
-|----------|-------------|---------|
-| `-o, --output` | Output directory | Current directory |
-| `-t, --num_threads` | Number of threads | 8 |
-| `--enable_X` | Enable XeccDNA detection | False |
-| `--force` | Force re-run existing outputs | False |
-| `--start_from` | Skip steps before step_num | None |
+#### Required Arguments
+| Argument            | Description                              |
+| :------------------ | :--------------------------------------- |
+| `-i`, `--input`     | Input PacBio HiFi reads in FASTA format. |
+| `-p`, `--prefix`    | Prefix for all output files.             |
+| `-r`, `--reference` | Reference genome in FASTA format.        |
 
-## Pipeline Modules
-
-The pipeline consists of several specialized scripts:
-- `Carousel.py`: Preprocessing & circularizing raw tandem repeats
-- `Ringmaster.py`: Classifying BLAST-aligned reads
-- `Sieve.py`: FASTA filtration
-- `Juggler.py`: BLAST result parsing
-- `Tamer.py`: Standardizing naming and sequence extraction
-- `Astrologer.py`: Coverage-based analysis
-- `MergeUecc/Mecc/Cecc/UeccInf`: Result deduplication
-- `FAIProcessor.py`: FASTA index validation
-- `ReportGenerator.py`: Results summarization
-
-## Output Files
-
-### Main Outputs
-- `<prefix>.Final.Confirmed.{Uecc,Mecc,Cecc,MCecc}.{csv,fasta}`
-- `<prefix>.Final.Confirmed.Xecc.fasta` (if --enable_X used)
-- `<prefix>.Final.Inferred.Uecc.{csv,fasta}`
-- `<prefix>.Final.Merged.Uecc.csv`
-- `<prefix>.report.{html,txt}`
-- `<prefix>.summary.csv`
-- `<prefix>.checkpoint`
-
-For detailed file formats and contents, please see our [documentation](https://github.com/leoxqy/CircleSeeker).
+#### Optional Arguments
+| Argument              | Description                                  | Default           |
+| :-------------------- | :------------------------------------------- | :---------------- |
+| `-o`, `--output`      | Output directory path.                       | Current directory |
+| `-t`, `--num_threads` | Number of threads to use.                    | `8`               |
+| `--enable_X`          | Enable the detection of XeccDNA.             | `False`           |
+| `--force`             | Force re-run and overwrite existing outputs. | `False`           |
+| `--start_from`        | Skip to a specific step number to start.     | `None`            |
 
 ## Example Workflow
 
-1. **Prepare Inputs**
-   - FASTA file of reads (e.g., `GBM_LB.fasta`)
-   - Reference genome (e.g., `T2T-CHM13v2.0_chr.fna`)
+1.  **Prepare Input Files**
+    -   PacBio HiFi Reads: `HeLa_rep1.fasta`
+    -   Reference Genome: `hg38.p13.fa`
 
-2. **Run CircleSeeker**
-   ```bash
-   CircleSeeker \
-     -i GBM_LB.fasta \
-     -p GBM_LB \
-     -r T2T-CHM13v2.0_chr.fna \
-     -t 16 \
-     --enable_X
-   ```
+2.  **Run CircleSeeker**
+    ```bash
+    CircleSeeker \
+        -i HeLa_rep1.fasta \
+        -p HeLa_rep1 \
+        -r hg38.p13.fa \
+        -t 16 \
+        --enable_X
+    ```
 
-3. **Check Results**
-   - Review output files in your specified directory
-   - Examine the HTML report for analysis summary
-   - Verify the checkpoint file for completion status
+3.  **Check the Results**
+    -   Review the output files in the specified directory.
+    -   Open `HeLa_rep1.report.html` for a visual summary of the analysis.
+    -   Confirm successful completion by checking the `HeLa_rep1.checkpoint` file.
 
-## License
+## Output Files
 
-This project is licensed under the GNU General Public License v2 (GPLv2) - see the [LICENSE](LICENSE) file for details.
+The pipeline generates several output files. The most important ones include:
 
-## Authors
-
-- Yaoxin Zhang (yxzhang@ncgr.com)
-- Leo Xinqi Yu (leoxqy@hotmail.com)
-
-## Support
-
-Please [open an issue](https://github.com/leoxqy/CircleSeeker/issues) for support, bug reports, or feature requests.
+-   `<prefix>.Final.Confirmed.{Uecc,Mecc,Cecc,MCecc}.{csv,fasta}`: Tables and sequences for eccDNA types confirmed by coverage analysis.
+-   `<prefix>.Final.Confirmed.Xecc.fasta`: Confirmed XeccDNA sequences (if `--enable_X` is used).
+-   `<prefix>.Final.Inferred.Uecc.{csv,fasta}`: **UeccDNA inferred using the Split-Reads method.**
+-   `<prefix>.report.{html,txt}`: A formatted summary report of the analysis.
+-   `<prefix>.summary.csv`: A master table containing statistics on read classifications.
+-   `<prefix>.checkpoint`: The checkpoint file used for pipeline resumption.
 
 ## Citation
 
-If you use CircleSeeker in your research, please cite the following (to be updated upon publication):
+If you use CircleSeeker in your research, please cite our paper:
 
-[Placeholder for citation information]
+> [Placeholder for citation information - to be updated upon publication]
 
 ## Contributing
 
-We welcome improvements and new feature ideas. To contribute:
+We welcome contributions and new feature ideas. To contribute:
+1.  Fork this repository and create a new branch.
+2.  Make your changes and test them thoroughly.
+3.  Submit a Pull Request for review.
 
-1. Fork this repository and create a new branch
-2. Make changes and thoroughly test them
-3. Submit a Pull Request
+Please see `CONTRIBUTING.md` for more details.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for more details.
+## License
 
-## Acknowledgments
+CircleSeeker is licensed under the [GNU General Public License v2 (GPLv2)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html).
 
-We would like to acknowledge the developers of the tools and libraries that CircleSeeker depends on, as well as the research community for their valuable suggestions and support.
+## Authors & Support
+
+-   **Yaoxin Zhang** (yxzhang@ncgr.com)
+-   **Leo Xinqi Yu** (leoxqy@hotmail.com)
+
+For any questions, bug reports, or feature requests, please [open an issue](https://github.com/leoxqy/CircleSeeker/issues) on GitHub.

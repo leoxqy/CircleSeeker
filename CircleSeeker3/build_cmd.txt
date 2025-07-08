@@ -1,1 +1,0 @@
-nohup conda build conda-recipe -c conda-forge -c bioconda > build.log 2>&1 &
