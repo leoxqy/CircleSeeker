@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "circleseeker2"
+version = "2.0.0"
+authors = [
+    { name="Yaoxin Zhang, Leo Xinqi Yu", email="yuxl@iu.edu" },
+]
+description = "Comprehensive eccDNA detection from HiFi sequencing data."
+readme = "README.md"
+license = { text = "GPL-2.0" }
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v2 (GPLv2)",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "click",
+    "pyyaml",
+]
+
+[project.scripts]
+circleseeker2 = "circleseeker2.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
