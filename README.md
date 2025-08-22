@@ -117,12 +117,6 @@ The pipeline generates several output files. The most important ones include:
 -   `<prefix>.summary.csv`: A master table containing statistics on read classifications.
 -   `<prefix>.checkpoint`: The checkpoint file used for pipeline resumption.
 
-## Citation
-
-If you use CircleSeeker in your research, please cite our paper:
-
-> [Placeholder for citation information - to be updated upon publication]
-
 ## Contributing
 
 We welcome contributions and new feature ideas. To contribute:
