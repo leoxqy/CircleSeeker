@@ -1,14 +1,6 @@
-"""CircleSeeker2: Comprehensive eccDNA detection from HiFi sequencing data."""
+"""CircleSeeker2 package
 
-from circleseeker2.__version__ import __version__, __author__, __email__, __license__
-from circleseeker2.config import Config
-from circleseeker2.exceptions import CircleSeekerError
+This package provides the CircleSeeker2 pipeline and step utilities.
+"""
 
-__all__ = [
-    "__version__",
-    "__author__",
-    "__email__",
-    "__license__",
-    "Config",
-    "CircleSeekerError",
-]
+__all__ = []
