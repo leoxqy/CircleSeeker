@@ -85,26 +85,42 @@ CircleSeeker \
 | `--force`             | Force re-run and overwrite existing outputs. | `False`           |
 | `--start_from`        | Skip to a specific step number to start.     | `None`            |
 
+## Test Data Setup
+
+### Download Required Test Data
+
+**Reference Genome (CHM13v2.0):**
+```bash
+# Download CHM13v2.0 reference genome (~900MB)
+wget https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/analysis_set/chm13v2.0.fa.gz
+gunzip chm13v2.0.fa.gz
+```
+
+**Test Sample Data:**
+- Use `HeLa_rep1_1k.fasta` - a 1kb subset of HeLa cell PacBio HiFi reads containing eccDNA candidates
+- This file should be obtained from the original CircleSeeker2 development dataset
+- Alternatively, use any PacBio HiFi FASTA file containing potential eccDNA sequences
+
 ## Example Workflow
 
 1.  **Prepare Input Files**
-    -   PacBio HiFi Reads: `HeLa_rep1.fasta`
-    -   Reference Genome: `hg38.p13.fa`
+    -   PacBio HiFi Reads: `HeLa_rep1_1k.fasta`
+    -   Reference Genome: `chm13v2.0.fa`
 
 2.  **Run CircleSeeker**
     ```bash
     CircleSeeker \
-        -i HeLa_rep1.fasta \
-        -p HeLa_rep1 \
-        -r hg38.p13.fa \
+        -i HeLa_rep1_1k.fasta \
+        -p HeLa_test \
+        -r chm13v2.0.fa \
         -t 16 \
         --enable_X
     ```
 
 3.  **Check the Results**
     -   Review the output files in the specified directory.
-    -   Open `HeLa_rep1.report.html` for a visual summary of the analysis.
-    -   Confirm successful completion by checking the `HeLa_rep1.checkpoint` file.
+    -   Open `HeLa_test.report.html` for a visual summary of the analysis.
+    -   Confirm successful completion by checking the `HeLa_test.checkpoint` file.
 
 ## Output Files
 
