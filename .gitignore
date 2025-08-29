@@ -1,73 +1,76 @@
-# Ignore Data folder
-/Data/
-Data/
+# OS junk
+.DS_Store
+Thumbs.db
 
-# Ignore FASTA files
-*.fasta
-*.fa
-
-# Python-specific ignores
+# Python cache/build
 __pycache__/
 *.py[cod]
-*$py.class
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# PyInstaller
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-.hypothesis/
+htmlcov/
 
-# Jupyter Notebook
-.ipynb_checkpoints
+# Packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
 
-# pyenv
-.python-version
+# Logs and checkpoints
+*.log
+*.checkpoint
+*.checkpoint.bak
 
-# Environment directories
-.env
-.venv
-env/
-venv/
-ENV/
+# Temp workdirs
+**/.tmp_work/
+tmp/
+temp/
 
-# IDE-specific files
+# IDE/editor
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# Operating system-specific files
-.DS_Store
-Thumbs.db
+# Test data and outputs (keep test code, ignore generated data)
+test_modules/**/input/
+test_modules/**/output/
+test_modules/**/expected/
+*.mmi
+*.{fa,fasta,fai,fq,fastq}
+*.{bam,bai,sam}
+*.{bed,bedpe,bed.gz}
+*.{tsv,csv}
+*.{clstr,idx}
+*_sorted.bam*
+organized_results/
+
+# External tool databases
+*.ndb
+*.nhr
+*.nin
+*.njs
+*.not
+*.nsq
+*.ntf
+*.nto
+
+# Config files with sensitive data
+config.yaml
+*.config
+
+# Backup and archive directories
+*_backup/
+*_archive/
+*_副本/
+
+# Environment
+.env
+.venv
+env/
+venv/
+ENV/
 

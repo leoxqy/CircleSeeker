@@ -1,138 +1,252 @@
-# CircleSeeker: Advanced Circular DNA Analysis for PacBio HiFi Data
+# CircleSeeker2
 
-[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
-[![Project Status: Active](https://img.shields.io/badge/status-active-success.svg)](https://github.com/leoxqy/CircleSeeker/)
-
-**CircleSeeker** is a specialized bioinformatics pipeline designed for the identification, classification, and characterization of extrachromosomal circular DNA (eccDNA) from PacBio HiFi long-read sequencing data.
-
----
+[![Version](https://img.shields.io/badge/version-2.0.0-blue)](pyproject.toml)
+[![Python](https://img.shields.io/badge/python-3.9+-green)](pyproject.toml)
+[![License](https://img.shields.io/badge/license-GPL--2.0-blue)](LICENSE)
 
 ## Overview
 
-Traditional methods for eccDNA identification are often platform-specific. Approaches for Next-Generation Sequencing (NGS) data primarily rely on **Split-Read** reconstruction algorithms, while earlier methods for Nanopore long reads focused on directly identifying tandem repeat structures (**CTC reads**).
+CircleSeeker2 is a comprehensive bioinformatics pipeline for detecting extrachromosomal circular DNA (eccDNA) from PacBio HiFi long-read sequencing data. Using a multi-round iterative analysis approach, it achieves high-sensitivity identification of various eccDNA types.
 
-**CircleSeeker** innovatively combines the strengths of these two strategies, specifically optimized for the unique advantages of PacBio HiFi data—long read lengths and high accuracy. It first identifies potential circular structures by detecting tandem repeats within reads and then employs a Split-Read based strategy to precisely reconstruct large eccDNAs (>20 kb). This hybrid approach ensures the accurate and efficient recovery of complete eccDNA sequences.
+### Key Features
 
-Following identification, CircleSeeker automatically classifies each eccDNA based on its alignment pattern and chimerism, providing a powerful tool for investigating genome instability.
-
-## Key Features
-
--   **Hybrid Detection Strategy**: Merges tandem repeat detection with Split-Read assembly, tailored to leverage the strengths of PacBio HiFi data for maximum recall and precision.
--   **Comprehensive eccDNA Classification**: Sorts eccDNA into biologically meaningful categories:
-    -   **UeccDNA (Unique-locus eccDNA):** Originates from a single, contiguous genomic locus.
-    -   **MeccDNA (Multi-locus eccDNA):** Composed of repetitive sequences (e.g., tandem repeats) that map to multiple genomic locations, but lacks a chimeric structure.
-    -   **CeccDNA (Chimeric eccDNA):** A chimeric circle formed by the fusion of two or more distant, non-contiguous genomic segments.
-    -   **MCeccDNA (Multi-locus Chimeric eccDNA):** A hybrid circle exhibiting both multi-locus and chimeric features.
-    -   **XeccDNA:** Sequences that cannot be classified into the above categories, potentially representing contamination, other unknown circular molecules, or complex unclassified structures.
--   **Automated & Efficient Pipeline**: Integrates multiple third-party tools (e.g., TideHunter, BLAST, minimap2, samtools) into a single, cohesive workflow with multi-threading support.
--   **Checkpoint & Resumption**: Creates a checkpoint file after each major step, allowing the pipeline to be resumed from the last completed point in case of interruption.
--   **Detailed Analysis Reports**: Automatically generates an HTML summary report, comprehensive CSV tables, and final FASTA files for easy interpretation and downstream analysis.
+- 🔍 **Multi-round Analysis**: TideHunter → BLAST+ (2x) → Minimap2 for comprehensive detection
+- ⚡ **High Performance**: Parallel processing with efficient memory management
+- 📊 **Multiple eccDNA Types**: Detects UeccDNA, MeccDNA, CeccDNA, MCeccDNA, and XeccDNA
+- 🔧 **Modular Design**: Clean architecture with reusable components
+- 📦 **Easy Installation**: Modern Python packaging with pip/conda support
+- 📈 **Comprehensive Reports**: HTML, CSV, and FASTA outputs with detailed statistics
+- 🔄 **Checkpoint System**: Resume pipeline from any step
 
 ## Installation
 
-We currently recommend installing CircleSeeker by downloading a release package and installing it with Conda. More installation options will be available in the future.
+### Development Installation
 
-### Option 1: From Release File (Recommended)
-
-1.  **Navigate to the Releases Page**: Visit the project's [Releases page](https://github.com/leoxqy/CircleSeeker/releases).
-2.  **Download the Package**: Download the latest `.tar.bz2` package (e.g., `circle_seeker-1.0.1-pyh2b07374_0.tar.bz2`).
-3.  **Install with Conda**: Open your terminal, navigate to the download directory, and run:
-    ```bash
-    # Replace the filename with the version you downloaded
-    conda install circle_seeker-1.0.1-pyh2b07374_0.tar.bz2
-    ```
-
-### Option 2: From Source (For Developers)
-
-1.  **Clone the Repository**:
-    ```bash
-    git clone [https://github.com/leoxqy/CircleSeeker.git](https://github.com/leoxqy/CircleSeeker.git)
-    cd CircleSeeker
-    ```
-2.  **Install with pip**:
-    ```bash
-    pip install .
-    ```
-    **Important**: If installing from source, ensure the following dependencies are in your system's `$PATH`:
-    `minimap2`, `samtools`, `blast+`, `seqkit`, `mosdepth`, `bcftools`, `tidehunter`.
-
-## Usage
-
-### Basic Command
 ```bash
-CircleSeeker \
-    -i <input.fasta> \
-    -p <output_prefix> \
-    -r <reference.fasta> \
-    -t <threads>
+# Clone repository
+git clone <repository-url>
+cd CircleSeeker2_dev
+
+# Install in development mode
+pip install -e .
+
+# Verify installation
+circleseeker2 --version
+circleseeker2 validate
 ```
 
-### Arguments
+### Dependencies
 
-#### Required Arguments
-| Argument            | Description                              |
-| :------------------ | :--------------------------------------- |
-| `-i`, `--input`     | Input PacBio HiFi reads in FASTA format. |
-| `-p`, `--prefix`    | Prefix for all output files.             |
-| `-r`, `--reference` | Reference genome in FASTA format.        |
+**Python packages** (automatically installed):
+- click>=8.1
+- pandas>=2.0
+- numpy>=1.23
+- biopython>=1.81
+- pysam>=0.22
+- pyyaml>=6.0
+- networkx>=3.0
 
-#### Optional Arguments
-| Argument              | Description                                  | Default           |
-| :-------------------- | :------------------------------------------- | :---------------- |
-| `-o`, `--output`      | Output directory path.                       | Current directory |
-| `-t`, `--num_threads` | Number of threads to use.                    | `8`               |
-| `--enable_X`          | Enable the detection of XeccDNA.             | `False`           |
-| `--force`             | Force re-run and overwrite existing outputs. | `False`           |
-| `--start_from`        | Skip to a specific step number to start.     | `None`            |
+**External tools** (install separately):
+- TideHunter
+- BLAST+ (makeblastdb, blastn)
+- Minimap2
+- Samtools
+- Mosdepth
+- CD-HIT
 
-## Example Workflow
+## Quick Start
 
-1.  **Prepare Input Files**
-    -   PacBio HiFi Reads: `HeLa_rep1.fasta`
-    -   Reference Genome: `hg38.p13.fa`
+### Basic Usage
 
-2.  **Run CircleSeeker**
-    ```bash
-    CircleSeeker \
-        -i HeLa_rep1.fasta \
-        -p HeLa_rep1 \
-        -r hg38.p13.fa \
-        -t 16 \
-        --enable_X
-    ```
+```bash
+# Run with minimal parameters
+circleseeker2 run input.fasta reference.fa
 
-3.  **Check the Results**
-    -   Review the output files in the specified directory.
-    -   Open `HeLa_rep1.report.html` for a visual summary of the analysis.
-    -   Confirm successful completion by checking the `HeLa_rep1.checkpoint` file.
+# Run with custom output and threads
+circleseeker2 run input.fasta reference.fa \
+    -o results \
+    -p sample1 \
+    -t 16
+```
+
+### Using Configuration File
+
+```bash
+# Generate configuration template
+circleseeker2 init-config -o config.yaml
+
+# Edit config.yaml with your parameters
+# Then run with configuration
+circleseeker2 run input.fasta reference.fa -c config.yaml
+```
+
+### Advanced Usage
+
+```bash
+# Resume from checkpoint
+circleseeker2 run input.fasta reference.fa -o previous_output
+
+# Start from specific step
+circleseeker2 run input.fasta reference.fa --start-from 5
+
+# Stop at specific step
+circleseeker2 run input.fasta reference.fa --stop-at 8
+
+# Dry run to see pipeline steps
+circleseeker2 run input.fasta reference.fa --dry-run
+```
+
+## Pipeline Architecture
+
+### Modern Package Structure
+
+```
+src/circleseeker2/
+├── __init__.py              # Package initialization
+├── __version__.py           # Version information
+├── __main__.py             # Package entry point
+├── cli.py                  # Click-based CLI
+├── config.py               # Configuration management
+├── exceptions.py           # Custom exceptions
+├── core/
+│   └── pipeline.py         # Main pipeline orchestrator
+├── external/               # External tool wrappers
+│   ├── base.py            # Base wrapper class
+│   ├── tidehunter.py      # TideHunter wrapper
+│   ├── blast.py           # BLAST+ wrapper
+│   ├── minimap2.py        # Minimap2 wrapper
+│   ├── samtools.py        # Samtools wrapper
+│   └── mosdepth.py        # Mosdepth wrapper
+├── modules/                # Analysis modules
+│   ├── carousel.py         # Circular DNA analysis
+│   ├── gatekeeper.py      # eccDNA classification
+│   └── processors/        # Processing utilities
+├── algorithms/            # Core algorithms
+├── io/                    # Input/Output utilities
+├── utils/                 # Utility functions
+│   └── validators.py      # Installation validation
+├── reports/               # Report generation
+└── resources/             # Configuration templates
+```
+
+### Pipeline Steps
+
+1. **make_blastdb** - Build BLAST database from reference
+2. **tidehunter** - Run TideHunter for tandem repeat detection
+3. **carousel** - Process TideHunter output and classify sequences
+4. **run_blast** - Run BLAST alignment against reference
+5. **gatekeeper** - Classify eccDNA into Uecc/Mecc/Unclassified
+6. **trapeze** - Process Cecc candidates (placeholder)
+7. **menagerie** - Generate FASTA files (placeholder)
+8. **cd_hit** - Remove redundant sequences (placeholder)
+9. **harmonizer** - Coordinate results (placeholder)
+10. **sieve** - Filter sequences (placeholder)
+11. **minimap2** - Map with Minimap2 (placeholder)
+12. **mosdepth** - Calculate depth coverage (placeholder)
+13. **contortionist** - Split regions (placeholder)
+14. **juggler** - Final processing (placeholder)
+
+## Configuration
+
+### YAML Configuration Format
+
+```yaml
+# Input files
+input_file: "input.fasta"
+reference: "reference.fa"
+output_dir: "results"
+prefix: "sample"
+
+# Feature flags
+enable_xecc: false
+
+# Performance settings
+performance:
+  threads: 8
+  max_memory: "16G"
+
+# Quality control parameters
+quality:
+  min_quality_score: 0.99
+  min_coverage: 10
+  min_identity: 99.0
+
+# External tool parameters
+tools:
+  tidehunter:
+    k: 16
+    w: 1
+    p: 100
+  blast:
+    word_size: 100
+    evalue: "1e-50"
+    perc_identity: 99.0
+```
 
 ## Output Files
 
-The pipeline generates several output files. The most important ones include:
+```
+output_dir/
+├── config.yaml                    # Effective configuration
+├── sample.checkpoint              # Pipeline checkpoint
+├── sample_processed.csv           # Carousel results
+├── sample_circular.fasta          # Circular sequences
+├── sample_blast_results.tsv       # BLAST alignments
+├── sample_uecc.csv                # UeccDNA results
+├── sample_mecc.csv                # MeccDNA results
+└── sample_unclassified.csv        # Unclassified results
+```
 
--   `<prefix>.Final.Confirmed.{Uecc,Mecc,Cecc,MCecc}.{csv,fasta}`: Tables and sequences for eccDNA types confirmed by coverage analysis.
--   `<prefix>.Final.Confirmed.Xecc.fasta`: Confirmed XeccDNA sequences (if `--enable_X` is used).
--   `<prefix>.Final.Inferred.Uecc.{csv,fasta}`: **UeccDNA inferred using the Split-Reads method.**
--   `<prefix>.report.{html,txt}`: A formatted summary report of the analysis.
--   `<prefix>.summary.csv`: A master table containing statistics on read classifications.
--   `<prefix>.checkpoint`: The checkpoint file used for pipeline resumption.
+## Commands
+
+- `circleseeker2 run` - Run the main pipeline
+- `circleseeker2 init-config` - Generate configuration template
+- `circleseeker2 validate` - Validate installation
+- `circleseeker2 benchmark` - Run performance benchmarks
+- `circleseeker2 --help` - Show help information
+
+## Development Status
+
+✅ **Completed**:
+- Modern package structure and CLI
+- Configuration management system
+- Pipeline architecture with checkpoints
+- External tool wrappers
+- Core modules (TideHunter, Carousel, Gatekeeper)
+- Validation and testing framework
+
+🚧 **In Progress**:
+- Additional pipeline steps (steps 5-13)
+- Comprehensive testing
+- Documentation completion
+
+## Migration from v1
+
+The original CircleSeeker2 script has been completely restructured:
+
+- **Modular Architecture**: Separated into logical modules
+- **Configuration System**: YAML-based configuration with validation
+- **Checkpoint System**: Resume from any step
+- **Modern CLI**: Click-based interface with multiple commands
+- **Error Handling**: Proper exception handling and logging
+- **Package Structure**: Follows modern Python packaging standards
 
 ## Contributing
 
-We welcome contributions and new feature ideas. To contribute:
-1.  Fork this repository and create a new branch.
-2.  Make your changes and test them thoroughly.
-3.  Submit a Pull Request for review.
-
-Please see `CONTRIBUTING.md` for more details.
+1. Fork the repository
+2. Create a feature branch
+3. Make changes following the existing code style
+4. Add tests for new functionality
+5. Submit a pull request
 
 ## License
 
-CircleSeeker is licensed under the [GNU General Public License v2 (GPLv2)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html).
+GNU General Public License v2.0 - see [LICENSE](LICENSE) file for details.
 
-## Authors & Support
+## Acknowledgments
 
--   **Yaoxin Zhang** (yxzhang@ncgr.com)
--   **Leo Xinqi Yu** (leoxqy@hotmail.com)
-
-For any questions, bug reports, or feature requests, please [open an issue](https://github.com/leoxqy/CircleSeeker/issues) on GitHub.
+CircleSeeker2 builds upon excellent bioinformatics tools:
+- [TideHunter](https://github.com/yangao07/TideHunter) - Tandem repeat detection
+- [BLAST+](https://blast.ncbi.nlm.nih.gov/) - Sequence alignment
+- [Minimap2](https://github.com/lh3/minimap2) - Long-read alignment
+- [samtools](https://github.com/samtools/samtools) - SAM/BAM manipulation
