@@ -1,0 +1,48 @@
+python step0_make_blastdb.py -i chm13v2.0.fa -o chm13v2_db
+
+python step1_tidehunter.py -i step1_Test.HeLa_10k.fasta -o step1_Test.TH.ecc_candidates.txt -t 16
+
+python step2_carousel.py -i step1_Test.TH.ecc_candidates.txt -o step2_processed.csv -f step2_circular.fasta
+
+python step3_run_blast.py -d chm13v2_db -q step2_circular.fasta -o step3_blast_results.tsv -t 36
+
+python step4_gatekeeper.py -b step3_blast_results.tsv --prefix step4
+
+python step5_trapeze.py -i step4_unclassified.csv -o step5_cecc.csv
+
+python step6_menagerie.py -f step2_circular.fasta -u step4_uecc.csv -m step4_mecc.csv -c step5_cecc.csv -o ./ -p step6 -X
+
+python step7_run_cd_hit_est.py -i step6_UeccDNA_pre.fasta -o step7_UeccDNA_pre_nr99 -t 24 &
+python step7_run_cd_hit_est.py -i step6_MeccDNA_pre.fasta -o step7_MeccDNA_pre_nr99 -t 24 &
+python step7_run_cd_hit_est.py -i step6_CeccDNA_pre.fasta -o step7_CeccDNA_pre_nr99 -t 24 &
+
+python step8_Harmonizer.py \
+  -iU step6_UeccDNA_processed.csv \
+  -cU step7_UeccDNA_pre_nr99.clstr \
+  -iM step6_MeccDNA_processed.csv \
+  -cM step7_MeccDNA_pre_nr99.clstr \
+  -iC step6_CeccDNA_processed.csv \
+  -cC step7_CeccDNA_pre_nr99.clstr \
+  -o ./ -p step8 --drop-seq -l INFO
+
+python step9_sieve.py -i step1_Test.HeLa_10k.fasta -l step2_processed.csv -o step9_filtered.fasta
+
+python3 step10_run_minimap2.py -r chm13v2.0.fa -i step9_filtered.fasta -o step10_sorted.bam -t 32
+
+python3 step11_run_mosdepth.py -i step10_sorted.bam -o step11_depth -t 32
+
+python step12_Contortionist.py -i step11_depth.win50.per-base.bed -b step10_sorted.bam -o step12.split_regions_refined.tsv
+
+python step13_Juggler_v1.py -r chm13v2.0.fa -i step9_filtered.fasta -c step12.split_regions_refined.tsv -o step13 -t 36
+
+python eccdna_analyzer.py \
+  --uecc step6_UeccDNA_pre.fasta \
+  --mecc step6_MeccDNA_pre.fasta \
+  --cecc step6_CeccDNA_pre.fasta \
+  --inferred step13.renamed.fasta \
+  --reads step1_Test.HeLa_10k.fasta \
+  --csv step2_processed.csv \
+  --sample "HeLa_10k" \
+  --output eccdna_report.html
+
+python circleseeker_organizer.py --prefix HeLa_10k

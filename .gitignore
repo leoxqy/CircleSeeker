@@ -1,0 +1,68 @@
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Python cache/build
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# Logs and checkpoints
+*.log
+*.checkpoint
+*.checkpoint.bak
+
+# Temp workdirs
+**/.tmp_work/
+tmp/
+temp/
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test data and outputs (keep test code, ignore generated data)
+test_modules/**/input/
+test_modules/**/output/
+test_modules/**/expected/
+*.mmi
+*.{fa,fasta,fai,fq,fastq}
+*.{bam,bai,sam}
+*.{bed,bedpe,bed.gz}
+*.{tsv,csv}
+*.{clstr,idx}
+*_sorted.bam*
+organized_results/
+
+# External tool databases
+*.ndb
+*.nhr
+*.nin
+*.njs
+*.not
+*.nsq
+*.ntf
+*.nto
+
+# Config files with sensitive data
+config.yaml
+*.config
+
+# Backup and archive directories
+*_backup/
+*_archive/
+*_副本/
