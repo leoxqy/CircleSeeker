@@ -1,0 +1,50 @@
+input_file: HeLa_rep1_1k.fasta
+reference: chm13v2.0.fa
+output_dir: 7777/.tmp_work
+prefix: 1k
+enable_xecc: true
+skip_make_db: false
+skip_tidehunter: false
+skip_carousel: false
+skip_blast: false
+skip_gatekeeper: false
+skip_report: false
+skip_organize: false
+runtime:
+  log_level: INFO
+  log_file: null
+  tmp_dir: .tmp
+  checkpoint_interval: 5
+  keep_tmp: false
+performance:
+  threads: 8
+  max_memory: 16G
+  chunk_size: 10000
+  parallel_jobs: 4
+  stream_buffer_size: 65536
+  enable_profiling: false
+quality:
+  min_quality_score: 0.99
+  min_coverage: 10
+  min_eccdna_size: 100
+  max_eccdna_size: 1000000
+  min_alignment_length: 100
+  min_identity: 99.0
+tools:
+  tidehunter:
+    k: 16
+    w: 1
+    p: 100
+    P: 2000000
+    e: 0.1
+    f: 2
+  blast:
+    word_size: 100
+    evalue: 1e-50
+    perc_identity: 99.0
+  minimap2:
+    preset: map-hifi
+    additional_args: ''
+  samtools: {}
+  mosdepth:
+    min_mapq: 1
