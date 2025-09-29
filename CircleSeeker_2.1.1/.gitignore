@@ -1,0 +1,74 @@
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Python cache/build
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+# Release archives
+release/*.tar.bz2
+*.tar.gz
+
+# Packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# Logs and checkpoints
+*.log
+*.checkpoint
+*.checkpoint.bak
+
+# Temp workdirs
+**/.tmp_work/
+tmp/
+temp/
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Large test artifacts (keep code, ignore data/outputs)
+tests/**/*.mmi
+tests/**/*.{fa,fasta,fai,fq,fastq}
+tests/**/*.{bam,bai,sam}
+tests/**/*.{bed,bedpe,bed.gz}
+tests/**/*.{tsv,csv}
+tests/**/*.{clstr,idx}
+tests/**/*_sorted.bam*
+tests/**/organized_results/
+
+# Local archives or experimental outputs
+legacy_archive/
+test_complete_fixed/
+test_modules_copy/
+test_quick_output/
+test_sieve_fix/
+
+# Project-specific outputs in root tests dir
+tests/out*/
+
+# Temporary scripts and files
+fix_performance.py
+quick_fix.sh
+install_test.sh
+
+# Old requirements files (using pyproject.toml)
+requirements*.txt
+setup.py
+
+# Development scripts
+scripts/cleanup_for_git.sh
+scripts/migrate_existing_tests.sh
+scripts/pytest.quick.ini

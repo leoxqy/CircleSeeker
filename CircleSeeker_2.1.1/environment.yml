@@ -1,0 +1,49 @@
+name: circleseeker
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+
+dependencies:
+  # Python interpreter
+  - python>=3.9
+  - pip>=23.0
+
+  # Core Python scientific packages
+  - numpy>=1.23.0
+  - pandas>=2.0.0
+  - scipy>=1.10.0
+
+  # Bioinformatics Python packages
+  - biopython>=1.81
+  - pysam>=0.22.0
+  - intervaltree>=3.1.0
+
+  # Data processing and utilities
+  - click>=8.1.0
+  - pyyaml>=6.0
+  - networkx>=3.0
+  - packaging>=23.0
+
+  # Bioinformatics tools - Essential
+  - tidehunter>=1.4.0
+  - blast>=2.12.0
+  - minimap2>=2.24
+  - samtools>=1.17
+  - bcftools>=1.17
+  - cd-hit>=4.8.1
+
+  # Variant calling
+  - varlociraptor>=5.0.0
+
+  # Circular DNA detection
+  - cyrcular
+
+  # Development tools (optional)
+  # Uncomment if needed for development
+  # - ipython
+  # - jupyter
+  # - pytest>=7.0
+  # - pytest-cov>=4.0
+  # - black>=22.0
+  # - flake8>=5.0

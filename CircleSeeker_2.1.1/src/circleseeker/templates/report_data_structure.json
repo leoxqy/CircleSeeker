@@ -1,0 +1,69 @@
+{
+  "metadata": {
+    "sample_name": "string - Sample name for the analysis",
+    "version": "string - CircleSeeker version",
+    "analysis_date": "string - Date and time of analysis (YYYY-MM-DD HH:MM:SS)"
+  },
+  "read_classification": {
+    "total_reads": "int - Total number of reads in the dataset",
+    "ctcr_reads": "int - Number of CtcR reads",
+    "ctcr_percentage": "float - Percentage of CtcR reads out of total",
+    "other_reads": "int - Number of non-CtcR reads",
+    "other_percentage": "float - Percentage of other reads out of total"
+  },
+  "ctcr_subtypes": {
+    "ctcr_perfect_count": "int - Number of CtcR-perfect reads",
+    "ctcr_perfect_percentage": "float - Percentage of CtcR-perfect out of CtcR reads",
+    "ctcr_perfect_total_percentage": "float - Percentage of CtcR-perfect out of total reads",
+    "ctcr_hybrid_count": "int - Number of CtcR-hybrid reads",
+    "ctcr_hybrid_percentage": "float - Percentage of CtcR-hybrid out of CtcR reads",
+    "ctcr_hybrid_total_percentage": "float - Percentage of CtcR-hybrid out of total reads",
+    "ctcr_inversion_count": "int - Number of CtcR-inversion reads",
+    "ctcr_inversion_percentage": "float - Percentage of CtcR-inversion out of CtcR reads",
+    "ctcr_inversion_total_percentage": "float - Percentage of CtcR-inversion out of total reads"
+  },
+  "all_eccdna_stats": {
+    "all_eccdna_count": "int - Total count of all eccDNA sequences",
+    "all_eccdna_min_length": "int - Minimum length of all eccDNA sequences",
+    "all_eccdna_max_length": "int - Maximum length of all eccDNA sequences",
+    "all_eccdna_mean_length": "float - Mean length of all eccDNA sequences",
+    "all_eccdna_median_length": "float - Median length of all eccDNA sequences",
+    "all_eccdna_mode_length": "int - Mode length of all eccDNA sequences",
+    "all_eccdna_std_dev": "float - Standard deviation of all eccDNA sequence lengths"
+  },
+  "ueccdna_stats": {
+    "ueccdna_count": "int - Count of UeccDNA sequences",
+    "ueccdna_min_length": "int - Minimum length of UeccDNA sequences",
+    "ueccdna_max_length": "int - Maximum length of UeccDNA sequences",
+    "ueccdna_mean_length": "float - Mean length of UeccDNA sequences",
+    "ueccdna_median_length": "float - Median length of UeccDNA sequences",
+    "ueccdna_mode_length": "int - Mode length of UeccDNA sequences",
+    "ueccdna_std_dev": "float - Standard deviation of UeccDNA sequence lengths"
+  },
+  "meccdna_stats": {
+    "meccdna_count": "int - Count of MeccDNA sequences",
+    "meccdna_min_length": "int - Minimum length of MeccDNA sequences",
+    "meccdna_max_length": "int - Maximum length of MeccDNA sequences",
+    "meccdna_mean_length": "float - Mean length of MeccDNA sequences",
+    "meccdna_median_length": "float - Median length of MeccDNA sequences",
+    "meccdna_mode_length": "int - Mode length of MeccDNA sequences",
+    "meccdna_std_dev": "float - Standard deviation of MeccDNA sequence lengths"
+  },
+  "ceccdna_stats": {
+    "ceccdna_count": "int - Count of CeccDNA sequences",
+    "ceccdna_min_length": "int - Minimum length of CeccDNA sequences",
+    "ceccdna_max_length": "int - Maximum length of CeccDNA sequences",
+    "ceccdna_mean_length": "float - Mean length of CeccDNA sequences",
+    "ceccdna_median_length": "float - Median length of CeccDNA sequences",
+    "ceccdna_mode_length": "int - Mode length of CeccDNA sequences",
+    "ceccdna_std_dev": "float - Standard deviation of CeccDNA sequence lengths"
+  },
+  "inference_analysis": {
+    "inferred_ueccdna_count": "int - Count of inferred UeccDNA sequences",
+    "ueccdna_overlap_count": "int - Number of inferred sequences that overlap with confirmed UeccDNA",
+    "ueccdna_overlap_percentage": "float - Percentage of overlap between inferred and confirmed UeccDNA",
+    "inferred_ceccdna_count": "int - Count of inferred CeccDNA sequences",
+    "ceccdna_overlap_count": "int - Number of inferred sequences that overlap with confirmed CeccDNA",
+    "ceccdna_overlap_percentage": "float - Percentage of overlap between inferred and confirmed CeccDNA"
+  }
+}

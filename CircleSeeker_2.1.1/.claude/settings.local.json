@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(echo \"Backed up to: $backup_dir\")",
+      "Bash(chmod:*)",
+      "Bash(grep:*)",
+      "Bash(python:*)",
+      "Read(//Users/yaoxinzhang/Desktop/**)",
+      "Bash(pip install:*)",
+      "Bash(pip uninstall:*)",
+      "Bash(PYTHONPATH=src python -m pytest tests/unit/test_cecc_build.py -v --tb=short)",
+      "Bash(export PYTHONPATH=src)",
+      "Bash(awk:*)",
+      "Bash(find:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
