@@ -1,154 +1,241 @@
-# CircleSeeker: Advanced Circular DNA Analysis for PacBio HiFi Data
+<p align="center">
+  <img src="docs/images/logo.png" width="300" alt="CircleSeeker">
+</p>
 
-[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
-[![Project Status: Active](https://img.shields.io/badge/status-active-success.svg)](https://github.com/leoxqy/CircleSeeker/)
+# CircleSeeker
 
-**CircleSeeker** is a specialized bioinformatics pipeline designed for the identification, classification, and characterization of extrachromosomal circular DNA (eccDNA) from PacBio HiFi long-read sequencing data.
+[![Version](https://img.shields.io/badge/version-2.1.1-blue.svg)](https://github.com/yaoxinzhang/CircleSeeker)
+[![Python](https://img.shields.io/badge/python-≥3.9-blue.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-GPL--2.0-green.svg)](LICENSE)
 
----
-
-## Overview
-
-Traditional methods for eccDNA identification are often platform-specific. Approaches for Next-Generation Sequencing (NGS) data primarily rely on **Split-Read** reconstruction algorithms, while earlier methods for Nanopore long reads focused on directly identifying tandem repeat structures (**CTC reads**).
-
-**CircleSeeker** innovatively combines the strengths of these two strategies, specifically optimized for the unique advantages of PacBio HiFi data—long read lengths and high accuracy. It first identifies potential circular structures by detecting tandem repeats within reads and then employs a Split-Read based strategy to precisely reconstruct large eccDNAs (>20 kb). This hybrid approach ensures the accurate and efficient recovery of complete eccDNA sequences.
-
-Following identification, CircleSeeker automatically classifies each eccDNA based on its alignment pattern and chimerism, providing a powerful tool for investigating genome instability.
-
-## Key Features
-
--   **Hybrid Detection Strategy**: Merges tandem repeat detection with Split-Read assembly, tailored to leverage the strengths of PacBio HiFi data for maximum recall and precision.
--   **Comprehensive eccDNA Classification**: Sorts eccDNA into biologically meaningful categories:
-    -   **UeccDNA (Unique-locus eccDNA):** Originates from a single, contiguous genomic locus.
-    -   **MeccDNA (Multi-locus eccDNA):** Composed of repetitive sequences (e.g., tandem repeats) that map to multiple genomic locations, but lacks a chimeric structure.
-    -   **CeccDNA (Chimeric eccDNA):** A chimeric circle formed by the fusion of two or more distant, non-contiguous genomic segments.
-    -   **MCeccDNA (Multi-locus Chimeric eccDNA):** A hybrid circle exhibiting both multi-locus and chimeric features.
-    -   **XeccDNA:** Sequences that cannot be classified into the above categories, potentially representing contamination, other unknown circular molecules, or complex unclassified structures.
--   **Automated & Efficient Pipeline**: Integrates multiple third-party tools (e.g., TideHunter, BLAST, minimap2, samtools) into a single, cohesive workflow with multi-threading support.
--   **Checkpoint & Resumption**: Creates a checkpoint file after each major step, allowing the pipeline to be resumed from the last completed point in case of interruption.
--   **Detailed Analysis Reports**: Automatically generates an HTML summary report, comprehensive CSV tables, and final FASTA files for easy interpretation and downstream analysis.
+Comprehensive detection and characterization of extrachromosomal circular DNA (eccDNA) from PacBio HiFi sequencing data.
 
 ## Installation
 
-We currently recommend installing CircleSeeker by downloading a release package and installing it with Conda. More installation options will be available in the future.
+### Using Conda (Recommended)
 
-### Option 1: From Release File (Recommended)
+```bash
+conda create -n circleseeker -c bioconda -c conda-forge circleseeker=2.1.1
+conda activate circleseeker
+```
 
-1.  **Navigate to the Releases Page**: Visit the project's [Releases page](https://github.com/leoxqy/CircleSeeker/releases).
-2.  **Download the Package**: Download the latest `.tar.bz2` package (e.g., `circle_seeker-1.0.1-pyh2b07374_0.tar.bz2`).
-3.  **Install with Conda**: Open your terminal, navigate to the download directory, and run:
-    ```bash
-    # Replace the filename with the version you downloaded
-    conda install circle_seeker-1.0.1-pyh2b07374_0.tar.bz2
-    ```
+### From Source
 
-### Option 2: From Source (For Developers)
+```bash
+git clone https://github.com/yaoxinzhang/CircleSeeker.git
+cd CircleSeeker
+conda env create -f environment.yml
+conda activate circleseeker
+pip install -e .
+```
 
-1.  **Clone the Repository**:
-    ```bash
-    git clone [https://github.com/leoxqy/CircleSeeker.git](https://github.com/leoxqy/CircleSeeker.git)
-    cd CircleSeeker
-    ```
-2.  **Install with pip**:
-    ```bash
-    pip install .
-    ```
-    **Important**: If installing from source, ensure the following dependencies are in your system's `$PATH`:
-    `minimap2`, `samtools`, `blast+`, `seqkit`, `mosdepth`, `bcftools`, `tidehunter`.
+## Quick Start
+
+```bash
+# Basic usage
+circleseeker -i reads.fasta -r reference.fa -o output_dir
+
+# With common options
+circleseeker \
+    -i sample.hifi.fasta \
+    -r hg38.fa \
+    -o results \
+    -p sample_name \
+    -t 16
+```
 
 ## Usage
 
-### Basic Command
-```bash
-CircleSeeker \
-    -i <input.fasta> \
-    -p <output_prefix> \
-    -r <reference.fasta> \
-    -t <threads>
-```
+### Required Arguments
 
-### Arguments
+- `-i, --input PATH` - Input HiFi reads (FASTA format)
+- `-r, --reference PATH` - Reference genome (FASTA format)
 
-#### Required Arguments
-| Argument            | Description                              |
-| :------------------ | :--------------------------------------- |
-| `-i`, `--input`     | Input PacBio HiFi reads in FASTA format. |
-| `-p`, `--prefix`    | Prefix for all output files.             |
-| `-r`, `--reference` | Reference genome in FASTA format.        |
+### Optional Arguments
 
-#### Optional Arguments
-| Argument              | Description                                  | Default           |
-| :-------------------- | :------------------------------------------- | :---------------- |
-| `-o`, `--output`      | Output directory path.                       | Current directory |
-| `-t`, `--num_threads` | Number of threads to use.                    | `8`               |
-| `--enable_X`          | Enable the detection of XeccDNA.             | `False`           |
-| `--force`             | Force re-run and overwrite existing outputs. | `False`           |
-| `--start_from`        | Skip to a specific step number to start.     | `None`            |
+- `-o, --output PATH` - Output directory (default: circleseeker_output)
+- `-p, --prefix TEXT` - Output file prefix (default: sample)
+- `-t, --threads INT` - Number of threads (default: 8)
+- `-c, --config PATH` - Configuration file (YAML format)
+- `-n, --noise` - Increase verbosity (-n for INFO, -nn for DEBUG)
+- `-h, --help` - Show help message
+- `--keep-tmp` - Keep temporary files
 
-## Test Data Setup
+## Pipeline Overview
 
-### Download Required Test Data
+CircleSeeker implements a 16-step analysis pipeline:
 
-**Reference Genome (CHM13v2.0):**
-```bash
-# Download CHM13v2.0 reference genome (~900MB)
-wget https://s3-us-west-2.amazonaws.com/human-pangenomics/T2T/CHM13/assemblies/analysis_set/chm13v2.0.fa.gz
-gunzip chm13v2.0.fa.gz
-```
+### Detection Phase (Steps 1-6)
+1. **make_blastdb** - Build BLAST database from reference
+2. **tidehunter** - Detect tandem repeats in HiFi reads
+3. **tandem_to_ring** - Convert tandem repeats to circular candidates
+4. **run_blast** - Map candidates to reference genome
+5. **um_classify** - Classify eccDNA as Unique (U) or Multiple (M) origin
+6. **cecc_build** - Identify Complex (C) eccDNA
 
-**Test Sample Data:**
-- Use `HeLa_rep1_1k.fasta` - a 1kb subset of HeLa cell PacBio HiFi reads containing eccDNA candidates
-- This file should be obtained from the original CircleSeeker2 development dataset
-- Alternatively, use any PacBio HiFi FASTA file containing potential eccDNA sequences
+### Processing Phase (Steps 7-10)
+7. **umc_process** - Process and cluster U/M/C types
+8. **cd_hit** - Remove redundancy (90% identity threshold)
+9. **ecc_dedup** - Deduplicate and standardize coordinates
+10. **read_filter** - Filter confirmed eccDNA reads
 
-## Example Workflow
+### Inference Phase (Steps 11-13)
+11. **minimap2** - Align filtered reads to reference
+12. **cyrcular_calling** - Detect eccDNA via split-read analysis (FDR=0.05)
+13. **iecc_curator** - Curate inferred eccDNA
 
-1.  **Prepare Input Files**
-    -   PacBio HiFi Reads: `HeLa_rep1_1k.fasta`
-    -   Reference Genome: `chm13v2.0.fa`
-
-2.  **Run CircleSeeker**
-    ```bash
-    CircleSeeker \
-        -i HeLa_rep1_1k.fasta \
-        -p HeLa_test \
-        -r chm13v2.0.fa \
-        -t 16 \
-        --enable_X
-    ```
-
-3.  **Check the Results**
-    -   Review the output files in the specified directory.
-    -   Open `HeLa_test.report.html` for a visual summary of the analysis.
-    -   Confirm successful completion by checking the `HeLa_test.checkpoint` file.
+### Integration Phase (Steps 14-16)
+14. **ecc_unify** - Merge confirmed and inferred results
+15. **ecc_summary** - Generate statistics and summaries
+16. **ecc_packager** - Package final outputs
 
 ## Output Files
 
-The pipeline generates several output files. The most important ones include:
+```
+output_dir/sample_name/
+├── sample_name_Confirmed_UeccDNA/
+│   ├── sample_name_UeccDNA_C.fasta      # Confirmed unique eccDNA sequences
+│   ├── sample_name_UeccDNA.bed          # Genomic coordinates (BED format)
+│   └── sample_name_UeccDNA.core.csv     # Detailed information table
+├── sample_name_Confirmed_MeccDNA/
+│   ├── sample_name_MeccDNA_C.fasta      # Confirmed multiple eccDNA sequences
+│   ├── sample_name_MeccSites.bed        # All genomic sites
+│   ├── sample_name_MeccBestSite.bed     # Best hit per eccDNA
+│   └── sample_name_MeccSites.core.csv   # Detailed information table
+├── sample_name_Confirmed_CeccDNA/
+│   ├── sample_name_CeccDNA_C.fasta      # Confirmed complex eccDNA sequences
+│   ├── sample_name_CeccSegments.bed     # All segments
+│   ├── sample_name_CeccJunctions.bedpe  # Junction information
+│   └── sample_name_CeccSegments.core.csv # Detailed information table
+├── sample_name_Inferred_eccDNA/
+│   ├── sample_name_UeccDNA_I.csv        # Inferred simple eccDNA
+│   ├── sample_name_UeccDNA_I.fasta      # Inferred simple sequences
+│   ├── sample_name_chimeric.csv         # Inferred chimeric eccDNA
+│   └── sample_name_CeccDNA_I.fasta      # Inferred complex sequences
+├── sample_name_merged_output.csv        # All eccDNA combined
+├── sample_name_report.html              # Interactive HTML report
+└── sample_name_summary.txt              # Summary statistics
+```
 
--   `<prefix>.Final.Confirmed.{Uecc,Mecc,Cecc,MCecc}.{csv,fasta}`: Tables and sequences for eccDNA types confirmed by coverage analysis.
--   `<prefix>.Final.Confirmed.Xecc.fasta`: Confirmed XeccDNA sequences (if `--enable_X` is used).
--   `<prefix>.Final.Inferred.Uecc.{csv,fasta}`: **UeccDNA inferred using the Split-Reads method.**
--   `<prefix>.report.{html,txt}`: A formatted summary report of the analysis.
--   `<prefix>.summary.csv`: A master table containing statistics on read classifications.
--   `<prefix>.checkpoint`: The checkpoint file used for pipeline resumption.
+### Output Format
 
-## Contributing
+The merged output file (`sample_name_merged_output.csv`) contains:
 
-We welcome contributions and new feature ideas. To contribute:
-1.  Fork this repository and create a new branch.
-2.  Make your changes and test them thoroughly.
-3.  Submit a Pull Request for review.
+| Column | Description |
+|--------|-------------|
+| eccDNA_id | Unique identifier (e.g., UeccDNA1, MeccDNA1, CeccDNA1) |
+| original | Original eccDNA ID from processing |
+| Regions | Genomic coordinates (chr:start-end format) |
+| Strand | DNA strand (+/-) |
+| Length | eccDNA size in base pairs |
+| eccDNA_type | Classification (UeccDNA/MeccDNA/CeccDNA) |
+| State | Detection method (Confirmed/Inferred) |
+| Seg_total | Number of segments (for complex eccDNA) |
+| Hit_count | Number of genomic hits |
 
-Please see `CONTRIBUTING.md` for more details.
+## Configuration
+
+Create a custom configuration file in YAML format:
+
+```yaml
+# Minimum configuration
+min_ecc_length: 100
+max_ecc_length: 1000000
+fdr_threshold: 0.05
+
+# Performance
+threads: 16
+memory_limit: "32G"
+
+# Algorithm parameters
+blast_identity: 85
+cluster_identity: 90
+min_tandem_copies: 2
+```
+
+## System Requirements
+
+- **Operating System**: Linux or macOS
+- **Python**: ≥3.9
+- **Memory**: Minimum 16GB (32GB recommended)
+- **Storage**: ~50GB free space
+- **CPU**: 8+ cores recommended
+
+## Dependencies
+
+### Python Packages
+- numpy ≥1.23
+- pandas ≥2.0
+- biopython ≥1.81
+- pysam ≥0.22
+- networkx ≥3.0
+- intervaltree ≥3.1
+
+### External Tools
+- TideHunter ≥1.4.0
+- BLAST+ ≥2.12.0
+- minimap2 ≥2.24
+- samtools ≥1.17
+- bcftools ≥1.17
+- CD-HIT ≥4.8.1
+- varlociraptor ≥5.0.0
+- cyrcular
+
+## Troubleshooting
+
+### Resume Interrupted Run
+
+```bash
+# Resume from last checkpoint
+circleseeker -i reads.fa -r ref.fa -o previous_output_dir
+```
+
+### Check Installation
+
+```bash
+# Verify CircleSeeker version
+circleseeker --version
+
+# Test with minimal data
+circleseeker -i test.fa -r ref.fa -o test_output
+```
+
+### Common Issues
+
+**Out of Memory**: Reduce thread count or increase available memory
+```bash
+circleseeker -i input.fa -r ref.fa -t 4
+```
+
+**Missing Tools**: Install via conda
+```bash
+conda install -c bioconda tidehunter blast minimap2
+```
+
+## Documentation
+
+For detailed documentation, see the `docs/` directory:
+
+- [Pipeline Modules](docs/Pipeline_Modules.md) - Detailed algorithm descriptions
+- [CLI Reference](docs/CLI_Reference.md) - Complete command-line options
+
+## Citation
+
+If you use CircleSeeker in your research, please cite:
+
+> Zhang Y, You M, Zhou C, et al. (2024). MMC-seq reveals a vast spatiotemporal eccDNA landscape from single cells to tissues. *Manuscript submitted*.
+
+CircleSeeker is the computational pipeline developed as part of the MMC-seq methodology for comprehensive eccDNA detection and characterization
 
 ## License
 
-CircleSeeker is licensed under the [GNU General Public License v2 (GPLv2)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html).
+GPL-2.0. See [LICENSE](LICENSE) for details.
 
-## Authors & Support
+## Contact
 
--   **Yaoxin Zhang** (yxzhang@ncgr.com)
--   **Leo Xinqi Yu** (leoxqy@hotmail.com)
+- Yaoxin Zhang: yxzhang@ncgr.ac.cn
+- Leo Xinqi Yu: leoxqy@hotmail.com
 
-For any questions, bug reports, or feature requests, please [open an issue](https://github.com/leoxqy/CircleSeeker/issues) on GitHub.
+## Acknowledgments
+
+We thank the developers of TideHunter, Cyrcular, and other integrated tools.
