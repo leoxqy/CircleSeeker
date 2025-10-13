@@ -1,7 +1,0 @@
-python -m circleseeker2.CircleSeeker2 `
-  -i R:\githubrepos\CircleSeeker\CircleSeeker2_dev\io\reads.fa `
-  -p sample `
-  -r R:\githubrepos\CircleSeeker\CircleSeeker2_dev\io\chm13v2.0.fa `
-  -o R:\githubrepos\CircleSeeker\CircleSeeker2_dev\io\out `
-  -t 8 -w 100 -e 1e-50 -P 99 `
-  --gate-gap-threshold 10 --gate-min-coverage 95

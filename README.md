@@ -4,7 +4,7 @@
 
 # CircleSeeker
 
-[![Version](https://img.shields.io/badge/version-2.1.1-blue.svg)](https://github.com/yaoxinzhang/CircleSeeker)
+[![Version](https://img.shields.io/badge/version-0.9.2-blue.svg)](https://github.com/yaoxinzhang/CircleSeeker)
 [![Python](https://img.shields.io/badge/python-≥3.9-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-GPL--2.0-green.svg)](LICENSE)
 
@@ -15,7 +15,7 @@ Comprehensive detection and characterization of extrachromosomal circular DNA (e
 ### Using Conda (Recommended)
 
 ```bash
-conda create -n circleseeker -c bioconda -c conda-forge circleseeker=2.1.1
+conda create -n circleseeker -c bioconda -c conda-forge circleseeker=0.9.2
 conda activate circleseeker
 ```
 
@@ -28,6 +28,19 @@ conda env create -f environment.yml
 conda activate circleseeker
 pip install -e .
 ```
+
+### Optional: Install Cresil (preferred inference engine)
+
+Cresil provides the fastest inference workflow. Install it alongside CircleSeeker:
+
+```bash
+git clone https://github.com/visanuwan/cresil.git
+cd cresil
+pip install -e .
+cresil --help   # Verify installation
+```
+
+Cresil requires a minimap2 `.mmi` index of the reference genome. CircleSeeker will create the index automatically when it is missing.
 
 ## Quick Start
 
@@ -80,8 +93,8 @@ CircleSeeker implements a 16-step analysis pipeline:
 10. **read_filter** - Filter confirmed eccDNA reads
 
 ### Inference Phase (Steps 11-13)
-11. **minimap2** - Align filtered reads to reference
-12. **cyrcular_calling** - Detect eccDNA via split-read analysis (FDR=0.05)
+11. **minimap2** - Prepare reference index (generates BAM only when Cyrcular is used)
+12. **ecc_inference** - Detect eccDNA (Cresil preferred, Cyrcular fallback)
 13. **iecc_curator** - Curate inferred eccDNA
 
 ### Integration Phase (Steps 14-16)
@@ -141,7 +154,7 @@ Create a custom configuration file in YAML format:
 # Minimum configuration
 min_ecc_length: 100
 max_ecc_length: 1000000
-fdr_threshold: 0.05
+fdr_threshold: 1.0
 
 # Performance
 threads: 16

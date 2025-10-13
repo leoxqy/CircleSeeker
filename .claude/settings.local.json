@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cloc:*)",
+      "Bash(find:*)",
+      "Bash(awk:*)",
+      "Read(//Users/yaoxinzhang/Desktop/CircleSeeker/**)",
+      "Bash(python3:*)",
+      "Bash(while read f)",
+      "Bash(do echo \"=== $f ===\")",
+      "Bash(done)",
+      "Bash(for:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
