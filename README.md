@@ -4,7 +4,7 @@
 
 # CircleSeeker
 
-[![Version](https://img.shields.io/badge/version-0.9.2-blue.svg)](https://github.com/yaoxinzhang/CircleSeeker)
+[![Version](https://img.shields.io/badge/version-0.9.3-blue.svg)](https://github.com/yaoxinzhang/CircleSeeker)
 [![Python](https://img.shields.io/badge/python-≥3.9-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-GPL--2.0-green.svg)](LICENSE)
 
@@ -15,7 +15,7 @@ Comprehensive detection and characterization of extrachromosomal circular DNA (e
 ### Using Conda (Recommended)
 
 ```bash
-conda create -n circleseeker -c bioconda -c conda-forge circleseeker=0.9.2
+conda create -n circleseeker -c bioconda -c conda-forge circleseeker=0.9.3
 conda activate circleseeker
 ```
 

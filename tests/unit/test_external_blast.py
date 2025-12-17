@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 import pytest
 from unittest.mock import patch, MagicMock
+import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
@@ -11,6 +12,14 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from circleseeker.external.blast import MakeBlastDB, BlastN, BlastRunner
+from circleseeker.external.base import ExternalTool
+from circleseeker.exceptions import ExternalToolError
+
+
+@pytest.fixture(autouse=True)
+def _mock_external_tool_install(monkeypatch):
+    """Skip actual binary detection so tests don't require BLAST to be installed."""
+    monkeypatch.setattr(ExternalTool, "_check_installation", lambda self: None)
 
 
 class TestMakeBlastDB:
@@ -44,7 +53,12 @@ class TestMakeBlastDB:
     @patch('subprocess.run')
     def test_makeblastdb_failure(self, mock_run, tmp_path):
         """Test MakeBlastDB failure handling."""
-        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="Error")
+        mock_run.side_effect = subprocess.CalledProcessError(
+            returncode=1,
+            cmd=["makeblastdb"],
+            output="",
+            stderr="Error"
+        )
 
         fasta_file = tmp_path / "reference.fasta"
         fasta_file.write_text(">seq1\nATCGATCG\n")
@@ -53,7 +67,7 @@ class TestMakeBlastDB:
 
         makeblastdb = MakeBlastDB()
 
-        with pytest.raises(Exception):
+        with pytest.raises(ExternalToolError):
             makeblastdb.build_database(fasta_file, db_prefix, dbtype="nucl")
 
 
@@ -79,7 +93,7 @@ class TestBlastN:
         output_file = tmp_path / "blast_results.tsv"
 
         blastn = BlastN()
-        blastn.run(
+        blastn.run_blast(
             database=db_path,
             query_file=query_file,
             output_file=output_file,
@@ -93,6 +107,9 @@ class TestBlastN:
         assert "blastn" in call_args
         assert "-query" in call_args
         assert "-db" in call_args
+        assert "-soft_masking" in call_args
+        soft_mask_idx = call_args.index("-soft_masking")
+        assert call_args[soft_mask_idx + 1] == "false"
 
 
 class TestBlastRunner:
@@ -100,10 +117,11 @@ class TestBlastRunner:
 
     def test_blast_runner_initialization(self):
         """Test BlastRunner initialization."""
-        runner = BlastRunner(num_threads=4, evalue=1e-5, max_target_seqs=100)
+        runner = BlastRunner(num_threads=4, evalue=1e-5, max_target_seqs=100, soft_masking=True)
         assert runner.num_threads == 4
         assert runner.evalue == 1e-5
         assert runner.max_target_seqs == 100
+        assert runner.soft_masking is True
 
     @patch('circleseeker.external.blast.BlastN')
     def test_blast_runner_run(self, mock_blastn_class, tmp_path):
@@ -127,14 +145,17 @@ class TestBlastRunner:
 
         # Verify BlastN was called
         mock_blastn_class.assert_called_once()
-        mock_blastn.run.assert_called_once()
+        mock_blastn.run_blast.assert_called_once()
+        kwargs = mock_blastn.run_blast.call_args.kwargs
+        assert kwargs["soft_masking"] is False
 
     def test_blast_runner_default_params(self):
         """Test BlastRunner default parameters."""
         runner = BlastRunner()
-        assert runner.num_threads == 1
-        assert runner.evalue == 1e-5
-        assert runner.max_target_seqs == 100
+        assert runner.num_threads == 8
+        assert runner.evalue == "1e-50"
+        assert runner.max_target_seqs == 1000
+        assert runner.soft_masking is False
 
 
 @pytest.fixture

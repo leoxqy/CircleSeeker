@@ -62,9 +62,11 @@ class BlastN(ExternalTool):
         word_size: int = 100,
         perc_identity: float = 99.0,
         outfmt: str = "6 std sstrand",
-        max_target_seqs: int = 1000
+        max_target_seqs: int = 1000,
+        soft_masking: bool = False,
     ) -> None:
         """Run BLAST search."""
+        soft_masking_value = "true" if soft_masking else "false"
         cmd = [
             self.tool_name,
             "-query", str(query_file),
@@ -75,7 +77,8 @@ class BlastN(ExternalTool):
             "-perc_identity", str(perc_identity),
             "-outfmt", outfmt,
             "-max_target_seqs", str(max_target_seqs),
-            "-num_threads", str(self.threads)
+            "-num_threads", str(self.threads),
+            "-soft_masking", soft_masking_value,
         ]
         
         output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -94,14 +97,19 @@ class BlastRunner:
         word_size: int = 100,
         evalue: str = "1e-50",
         perc_identity: float = 99.0,
-        outfmt: str = "6 std sstrand"
+        outfmt: str = "6 std sstrand",
+        max_target_seqs: int = 1000,
+        soft_masking: bool = False,
     ):
         self.makeblastdb = MakeBlastDB(threads=num_threads)
         self.blastn = BlastN(threads=num_threads)
+        self.num_threads = num_threads
         self.word_size = word_size
         self.evalue = evalue
         self.perc_identity = perc_identity
         self.outfmt = outfmt
+        self.max_target_seqs = max_target_seqs
+        self.soft_masking = soft_masking
     
     def run(
         self,
@@ -118,5 +126,7 @@ class BlastRunner:
             evalue=self.evalue,
             word_size=self.word_size,
             perc_identity=self.perc_identity,
-            outfmt=self.outfmt
+            max_target_seqs=self.max_target_seqs,
+            outfmt=self.outfmt,
+            soft_masking=self.soft_masking,
         )

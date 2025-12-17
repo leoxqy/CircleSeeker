@@ -5,6 +5,19 @@ All notable changes to CircleSeeker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] - 2025-12-16
+
+### Changed
+- **BLAST nucleotide alignment**: Lowercase (soft-masked) regions are no longer suppressed during seeding/search. Added `-soft_masking false` to the BLAST runner so confirmed candidates can align even when inputs are soft-masked.
+- Updated version metadata and README badges to 0.9.3.
+
+### Technical Details
+- **Files Modified**:
+  - `src/circleseeker/external/blast.py`: Added explicit `-soft_masking false` option to `blastn` invocation via `BlastRunner`.
+  - `src/circleseeker/__version__.py`, `pyproject.toml`, `README.md`: Bumped version to 0.9.3.
+
+---
+
 ## [0.9.2] - 2025-01-11
 
 ### Fixed
@@ -58,6 +71,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## Upgrade Instructions
+
+### From 0.9.2 to 0.9.3
+
+No breaking changes. Update as usual:
+
+```bash
+# If installed via conda
+conda update circleseeker
+
+# If installed from source
+cd CircleSeeker
+git pull
+pip install -e .
+```
+
+All BLAST runs now honor lowercase bases (soft masked regions) instead of skipping them.
 
 ### From 0.9.1 to 0.9.2
 

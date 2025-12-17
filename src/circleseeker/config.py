@@ -52,7 +52,10 @@ class ToolConfig:
         "k": 16, "w": 1, "p": 100, "P": 2000000, "e": 0.1, "f": 2
     })
     blast: Dict[str, Any] = field(default_factory=lambda: {
-        "word_size": 100, "evalue": "1e-50", "perc_identity": 99.0
+        "word_size": 100,
+        "evalue": "1e-50",
+        "perc_identity": 99.0,
+        "soft_masking": False,
     })
     minimap2: Dict[str, Any] = field(default_factory=lambda: {
         "preset": "map-hifi", "additional_args": ""
