@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **BLAST nucleotide alignment**: Lowercase (soft-masked) regions are no longer suppressed during seeding/search. Added `-soft_masking false` to the BLAST runner so confirmed candidates can align even when inputs are soft-masked.
+- **Reports**: HTML/TXT summary reports now show the actual CircleSeeker version (instead of the hardcoded `v2.1.0` placeholder).
+- **Packaging & docs**: Updated the conda recipe metadata and both CN/EN pipeline/CLI guides to reference CircleSeeker 0.9.3.
 - Updated version metadata and README badges to 0.9.3.
 
 ### Technical Details

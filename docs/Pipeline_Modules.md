@@ -1,6 +1,6 @@
-# CircleSeeker Pipeline 模块说明（v0.9.1）
+# CircleSeeker Pipeline 模块说明（v0.9.3）
 
-本文件概述 CircleSeeker 0.9.1 的 16 个管线步骤、输入输出关系以及关键实现要点，帮助使用者理解整体流程与模块职责。
+本文件概述 CircleSeeker 0.9.3 的 16 个管线步骤、输入输出关系以及关键实现要点，帮助使用者理解整体流程与模块职责。
 
 ---
 

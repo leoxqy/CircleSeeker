@@ -1,6 +1,6 @@
-# CircleSeeker CLI 使用手册（v0.9.1）
+# CircleSeeker CLI 使用手册（v0.9.3）
 
-本手册针对 CircleSeeker 0.9.1 的命令行界面，涵盖常用参数、调试选项、运行时行为与输出结构。默认安装后可通过 `circleseeker` 或 `CircleSeeker` 两个入口调用。
+本手册针对 CircleSeeker 0.9.3 的命令行界面，涵盖常用参数、调试选项、运行时行为与输出结构。默认安装后可通过 `circleseeker` 或 `CircleSeeker` 两个入口调用。
 
 ---
 

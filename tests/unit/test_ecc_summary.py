@@ -14,6 +14,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from circleseeker.modules.ecc_summary import EccSummary
+from circleseeker import __version__
 
 
 class TestEccSummary:
@@ -32,7 +33,7 @@ class TestEccSummary:
 
         assert summary.sample_name == sample_name
         assert summary.output_dir == output_dir
-        assert summary.version == "v2.1.0"
+        assert summary.version == __version__
         assert isinstance(summary.read_stats, dict)
         assert isinstance(summary.ctcr_stats, dict)
         assert isinstance(summary.eccdna_stats, dict)

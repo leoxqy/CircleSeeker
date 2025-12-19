@@ -15,6 +15,7 @@ from typing import Dict, Optional, Tuple, Union
 import argparse
 import logging
 from circleseeker.utils.logging import get_logger
+from circleseeker import __version__
 import sys
 
 
@@ -38,7 +39,7 @@ class EccSummary:
         self.ctcr_stats = {}
         self.eccdna_stats = {}
         self.overlap_stats = {}
-        self.version = "v2.1.0"
+        self.version = __version__
 
         # Internal bookkeeping for compatibility methods
         self._original_fasta: Optional[Path] = None

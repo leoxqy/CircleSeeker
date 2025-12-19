@@ -1,4 +1,4 @@
-# CircleSeeker Pipeline Modules (v0.9.1)
+# CircleSeeker Pipeline Modules (v0.9.3)
 
 This document summarizes the 16-step CircleSeeker pipeline for English-speaking users.
 

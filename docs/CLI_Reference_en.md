@@ -1,6 +1,6 @@
-# CircleSeeker CLI Reference (v0.9.1)
+# CircleSeeker CLI Reference (v0.9.3)
 
-This document describes the CircleSeeker 0.9.1 command-line interface for English-speaking users.
+This document describes the CircleSeeker 0.9.3 command-line interface for English-speaking users.
 
 ---
 
