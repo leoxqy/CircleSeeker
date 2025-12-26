@@ -76,7 +76,7 @@ about:
     Key features:
     - Dual-engine support: Cresil (preferred) and Cyrcular (fallback) with intelligent auto-selection
     - Hybrid detection strategy combining tandem repeat detection with Split-Read assembly
-    - Comprehensive eccDNA classification (UeccDNA, MeccDNA, CeccDNA, MCeccDNA, XeccDNA)
+    - Comprehensive eccDNA classification (UeccDNA, MeccDNA, CeccDNA, XeccDNA)
     - Automated pipeline with checkpoint and resumption capabilities
     - Detailed HTML reports and comprehensive output formats
     - Modular architecture with 16 processing steps
