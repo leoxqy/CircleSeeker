@@ -1,0 +1,222 @@
+"""Configuration management for CircleSeeker."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
+from typing import Optional, Dict, Any
+import yaml
+from circleseeker.exceptions import ConfigurationError
+
+
+@dataclass
+class RuntimeConfig:
+    """Runtime configuration."""
+
+    log_level: str = "WARNING"
+    log_file: Optional[Path] = None
+    tmp_dir: Path = Path(".tmp_work")
+    keep_tmp: bool = False
+    # Policy when config changes vs. checkpoint: 'continue' | 'reset' | 'fail'
+    checkpoint_policy: str = "continue"
+    # Enable tqdm progress where available
+    enable_progress: bool = True
+
+
+@dataclass
+class PerformanceConfig:
+    """Performance-related configuration."""
+
+    threads: int = 8
+
+
+@dataclass
+class ToolConfig:
+    """External tool configuration."""
+
+    tidehunter: Dict[str, Any] = field(
+        default_factory=lambda: {"k": 16, "w": 1, "p": 100, "P": 2000000, "e": 0.1, "f": 2}
+    )
+    blast: Dict[str, Any] = field(
+        default_factory=lambda: {
+            "word_size": 100,
+            "evalue": "1e-50",
+            "perc_identity": 99.0,
+            "soft_masking": False,
+        }
+    )
+    minimap2: Dict[str, Any] = field(
+        default_factory=lambda: {"preset": "map-hifi", "additional_args": ""}
+    )
+    samtools: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class Config:
+    """Main configuration class."""
+
+    # Required parameters (set via CLI or config file)
+    input_file: Optional[Path] = None
+    reference: Optional[Path] = None
+    output_dir: Path = Path("circleseeker_output")
+    prefix: str = "sample"
+
+    # Feature flags
+    enable_xecc: bool = True
+
+    # Step skip flags (canonical new names provided as properties below)
+    skip_make_db: bool = False  # alias of skip_make_blastdb
+    skip_tidehunter: bool = False
+    skip_carousel: bool = False  # alias of skip_tandem_to_ring
+    skip_blast: bool = False  # alias of skip_run_blast
+    skip_gatekeeper: bool = False  # alias of skip_um_classify
+    skip_organize: bool = False
+
+    # Sub-configurations
+    runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+    performance: PerformanceConfig = field(default_factory=PerformanceConfig)
+    tools: ToolConfig = field(default_factory=ToolConfig)
+
+    # Convenience properties
+    @property
+    def threads(self) -> int:
+        return self.performance.threads
+
+    @threads.setter
+    def threads(self, value: int):
+        self.performance.threads = value
+
+    @property
+    def keep_tmp(self) -> bool:
+        return self.runtime.keep_tmp
+
+    @keep_tmp.setter
+    def keep_tmp(self, value: bool):
+        self.runtime.keep_tmp = value
+
+    def validate(self) -> None:
+        """Validate configuration."""
+        if not self.input_file:
+            raise ConfigurationError("Input file is required")
+        if not self.reference:
+            raise ConfigurationError("Reference genome is required")
+        if not self.input_file.exists():
+            raise ConfigurationError(f"Input file not found: {self.input_file}")
+        if not self.reference.exists():
+            raise ConfigurationError(f"Reference file not found: {self.reference}")
+
+        # Validate numeric ranges
+        if self.performance.threads < 1:
+            raise ConfigurationError("Threads must be >= 1")
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+
+        def path_to_str(obj):
+            if isinstance(obj, Path):
+                return str(obj)
+            elif isinstance(obj, dict):
+                return {k: path_to_str(v) for k, v in obj.items()}
+            elif isinstance(obj, (list, tuple)):
+                return [path_to_str(item) for item in obj]
+            return obj
+
+        return path_to_str(asdict(self))
+
+    # ---- New canonical skip flags via properties (backward-compatible) ----
+    @property
+    def skip_make_blastdb(self) -> bool:
+        return self.skip_make_db
+
+    @skip_make_blastdb.setter
+    def skip_make_blastdb(self, value: bool) -> None:
+        self.skip_make_db = value
+
+    @property
+    def skip_tandem_to_ring(self) -> bool:
+        return self.skip_carousel
+
+    @skip_tandem_to_ring.setter
+    def skip_tandem_to_ring(self, value: bool) -> None:
+        self.skip_carousel = value
+
+    @property
+    def skip_run_blast(self) -> bool:
+        return self.skip_blast
+
+    @skip_run_blast.setter
+    def skip_run_blast(self, value: bool) -> None:
+        self.skip_blast = value
+
+    @property
+    def skip_um_classify(self) -> bool:
+        return self.skip_gatekeeper
+
+    @skip_um_classify.setter
+    def skip_um_classify(self, value: bool) -> None:
+        self.skip_gatekeeper = value
+
+
+def load_config(path: Path) -> Config:
+    """Load configuration from YAML file."""
+    with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    def build_config(data: Dict[str, Any]) -> Config:
+        cfg = Config()
+
+        # Direct attributes
+        if "input_file" in data and data["input_file"] is not None:
+            cfg.input_file = Path(data["input_file"])
+        if "reference" in data and data["reference"] is not None:
+            cfg.reference = Path(data["reference"])
+        if "output_dir" in data and data["output_dir"] is not None:
+            cfg.output_dir = Path(data["output_dir"])
+        if "prefix" in data:
+            cfg.prefix = data["prefix"]
+        if "enable_xecc" in data:
+            cfg.enable_xecc = data["enable_xecc"]
+
+        # Skip flags
+        skip_flags = [
+            "skip_make_db",
+            "skip_tidehunter",
+            "skip_carousel",
+            "skip_blast",
+            "skip_gatekeeper",
+            "skip_organize",
+        ]
+        for flag in skip_flags:
+            if flag in data:
+                setattr(cfg, flag, data[flag])
+
+        # Runtime config
+        if "runtime" in data:
+            for key, value in data["runtime"].items():
+                if hasattr(cfg.runtime, key):
+                    if key in ["log_file", "tmp_dir"] and value:
+                        value = Path(value)
+                    setattr(cfg.runtime, key, value)
+
+        # Performance config
+        if "performance" in data:
+            for key, value in data["performance"].items():
+                if hasattr(cfg.performance, key):
+                    setattr(cfg.performance, key, value)
+
+        # Tool config
+        if "tools" in data:
+            for tool, params in data["tools"].items():
+                if hasattr(cfg.tools, tool):
+                    setattr(cfg.tools, tool, params)
+
+        return cfg
+
+    return build_config(data)
+
+
+def save_config(cfg: Config, path: Path) -> None:
+    """Save configuration to YAML file."""
+    data = cfg.to_dict()
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False)

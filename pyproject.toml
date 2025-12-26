@@ -1,0 +1,135 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "circleseeker"
+version = "0.9.5"
+description = "Comprehensive eccDNA detection from PacBio HiFi sequencing data"
+readme = "README.md"
+authors = [
+    {name = "Yaoxin Zhang", email = "yxzhang@ncgr.ac.cn"},
+    {name = "Leo Xinqi Yu", email = "leoxqy@hotmail.com"}
+]
+maintainers = [
+    {name = "Yaoxin Zhang", email = "yxzhang@ncgr.ac.cn"}
+]
+license = "GPL-2.0-only"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X",
+]
+requires-python = ">=3.9"
+dependencies = [
+    "click>=8.1.0",
+    "pandas>=2.0.0",
+    "numpy>=1.23.0",
+    "biopython>=1.81",
+    "pysam>=0.22.0",
+    "pyyaml>=6.0",
+    "networkx>=3.0",
+    "packaging>=23.0",
+    "intervaltree>=3.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=22.0.0",
+    "flake8>=5.0.0",
+    "mypy>=0.990",
+    "pre-commit>=3.0.0",
+]
+docs = [
+    "sphinx>=5.0.0",
+    "sphinx-rtd-theme>=1.0.0",
+    "sphinx-click>=4.0.0",
+]
+
+[project.scripts]
+circleseeker = "circleseeker.cli:main"
+CircleSeeker = "circleseeker.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/yaoxinzhang/CircleSeeker"
+Documentation = "https://github.com/yaoxinzhang/CircleSeeker#readme"
+Repository = "https://github.com/yaoxinzhang/CircleSeeker.git"
+"Bug Tracker" = "https://github.com/yaoxinzhang/CircleSeeker/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["circleseeker*"]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+circleseeker = [
+    "templates/*.html",
+    "templates/*.css",
+    "resources/*.yaml",
+    "resources/*.json",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py39", "py310", "py311"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers"
+pythonpath = ["src"]
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+
+[tool.coverage.run]
+source = ["src/circleseeker"]
+omit = ["*/tests/*", "*/__init__.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]

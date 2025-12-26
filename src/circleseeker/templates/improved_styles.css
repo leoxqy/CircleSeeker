@@ -1,0 +1,268 @@
+/* Improved report styles aligned with the HeLa final reference layout */
+
+body {
+    font-family: Arial, 'Helvetica Neue', sans-serif;
+    background: #fafafa;
+    min-height: 100vh;
+    padding: 30px 20px;
+    line-height: 1.6;
+    color: #333333;
+    font-size: 14px;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    background: #ffffff;
+    border: 1px solid #e0e0e0;
+}
+
+h1 {
+    background: #f8f9fa;
+    color: #2c3e50;
+    padding: 30px;
+    text-align: center;
+    font-size: 24px;
+    font-weight: bold;
+    border-bottom: 2px solid #dee2e6;
+    margin-bottom: 30px;
+}
+
+h2 {
+    color: #34495e;
+    padding: 15px 20px;
+    font-size: 18px;
+    border: 1px solid #dee2e6;
+    margin: 30px 40px 25px 40px;
+    font-weight: bold;
+    background: #f8f9fa;
+    border-radius: 5px;
+}
+
+h2:first-of-type {
+    margin-top: 0;
+}
+
+h3 {
+    color: #495057;
+    font-size: 14px;
+    margin-bottom: 10px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+h4 {
+    color: #34495e;
+    font-size: 16px;
+    margin-bottom: 15px;
+    font-weight: bold;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+    margin: 0 40px 30px 40px;
+}
+
+.stat-card {
+    background: #fafbfc;
+    padding: 20px;
+    border: 1px solid #dee2e6;
+    text-align: center;
+}
+
+.stat-card h3 {
+    color: #6c757d;
+    font-size: 12px;
+    margin-bottom: 10px;
+    letter-spacing: 0.5px;
+}
+
+.stat-value {
+    font-size: 28px;
+    font-weight: bold;
+    margin: 8px 0;
+}
+
+.stat-percentage {
+    color: #6c757d;
+    font-size: 12px;
+}
+
+table {
+    width: calc(100% - 80px);
+    margin: 20px 40px;
+    border-collapse: collapse;
+    border: 1px solid #dee2e6;
+    font-size: 14px;
+    background: #ffffff;
+}
+
+thead {
+    background: #f8f9fa;
+}
+
+th {
+    padding: 12px 15px;
+    text-align: center;
+    color: #495057;
+    font-weight: bold;
+    font-size: 14px;
+    border-bottom: 2px solid #dee2e6;
+}
+
+td {
+    padding: 12px 15px;
+    text-align: center;
+    color: #333333;
+    border-bottom: 1px solid #eef0f2;
+}
+
+tbody tr:nth-child(even) {
+    background: #f9f9f9;
+}
+
+.number {
+    text-align: center;
+}
+
+.note-box {
+    margin: 0 40px 20px 40px;
+    background: #fff9e6;
+    border-left: 4px solid #f4c542;
+    border: 1px solid #f2d98b;
+    padding: 15px;
+    font-size: 13px;
+    color: #6c5e36;
+}
+
+.note-box sup {
+    font-size: 10px;
+}
+
+.inference-summary {
+    margin: 0 40px 30px 40px;
+    background: #eef5ff;
+    border: 1px solid #d0e1ff;
+    padding: 20px;
+    border-radius: 6px;
+}
+
+.inference-summary h4 {
+    margin-bottom: 20px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.inference-details {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.inference-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+}
+
+.inference-item strong {
+    color: #495057;
+}
+
+.inference-count {
+    color: #2c3e50;
+    font-weight: bold;
+    font-size: 18px;
+    margin-right: 6px;
+}
+
+.inference-note {
+    color: #6c757d;
+    font-size: 12px;
+}
+
+.footer {
+    background: #f8f9fa;
+    color: #495057;
+    text-align: center;
+    padding: 20px;
+    border-top: 2px solid #dee2e6;
+    font-size: 13px;
+    margin-top: 40px;
+}
+
+.footer p {
+    margin: 3px 0;
+}
+
+sup {
+    color: #dc3545;
+    font-weight: bold;
+    font-size: 12px;
+}
+
+.color-primary {
+    color: #5a6c7d;
+}
+
+.color-danger {
+    color: #a94442;
+}
+
+.color-secondary {
+    color: #777777;
+}
+
+@media (max-width: 768px) {
+    body {
+        font-size: 13px;
+        padding: 20px 10px;
+    }
+
+    h1 {
+        font-size: 20px;
+        padding: 20px;
+    }
+
+    h2 {
+        font-size: 16px;
+        margin: 20px;
+        padding: 15px 20px 10px 20px;
+    }
+
+    .stats-grid {
+        margin: 0 20px 20px 20px;
+    }
+
+    table {
+        width: calc(100% - 40px);
+        margin: 20px;
+        font-size: 13px;
+    }
+
+    .note-box,
+    .inference-summary {
+        margin: 20px;
+    }
+
+    .inference-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+}
+
+@media print {
+    body {
+        background: #ffffff;
+        font-size: 12px;
+        padding: 0;
+    }
+
+    .container {
+        border: none;
+    }
+}

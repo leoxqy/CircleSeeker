@@ -1,17 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cloc:*)",
-      "Bash(find:*)",
-      "Bash(awk:*)",
-      "Read(//Users/yaoxinzhang/Desktop/CircleSeeker/**)",
-      "Bash(python3:*)",
-      "Bash(while read f)",
-      "Bash(do echo \"=== $f ===\")",
-      "Bash(done)",
-      "Bash(for:*)"
-    ],
-    "deny": [],
-    "ask": []
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nRelease CircleSeeker 0.9.5\n\n- Add inference engine display at startup\n- Refactor CLI code with _execute_pipeline\\(\\) function\n- Fix --show-steps side effect \\(no longer creates directories\\)\n- Fix bare except clauses and empty f-strings\n- Fix TideHunter case sensitivity detection\n- Fix config file parameter handling\n- Improve dependency checker with min_version support\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+    ]
   }
 }

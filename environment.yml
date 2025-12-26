@@ -1,0 +1,103 @@
+name: circleseeker
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+
+dependencies:
+  # ==================== Python Interpreter ====================
+  - python>=3.9
+  - pip>=23.0
+
+  # ==================== Core Python Packages ====================
+  - numpy>=1.23.0
+  - pandas>=2.0.0
+  - scipy>=1.10.0
+  - tqdm>=4.66.0
+
+  # ==================== Bioinformatics Python Packages ====================
+  - biopython>=1.81
+  - pysam>=0.22.0
+  - intervaltree>=3.1.0
+  - pybedtools>=0.9.0
+  - mappy>=2.26
+
+  # ==================== Data Processing & Utilities ====================
+  - click>=8.1.0
+  - pyyaml>=6.0
+  - networkx>=3.0
+  - packaging>=23.0
+
+  # ==================== Visualization (Optional) ====================
+  - matplotlib>=3.7.0
+  - python-graphviz>=0.20.0
+
+  # ==================== Bioinformatics Tools - Core ====================
+  # Sequence alignment and mapping
+  - minimap2>=2.24
+  - samtools>=1.17
+  - bcftools>=1.17
+
+  # Read processing and filtering
+  - tidehunter>=1.4.0
+  - nanofilt>=2.8.0
+
+  # Sequence analysis
+  - blast>=2.12.0
+  - cd-hit>=4.8.1
+
+  # BED/BAM utilities
+  - bedtools>=2.31.0
+  - tabix>=1.11
+  - mosdepth>=0.3.0
+
+  # ==================== Circular DNA Detection Tools ====================
+  # Cyrcular (always available as fallback)
+  - cyrcular
+  - varlociraptor>=5.0.0
+
+  # Cresil (preferred tool, install manually from GitHub):
+  #   git clone https://github.com/visanuwan/cresil.git
+  #   cd cresil && pip install -e .
+
+  # ==================== Additional Utilities ====================
+  - bioawk>=1.0
+  - parallel>=20231122
+  - medaka>=1.11.0
+
+  # ==================== Development Tools (Optional) ====================
+  # Uncomment if needed for development
+  # - ipython
+  # - jupyter
+  # - pytest>=7.0
+  # - pytest-cov>=4.0
+  # - black>=22.0
+  # - flake8>=5.0
+
+# ==================== Installation Instructions ====================
+#
+# 1. Create environment:
+#    conda env create -f environment.yml
+#
+# 2. Activate environment:
+#    conda activate circleseeker
+#
+# 3. Install CircleSeeker:
+#    pip install -e .
+#
+# 4. Install Cresil (recommended, optional):
+#    git clone https://github.com/visanuwan/cresil.git
+#    cd cresil && pip install -e .
+#
+# 5. Verify installation:
+#    circleseeker --version
+#    cresil --help      # If Cresil is installed
+#    cyrcular --version # Always available
+#
+# ==================== Notes ====================
+#
+# - This environment includes ALL dependencies for both Cresil and Cyrcular
+# - Cresil is the preferred tool (faster, simpler workflow)
+# - Cyrcular is always available as fallback
+# - CircleSeeker will auto-detect which tool is available
+# - Install Cresil manually after creating the environment

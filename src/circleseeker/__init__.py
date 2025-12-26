@@ -1,0 +1,39 @@
+"""CircleSeeker: Comprehensive eccDNA detection from HiFi sequencing data.
+
+This package provides tools for detecting extrachromosomal circular DNA (eccDNA)
+from PacBio HiFi long-read sequencing data using a multi-round iterative analysis approach.
+"""
+
+from circleseeker.__version__ import (
+    __version__,
+    __author__,
+    __email__,
+    __license__,
+    __description__,
+)
+
+# Import main classes when needed
+try:
+    from circleseeker.core.pipeline import Pipeline  # noqa: F401
+    from circleseeker.config import Config  # noqa: F401
+    from circleseeker.exceptions import CircleSeekerError  # noqa: F401
+
+    __all__ = [
+        "__version__",
+        "__author__",
+        "__email__",
+        "__license__",
+        "__description__",
+        "Pipeline",
+        "Config",
+        "CircleSeekerError",
+    ]
+except ImportError:
+    # Allow partial imports during development
+    __all__ = [
+        "__version__",
+        "__author__",
+        "__email__",
+        "__license__",
+        "__description__",
+    ]

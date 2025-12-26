@@ -1,0 +1,232 @@
+# Changelog
+
+All notable changes to CircleSeeker will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.9.5] - 2025-12-26
+
+### Added
+- **Inference engine display**: Shows which inference tool (Cresil/Cyrcular) will be used at startup
+  - Displays in configuration summary before pipeline execution
+  - Shows warning if only Cyrcular is available (Cresil recommended)
+
+### Fixed
+- **CLI code refactoring**: Extracted common logic to `_execute_pipeline()` function
+  - Eliminates code duplication between `cli()` and `run()` commands
+  - Reduces maintenance burden and potential behavior divergence
+- **`--show-steps` side effect**: No longer creates output directories when only viewing steps
+  - Uses lightweight `_show_pipeline_steps()` that reads class-level STEPS directly
+- **Bare except clauses**: Replaced with specific exception types
+  - `display.py`: 2 occurrences fixed
+  - `ecc_unify.py`: 3 occurrences fixed
+  - `external_tools.py`: 4 occurrences fixed
+- **Empty f-strings**: Removed 14 unnecessary f-string prefixes across modules
+- **Trailing whitespace**: Cleaned up 4 files
+- **`import *` usage**: Replaced with explicit imports in `modules/tools/__init__.py`
+- **Duplicate import**: Removed redundant `import pandas` in `column_standards.py`
+- **TideHunter case sensitivity**: Now correctly detects both `TideHunter` and `tidehunter` executables
+  - Bioconda may install the tool with different name casing on different systems
+  - Added `_find_tidehunter_executable()` helper function
+  - Updated dependency checker and validators to check alternative names
+- **Project URLs**: Fixed GitHub repository URLs in `pyproject.toml` and `conda-recipe/meta.yaml`
+- **Config file parameter handling**: Now properly reads all parameters from config files
+  - CLI arguments take precedence over config values
+  - Config values take precedence over hardcoded defaults
+  - Fixed: output_dir, prefix, threads now correctly use config file values when not specified via CLI
+  - Added `cfg.validate()` call before dependency check (fail fast on missing files)
+  - `--keep-tmp/--no-keep-tmp` flag pair now explicitly overrides config file `keep_tmp` setting
+  - Error message clarifies config file usage
+- **Dependency checker improvements**:
+  - Added min_version checking with version comparison
+  - Added TideHunter to dependency list with alt_names support
+  - bcftools/varlociraptor now conditionally required when only Cyrcular is available (no Cresil)
+  - Added cd-hit-est to `validate --full` check
+  - Version warnings displayed but don't block execution
+- **Removed dead code**: `--skip-organize` flag removed from `run` subcommand (was never wired up)
+- **IeccCurator export fix**: Replaced non-existent class with actual functions
+  - Exports: `curate_ecc_tables`, `generate_fasta_sequences`, `write_curated_tables`, etc.
+  - Fixed import paths in `modules/tools/__init__.py`
+- **Removed duplicate config template**: Consolidated to single source in `resources/__init__.py`
+
+### Changed
+- **Version metadata**: Updated to 0.9.5 across all files including `conda-recipe/meta.yaml`
+
+## [0.9.4] - 2025-12-25
+
+### Added
+- **Chimeric eccDNA Overlap Detection**: New segment-wise reciprocal overlap method for detecting redundant chimeric eccDNA
+  - Replaces exact string matching with flexible segment-by-segment comparison
+  - Uses 99% reciprocal overlap threshold with ±10bp coordinate tolerance
+  - Significantly reduces false negatives caused by minor coordinate differences (2-10bp)
+  - Backward compatible: both 'exact' and 'overlap' methods available via `method` parameter
+
+- **Pre-flight Dependency Checker**: Comprehensive tool dependency checking at startup
+  - Checks all required tools (minimap2, samtools, blastn, makeblastdb, cd-hit-est) before pipeline execution
+  - Verifies at least one inference tool (cresil or cyrcular) is available
+  - Clear, actionable error messages with installation hints
+  - Prevents wasting computation time on incomplete installations
+  - Distinguishes between required and optional dependencies
+
+### Fixed
+- **`verbose` parameter**: Fixed always-on verbose output in ecc_packager module (19 occurrences)
+- **ResultKeys constant mismatch**: Fixed AttributeError when overview table is missing (TSV vs CSV naming)
+
+### Removed
+- **`--skip-report` flag**: Removed from CLI and pipeline (reports are always generated and packaged)
+
+### Changed
+- **BLAST soft masking**: Disabled soft masking in BLAST alignment (inherited from 0.9.3)
+  - Added `-soft_masking false` to BLAST runner
+  - Ensures confirmed candidates can align even when inputs are soft-masked
+
+- **README Configuration**: Updated configuration examples to match actual implementation
+  - Removed undocumented parameters (min_ecc_length, fdr_threshold, etc.)
+  - Added correct tool-specific configuration structure
+  - Now reflects actual config.py structure
+
+### Technical Details
+- **Files Modified**:
+  - `src/circleseeker/modules/ecc_unify.py`:
+    - Added `method` parameter to `find_redundant_chimeric()` (default: 'overlap')
+    - New function: `find_redundant_chimeric_overlap()` - segment-wise matching
+    - New function: `find_redundant_chimeric_exact()` - legacy exact matching
+    - New helper functions: `_segments_match()`, `reciprocal_overlap_ok()`
+  - `src/circleseeker/external/blast.py`:
+    - Added `soft_masking` parameter to `BlastN.run_blast()` (default: False)
+    - Added `soft_masking` to `BlastRunner.__init__()` and `BlastRunner.run()`
+  - `src/circleseeker/config.py`:
+    - Added `soft_masking: False` to BLAST configuration
+  - `tests/unit/test_ecc_unify.py`:
+    - New tests for chimeric overlap detection edge cases
+  - Version files: `src/circleseeker/__version__.py`, `pyproject.toml`
+
+- **Impact**:
+  - **Reduced false negative rate**: Expected to drop from ~20% to ~5% for chimeric eccDNA
+  - **Better biological accuracy**: Tolerates natural coordinate variations from different tools
+  - **Backward compatible**: Old method still available via `method='exact'`
+
+### Example
+
+Before (0.9.3 and earlier):
+```python
+# Two biologically identical chimeric eccDNA with 5bp coordinate difference
+Cecc1: chr1:1000-2000;chr2:3000-4000  # Confirmed
+Cecc2: chr1:1000-2000;chr2:3005-4005  # Inferred (5bp shift)
+# Result: Cecc2 NOT detected as redundant (false negative)
+```
+
+After (0.9.4):
+```python
+# Same data with new overlap method
+# Result: Cecc2 correctly detected as redundant ✅
+# Reason: 99% overlap + within 10bp tolerance
+```
+
+---
+
+## [0.9.3] - 2025-12-16
+
+### Changed
+- **BLAST nucleotide alignment**: Lowercase (soft-masked) regions are no longer suppressed during seeding/search. Added `-soft_masking false` to the BLAST runner so confirmed candidates can align even when inputs are soft-masked.
+- Updated version metadata and README badges to 0.9.3.
+
+### Technical Details
+- **Files Modified**:
+  - `src/circleseeker/external/blast.py`: Added explicit `-soft_masking false` option to `blastn` invocation via `BlastRunner`.
+  - `src/circleseeker/__version__.py`, `pyproject.toml`, `README.md`: Bumped version to 0.9.3.
+
+---
+
+## [0.9.2] - 2025-01-11
+
+### Fixed
+- **Critical Bug Fix**: Fixed `read_filter` module to correctly handle semicolon-separated read IDs in core CSV files
+  - Previously, multiple read IDs separated by semicolons were treated as a single ID
+  - Now properly splits and processes each individual read ID
+  - This ensures all reads from CD-HIT clusters are correctly filtered
+
+- **Cecc Filtering Logic**: Fixed segment count filtering in `cecc_build` module
+  - Changed from `len(g) <= min_segments` to `len(g) < min_segments`
+  - Now correctly keeps eccDNA with ≥2 segments (previously required ≥3)
+  - Aligns with Cecc definition: complex eccDNA must have at least 2 segments
+
+### Added
+- Added `logging` import to `read_filter.py` for proper type hints
+- Enhanced documentation with inline comments explaining filtering logic
+
+### Changed
+- Improved docstring for `min_segments` parameter to be more explicit
+- Updated version badge and installation instructions in README.md
+
+### Technical Details
+- **Files Modified**:
+  - `src/circleseeker/modules/read_filter.py`: Lines 19, 113-117, 146, 216
+  - `src/circleseeker/modules/cecc_build.py`: Lines 290, 502
+  - `src/circleseeker/__version__.py`: Version updated to 0.9.2
+  - `pyproject.toml`: Version updated to 0.9.2
+  - `README.md`: Version badge and conda installation command
+
+- **Impact**:
+  - More accurate read filtering (no false negatives from clustered reads)
+  - Correct Cecc classification (no false negatives from 2-segment eccDNA)
+  - Better alignment with biological definitions of eccDNA types
+
+## [0.9.1] - 2025-01-10
+
+### Added
+- Initial public release
+- Comprehensive 16-step eccDNA detection pipeline
+- Support for dual inference engines (Cresil/Cyrcular)
+- HTML report generation
+- Checkpoint and resume functionality
+
+### Features
+- Detection of Unique, Multiple, and Complex eccDNA types
+- Integration of confirmed and inferred eccDNA
+- Comprehensive output formats (CSV, BED, BEDPE, FASTA)
+- Extensive test coverage (420+ unit tests)
+- Detailed documentation
+
+---
+
+## Upgrade Instructions
+
+### From 0.9.2/0.9.3 to 0.9.4
+
+No breaking changes. The new overlap detection method is automatically enabled by default.
+
+```bash
+# If installed via conda
+conda activate circleseeker
+pip install --upgrade circleseeker
+
+# Or reinstall from source
+cd CircleSeeker
+pip install -e .
+```
+
+### Configuration
+
+The new overlap method is enabled by default. To use the legacy exact matching:
+
+```python
+# In your code (if using CircleSeeker as a library)
+from circleseeker.modules.ecc_unify import find_redundant_chimeric
+
+redundant_ids = find_redundant_chimeric(
+    inferred_df,
+    confirmed_df,
+    method='exact'  # Use legacy method
+)
+```
+
+---
+
+## Versioning
+
+CircleSeeker follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
+- **MAJOR** version for incompatible API changes
+- **MINOR** version for backward-compatible functionality additions
+- **PATCH** version for backward-compatible bug fixes
