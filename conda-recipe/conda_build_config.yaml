@@ -1,6 +1,0 @@
-# Conda build configuration for CircleSeeker
-# Explicitly set numpy version to suppress warning
-# Note: This is a noarch package, so numpy version doesn't affect the build
-
-numpy:
-  - 1.26   # Set to 1.26 to match conda-build's default and suppress warning
