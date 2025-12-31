@@ -27,6 +27,11 @@ def parse_cresil_region(region_str: str) -> tuple[str, int, int, str]:
         >>> parse_cresil_region("chr2:47242017-47243061_-")
         ('chr2', 47242017, 47243061, '-')
     """
+    if not isinstance(region_str, str) or not region_str.strip():
+        raise ValueError(f"Invalid Cresil region: {region_str}")
+
+    region_str = region_str.strip()
+
     # Split strand
     if region_str.endswith("_+") or region_str.endswith("_-"):
         region, strand = region_str.rsplit("_", 1)
@@ -35,16 +40,32 @@ def parse_cresil_region(region_str: str) -> tuple[str, int, int, str]:
         strand = "+"  # Default to positive strand
 
     # Parse chr:start-end
-    chrom, coords = region.split(":")
-    start_str, end_str = coords.split("-")
-    start, end = int(start_str), int(end_str)
+    if ":" not in region:
+        raise ValueError(f"Invalid Cresil region (missing ':'): {region_str}")
+    chrom, coords = region.split(":", 1)
+    if not chrom:
+        raise ValueError(f"Invalid Cresil region (empty chromosome): {region_str}")
+    if "-" not in coords:
+        raise ValueError(f"Invalid Cresil region (missing '-'): {region_str}")
+    start_str, end_str = coords.split("-", 1)
+    try:
+        start = int(start_str)
+        end = int(end_str)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid Cresil region coordinates: {region_str}") from exc
 
     return chrom, start, end, strand
 
 
 def parse_cresil_regions(region_str: str) -> list[tuple[str, int, int, str]]:
     """Parse Cresil merge_region field that may contain multiple segments."""
-    parts = [part.strip() for part in re.split(r"[;,]+|\s+", region_str) if part.strip()]
+    if pd.isna(region_str):
+        raise ValueError(f"Unable to parse Cresil region: {region_str}")
+    region_str = str(region_str).strip()
+    if not region_str:
+        raise ValueError(f"Unable to parse Cresil region: {region_str}")
+
+    parts = [part.strip() for part in re.split(r"[;,|]+|\s+", region_str) if part.strip()]
     if not parts:
         raise ValueError(f"Unable to parse Cresil region: {region_str}")
     return [parse_cresil_region(part) for part in parts]
@@ -81,18 +102,35 @@ def convert_cresil_to_cyrcular_format(cresil_file: Path | str) -> pd.DataFrame:
     # Convert to Cyrcular format
     converted_rows = []
 
-    for _, row in df.iterrows():
+    for idx, row in df.iterrows():
         region_str = row["merge_region"]
 
         # Parse region(s); Cresil uses semicolon/comma to separate segments
-        regions = parse_cresil_regions(region_str)
-
-        if len(regions) != row.get("num_region", len(regions)):
+        try:
+            regions = parse_cresil_regions(region_str)
+        except ValueError as e:
             logger.warning(
-                "eccDNA %s reports num_region=%s but parsed %s segments",
+                "Skipping row %s: failed to parse region %r - %s",
+                idx, region_str, e
+            )
+            continue
+
+        reported_segments = row.get("num_region")
+        reported_count = None
+        if pd.notna(reported_segments):
+            try:
+                reported_count = int(reported_segments)
+            except (TypeError, ValueError):
+                reported_count = None
+
+        if reported_count is not None and len(regions) != reported_count:
+            logger.warning(
+                "eccDNA %s reports num_region=%s but parsed %s segments. "
+                "Original merge_region: %r",
                 row.get("id"),
                 row.get("num_region"),
                 len(regions),
+                region_str,
             )
 
         # Cyrcular format expects semicolon-separated regions without strand info
@@ -105,10 +143,10 @@ def convert_cresil_to_cyrcular_format(cresil_file: Path | str) -> pd.DataFrame:
         af_nanopore = min(coverage / 100.0, 1.0)  # Normalize to 0-1 range
 
         converted_row = {
-            "circle_id": row["id"],
+            "circle_id": row.get("id", f"cresil_{idx}"),
             "regions": regions_formatted,
-            "circle_length": row["merge_len"],
-            "segment_count": row["num_region"],
+            "circle_length": row.get("merge_len", 0),
+            "segment_count": len(regions),
             "num_split_reads": row.get("numreads", 0),
             # Cresil doesn't provide probability scores, use defaults
             "prob_present": 0.95,  # High confidence default

@@ -5,6 +5,54 @@ All notable changes to CircleSeeker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.8] - 2025-12-31
+
+### Changed
+- **BLAST removed**: Removed BLAST as alignment option, minimap2 is now the only aligner
+  - Deleted `external/blast.py` and related test files
+  - Renamed `minimap2_blast.py` → `minimap2_align.py`
+  - Removed `--aligner` and `--blast-word-mode` CLI options
+  - Removed `makeblastdb` pipeline step
+- **Pipeline step renaming**: `run_blast` → `run_alignment` for clarity
+- **Step numbering**: Pipeline now starts from Step 0 (check_dependencies)
+  - Step 0: check_dependencies (new)
+  - Step 1: tidehunter
+  - Step 2-15: remaining steps
+- **Output filenames**: `*_blast_results.tsv` → `*_alignment_results.tsv`
+- **Generic naming**: Renamed BLAST-specific identifiers to generic alignment names
+  - `BLAST_COLUMNS` → `ALIGNMENT_COLUMNS`
+  - `read_blast_results()` → `read_alignment_results()`
+  - `classify_blast_results()` → `classify_alignment_results()`
+
+### Added
+- **Step 0: check_dependencies**: Dependency checking is now a formal pipeline step
+  - Runs before tidehunter as the first step
+  - Validates all required tools before pipeline execution
+
+### Fixed
+- **Best alignment selection**: Fixed `ecc_dedup.py` to use `alignment_length` instead of `bit_score` when bit_score is 0 (minimap2 output)
+  - Priority: bit_score (if non-zero) > alignment_length > first row
+
+## [0.9.6] - 2025-12-29
+
+### Added
+- **Pipeline stderr coverage tests**: Added unit tests to ensure minimap2 and varlociraptor pipelines do not pipe stderr (prevents deadlocks)
+- **Minimap2 alignment option**: Added a minimap2-backed alignment path for candidate mapping (PAF converted to BLAST TSV) with `tools.aligner=minimap2`
+- **CLI aligner and BLAST presets**: Added `--aligner` and `--blast-word-mode` to switch aligner and word_size presets without editing config
+
+### Fixed
+- **Subprocess pipeline deadlocks**: Avoided piping stderr in minimap2→samtools and varlociraptor→bcftools pipelines
+- **Report version string**: ecc_summary now uses the package version instead of a hard-coded v2.1.0
+
+### Changed
+- **License**: Switched to GPL-3.0-only with a commercial license option (dual-licensed) and updated metadata/docs accordingly
+- **Version metadata**: Updated to 0.9.6 across packaging and documentation
+- **BLAST defaults**: Adjusted `word_size` to 50 and `max_target_seqs` to 200 for speed/quality balance
+- **Default aligner**: Set `tools.aligner` to `minimap2` for candidate alignment by default
+
+### Removed
+- **ReadFilterAdapter**: Removed unused adapter that referenced a non-existent ReadFilter class
+
 ## [0.9.5] - 2025-12-26
 
 ### Added

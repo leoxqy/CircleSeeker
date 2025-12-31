@@ -38,14 +38,13 @@ def validate_installation(full_check: bool = False) -> List[str]:
         # CircleSeeker external tools with alternative names
         external_tools = [
             ("TideHunter", ["tidehunter"]),  # bioconda may install as lowercase
-            ("makeblastdb", None),
-            ("blastn", None),
+            ("minimap2", None),  # Required for sequence alignment
             ("cd-hit-est", None),  # Required for sequence clustering
-            ("minimap2", None),
             ("samtools", None),
-            ("bcftools", None),
-            ("cyrcular", None),
-            ("varlociraptor", None),
+            ("bcftools", None),  # Optional: required for Cyrcular
+            ("cyrcular", None),  # Optional: inference engine (fallback)
+            ("varlociraptor", None),  # Optional: required for Cyrcular
+            ("cresil", None),  # Optional: inference engine (preferred)
         ]
 
         for tool_name, alt_names in external_tools:

@@ -277,6 +277,37 @@ class TestVarlociraptor:
 
     @patch.object(Varlociraptor, '_check_installation')
     @patch('subprocess.Popen')
+    def test_filter_calls_fdr_does_not_pipe_stderr(self, mock_popen, mock_check, tmp_path):
+        """Ensure filter_calls_fdr_local_smart doesn't pipe stderr to avoid deadlocks."""
+        input_calls_bcf = tmp_path / "calls.bcf"
+        output_calls_fdr_bcf = tmp_path / "output" / "calls_filtered.bcf"
+
+        input_calls_bcf.touch()
+
+        mock_p1 = MagicMock()
+        mock_p1.wait.return_value = 0
+        mock_p1.stdout = MagicMock()
+
+        mock_p2 = MagicMock()
+        mock_p2.wait.return_value = 0
+        mock_p2.stdout = MagicMock()
+
+        mock_p3 = MagicMock()
+        mock_p3.wait.return_value = 0
+
+        mock_popen.side_effect = [mock_p1, mock_p2, mock_p3]
+
+        varlociraptor = Varlociraptor()
+        varlociraptor.filter_calls_fdr_local_smart(
+            input_calls_bcf=input_calls_bcf,
+            output_calls_fdr_bcf=output_calls_fdr_bcf,
+        )
+
+        for call in mock_popen.call_args_list:
+            assert call.kwargs.get("stderr") is None
+
+    @patch.object(Varlociraptor, '_check_installation')
+    @patch('subprocess.Popen')
     def test_filter_calls_fdr_defaults(self, mock_popen, mock_check, tmp_path):
         """Test filter_calls_fdr_local_smart with default parameters."""
         input_calls_bcf = tmp_path / "calls.bcf"

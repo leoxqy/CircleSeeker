@@ -187,15 +187,28 @@ class Minimap2(ExternalTool):
         temp_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            if output_format.lower() == "bam" and self.config.sort_bam and self.has_samtools:
-                # Use temporary file approach to avoid pipe data loss
-                self._run_alignment_safe(ref_index, query, output_file, temp_dir)
+            if output_format.lower() == "bam":
+                if not self.has_samtools:
+                    raise PipelineError("samtools is required to produce BAM output")
+                if self.config.sort_bam:
+                    # Use temporary file approach to avoid pipe data loss
+                    self._run_alignment_safe(ref_index, query, output_file, temp_dir)
+                else:
+                    self.logger.warning(
+                        "BAM output requested without sorting; producing unsorted BAM"
+                    )
+                    self._run_alignment_unsorted(ref_index, query, output_file, temp_dir)
             else:
                 self._run_alignment_simple(ref_index, query, output_file)
 
-            # Create BAM index if requested
+            # Create BAM index if requested and the BAM is sorted
             if output_format.lower() == "bam" and self.config.index_bam and self.has_samtools:
-                self._index_bam(output_file)
+                if self.config.sort_bam:
+                    self._index_bam(output_file)
+                else:
+                    self.logger.warning(
+                        "Skipping BAM index creation because the BAM output is unsorted"
+                    )
 
             self.logger.info("Alignment completed successfully")
             self.logger.info(f"Output file: {output_file}")
@@ -347,6 +360,55 @@ class Minimap2(ExternalTool):
         except subprocess.CalledProcessError as e:
             self.logger.error(f"minimap2 failed: {e.stderr}")
             raise PipelineError(f"Alignment failed: {e}")
+
+    def _run_alignment_unsorted(
+        self, reference: Path, reads: Path, output_bam: Path, temp_dir: Path
+    ) -> None:
+        """Run alignment and convert to BAM without sorting."""
+        temp_sam = temp_dir / "temp_alignment.sam"
+
+        minimap2_cmd = ["minimap2", "-t", str(self.config.threads), "-ax", self.preset]
+        if self.allow_secondary:
+            minimap2_cmd.extend(["--secondary", "yes"])
+        else:
+            minimap2_cmd.extend(["--secondary", "no"])
+
+        if self.config.additional_args:
+            minimap2_cmd.extend(self.config.additional_args.split())
+
+        minimap2_cmd.extend([str(reference), str(reads), "-o", str(temp_sam)])
+
+        self.logger.info("Running minimap2 alignment")
+        self.logger.debug(f"Command: {' '.join(minimap2_cmd)}")
+
+        try:
+            subprocess.run(minimap2_cmd, stderr=subprocess.PIPE, text=True, check=True)
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"minimap2 failed: {e.stderr}")
+            raise PipelineError(f"Alignment failed: {e}")
+
+        samtools_cmd = [
+            "samtools",
+            "view",
+            "-b",
+            "-o",
+            str(output_bam),
+            str(temp_sam),
+        ]
+
+        self.logger.info("Converting SAM to BAM (unsorted)")
+        self.logger.debug(f"Command: {' '.join(samtools_cmd)}")
+
+        try:
+            subprocess.run(samtools_cmd, stderr=subprocess.PIPE, text=True, check=True)
+            if not output_bam.exists() or output_bam.stat().st_size == 0:
+                raise PipelineError("samtools view created empty BAM output")
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"samtools view failed: {e.stderr}")
+            raise PipelineError(f"BAM conversion failed: {e}")
+        finally:
+            if temp_sam.exists():
+                temp_sam.unlink()
 
     def _index_bam(self, bam_file: Path) -> None:
         """

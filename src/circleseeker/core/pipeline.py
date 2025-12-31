@@ -20,8 +20,8 @@ from circleseeker.utils.logging import get_logger
 
 # Centralized imports for modules and external tools used across steps
 
-# Step 0 - make_blastdb (blast)
-from circleseeker.external.blast import MakeBlastDB
+# Step 0 - check_dependencies
+from circleseeker.utils.dependency_checker import DependencyChecker
 
 # Step 1 - tidehunter
 from circleseeker.external.tidehunter import TideHunter
@@ -29,8 +29,8 @@ from circleseeker.external.tidehunter import TideHunter
 # Step 2 - tandem_to_ring
 from circleseeker.modules.tandem_to_ring import TandemToRing
 
-# Step 3 - run_blast (blast)
-from circleseeker.external.blast import BlastRunner
+# Step 3 - run_alignment (minimap2)
+from circleseeker.external.minimap2_align import Minimap2Aligner
 
 # Step 4 - um_classify
 from circleseeker.modules.um_classify import UMeccClassifier
@@ -90,8 +90,7 @@ class ResultKeys:
 
     T2R_CSV = "tandem_to_ring_csv"
     T2R_FASTA = "tandem_to_ring_fasta"
-    BLAST_DB = "blast_db"
-    BLAST_OUTPUT = "blast_output"
+    ALIGNMENT_OUTPUT = "alignment_output"
     UECC_CSV = "uecc_csv"
     MECC_CSV = "mecc_csv"
     UNCLASSIFIED_CSV = "unclassified_csv"
@@ -119,6 +118,7 @@ class ResultKeys:
     CYRCULAR_RESULT_COUNT = "cyrcular_result_count"
     OVERLAP_REPORT = "overlap_report"
     OVERLAP_STATS = "overlap_stats"
+    INFERENCE_INPUT_EMPTY = "inference_input_empty"
     UECC_CORE_CSV = "uecc_core_csv"
     MECC_CORE_CSV = "mecc_core_csv"
     CECC_CORE_CSV = "cecc_core_csv"
@@ -248,12 +248,13 @@ class Pipeline:
 
     # Define pipeline steps (final order; deprecated/unused steps removed)
     # skip_condition maps to Config attributes (canonical names via properties)
+    # Step 0 is check_dependencies, Step 1 is tidehunter, etc.
     STEPS = [
-        PipelineStep("make_blastdb", "Build BLAST database", skip_condition="skip_make_blastdb"),
+        PipelineStep("check_dependencies", "Check required tools and dependencies"),
         PipelineStep("tidehunter", "Run TideHunter for tandem repeat detection", skip_condition="skip_tidehunter"),
         PipelineStep("tandem_to_ring", "Process TideHunter output", skip_condition="skip_tandem_to_ring"),
-        PipelineStep("run_blast", "Run BLAST alignment", skip_condition="skip_run_blast"),
-        PipelineStep("um_classify", "Classify eccDNA types", skip_condition="skip_um_classify"),
+        PipelineStep("run_alignment", "Run minimap2 alignment"),
+        PipelineStep("um_classify", "Classify eccDNA types"),
         PipelineStep("cecc_build", "Process Cecc candidates"),
         PipelineStep("umc_process", "Generate FASTA files"),
         PipelineStep("cd_hit", "Remove redundant sequences"),
@@ -864,6 +865,18 @@ class Pipeline:
             self._save_state()
 
         try:
+            total_steps = len(self.STEPS)
+            if start_from is not None and not (1 <= start_from <= total_steps):
+                raise PipelineError(
+                    f"start_from must be within 1..{total_steps}, got {start_from}"
+                )
+            if stop_at is not None and not (1 <= stop_at <= total_steps):
+                raise PipelineError(f"stop_at must be within 1..{total_steps}, got {stop_at}")
+            if start_from is not None and stop_at is not None and start_from > stop_at:
+                raise PipelineError(
+                    f"start_from ({start_from}) cannot be greater than stop_at ({stop_at})"
+                )
+
             # Determine step range
             start_idx = (start_from - 1) if start_from else 0
             end_idx = stop_at if stop_at else len(self.STEPS)
@@ -875,7 +888,7 @@ class Pipeline:
                 desc="Process",
                 enabled=getattr(self.config.runtime, "enable_progress", True),
             )
-            for i, step in enumerate(iterator, start_idx + 1):
+            for i, step in enumerate(iterator, start_idx):
                 step_label = step.display_name or step.name
                 if step.name in self.state.completed_steps and not force:
                     self.logger.info(f"Skipping completed step {i}: {step_label}")
@@ -961,25 +974,18 @@ class Pipeline:
 
     # ===================== STEP IMPLEMENTATIONS =====================
 
-    # New step name wrappers for backward compatibility
-    # Removed alias methods - using direct step names now
+    def _step_check_dependencies(self) -> None:
+        """Step 0: Check all required tools and dependencies."""
+        checker = DependencyChecker(logger=self.logger.getChild("dependency_checker"))
+        all_ok = checker.check_all()
 
-    def _step_make_blastdb(self) -> None:
-        """Step 0: Build BLAST database."""
-        db_prefix = self.config.output_dir / f"{self.config.prefix}_blast_db"
-
-        makeblastdb = MakeBlastDB()
-        if makeblastdb.verify_database(db_prefix):
-            self.logger.info(f"BLAST database already exists: {db_prefix}")
-        else:
-            makeblastdb.build_database(
-                input_file=self.config.reference,
-                output_db=db_prefix,
-                dbtype=self.config.tools.blast.get("dbtype", "nucl"),
-                title=f"{self.config.prefix}_reference",
+        if not all_ok:
+            checker.print_report()
+            raise PipelineError(
+                "Missing required dependencies. Please install missing tools and try again."
             )
 
-        self.state.results[ResultKeys.BLAST_DB] = str(db_prefix)
+        self.logger.info("All required dependencies are available")
 
     def _step_tidehunter(self) -> None:
         """Step 1: Run TideHunter."""
@@ -1018,23 +1024,50 @@ class Pipeline:
         self._set_result(ResultKeys.T2R_CSV, str(csv_output))
         self._set_result(ResultKeys.T2R_FASTA, str(fasta_output))
 
-    def _step_run_blast(self) -> None:
-        """Step 3: Run BLAST alignment."""
-        blast_output = self.config.output_dir / f"{self.config.prefix}_blast_results.tsv"
+    def _step_run_alignment(self) -> None:
+        """Step 3: Run minimap2 alignment."""
+        alignment_output = self.config.output_dir / f"{self.config.prefix}_alignment_results.tsv"
 
         query_file = Path(self._get_result(ResultKeys.T2R_FASTA, default=self.config.input_file))
-        db_prefix = Path(self.state.results[ResultKeys.BLAST_DB])
 
-        blast_runner = BlastRunner(num_threads=self.config.threads, **self.config.tools.blast)
-        blast_runner.run(database=db_prefix, query_file=query_file, output_file=blast_output)
+        minimap_cfg = self.config.tools.minimap2_align or {}
+        if not isinstance(minimap_cfg, dict):
+            raise PipelineError(
+                "Invalid minimap2_align config; expected mapping, "
+                f"got {type(minimap_cfg).__name__}"
+            )
+        preset = minimap_cfg.get("preset", "sr")
+        additional_args = minimap_cfg.get("additional_args", "")
+        max_target_seqs = minimap_cfg.get("max_target_seqs", 200)
 
-        self.state.results[ResultKeys.BLAST_OUTPUT] = str(blast_output)
+        runner = Minimap2Aligner(
+            threads=self.config.threads, logger=self.logger.getChild("minimap2_align")
+        )
+        runner.run(
+            reference=self.config.reference,
+            query=query_file,
+            output_tsv=alignment_output,
+            preset=preset,
+            max_target_seqs=int(max_target_seqs),
+            additional_args=additional_args,
+        )
+        self.state.results[ResultKeys.ALIGNMENT_OUTPUT] = str(alignment_output)
 
     def _step_um_classify(self) -> None:
         """Step 4: Classify eccDNA types using um_classify module."""
         import pandas as pd
 
-        blast_output = Path(self.state.results[ResultKeys.BLAST_OUTPUT])
+        alignment_output = self._resolve_stored_path(
+            self.state.results.get(ResultKeys.ALIGNMENT_OUTPUT),
+            [f"{self.config.prefix}_alignment_results.tsv"],
+        )
+        if not alignment_output:
+            raise PipelineError(
+                "Alignment output not found; run the alignment step before um_classify."
+            )
+        self.state.results[ResultKeys.ALIGNMENT_OUTPUT] = self._serialize_path_for_state(
+            alignment_output
+        )
         output_prefix = self.config.output_dir / "um_classify"
 
         # Use Python import and class
@@ -1042,10 +1075,10 @@ class Pipeline:
 
         self.logger.info("Running um_classify module")
 
-        # Handle empty BLAST results (valid scenario when no hits found)
-        if not blast_output.exists() or blast_output.stat().st_size == 0:
+        # Handle empty alignment results (valid scenario when no hits found)
+        if not alignment_output.exists() or alignment_output.stat().st_size == 0:
             self.logger.warning(
-                "BLAST output is empty - no alignments found. "
+                "Alignment output is empty - no alignments found. "
                 "This may occur when reads have no similarity to the reference."
             )
             # Initialize empty results
@@ -1053,10 +1086,44 @@ class Pipeline:
             self.state.results[ResultKeys.MECC_COUNT] = 0
             return
 
-        # Read blast results
-        blast_df = pd.read_csv(blast_output, sep="\t", header=None)
-        uecc_df, mecc_df, unclassified_df = classifier.classify_blast_results(
-            blast_df, output_prefix
+        # Read alignment results
+        alignment_df = pd.read_csv(alignment_output, sep="\t", header=None)
+
+        # Validate query_id format early to avoid opaque failures
+        try:
+            query_ids = alignment_df.iloc[:, 0].astype(str)
+            valid_mask = query_ids.str.count(r"\|") >= 3
+        except Exception as exc:
+            self.logger.error(f"Failed to validate alignment query IDs: {exc}")
+            raise PipelineError("Alignment query_id validation failed") from exc
+
+        if not valid_mask.any():
+            self.logger.error(
+                "Alignment query_id format is invalid for um_classify. "
+                "Expected 'read|repN|length|copy' (at least 4 '|' fields). "
+                "Skipping classification."
+            )
+            uecc_output = self.config.output_dir / "um_classify.uecc.csv"
+            mecc_output = self.config.output_dir / "um_classify.mecc.csv"
+            unclass_output = self.config.output_dir / "um_classify.unclassified.csv"
+            pd.DataFrame().to_csv(uecc_output, index=False)
+            pd.DataFrame().to_csv(mecc_output, index=False)
+            pd.DataFrame().to_csv(unclass_output, index=False)
+            self.state.results[ResultKeys.UECC_CSV] = str(uecc_output)
+            self.state.results[ResultKeys.MECC_CSV] = str(mecc_output)
+            self.state.results[ResultKeys.UNCLASSIFIED_CSV] = str(unclass_output)
+            self.state.results[ResultKeys.UECC_COUNT] = 0
+            self.state.results[ResultKeys.MECC_COUNT] = 0
+            return
+        if not valid_mask.all():
+            self.logger.warning(
+                "Some alignment query IDs lack the expected 'read|repN|length|copy' format; "
+                "those entries will be ignored during classification."
+            )
+            alignment_df = alignment_df[valid_mask].copy()
+
+        uecc_df, mecc_df, unclassified_df = classifier.classify_alignment_results(
+            alignment_df, output_prefix
         )
 
         # Check for output files
@@ -1420,9 +1487,6 @@ class Pipeline:
 
         # Get tandem_to_ring CSV (carousel classification)
         carousel_csv = self.config.output_dir / "tandem_to_ring.csv"
-        if not carousel_csv.exists():
-            self.logger.error("TandemToRing CSV not found; cannot run read_filter step")
-            raise PipelineError(f"Missing TandemToRing CSV: {carousel_csv}")
 
         # Original input FASTA
         original_fasta = self.config.input_file
@@ -1435,13 +1499,22 @@ class Pipeline:
         # Initialize Sieve with 9.1 logic
         sieve = Sieve(self.logger.getChild("read_filter"))
 
-        # Run sieve using carousel classification
-        stats = sieve.run_sieve(
-            carousel_csv=carousel_csv,
-            input_fastas=[original_fasta],
-            output_fasta=output_fasta,
-            ctcr_classes=None,  # Use default CtcR classes
-        )
+        if not carousel_csv.exists():
+            self.logger.warning(
+                "TandemToRing CSV not found; skipping CtcR filtering and retaining all reads"
+            )
+            stats = sieve.filter_fasta_files(
+                input_fastas=[original_fasta],
+                output_fasta=output_fasta,
+            )
+        else:
+            # Run sieve using carousel classification
+            stats = sieve.run_sieve(
+                carousel_csv=carousel_csv,
+                input_fastas=[original_fasta],
+                output_fasta=output_fasta,
+                ctcr_classes=None,  # Use default CtcR classes
+            )
 
         self._set_result(ResultKeys.READ_FILTER_OUTPUT_FASTA, str(output_fasta))
         self._set_result(ResultKeys.READ_FILTER_TOTAL, stats.total_reads)
@@ -1456,8 +1529,6 @@ class Pipeline:
 
     def _step_minimap2(self) -> None:
         """Step 11: Prepare mapping artifacts (alignment optional for Cresil)."""
-
-        inference_tool = self._select_inference_tool()
 
         # Determine input FASTA with robust fallback
         sieve_output = self._get_result(ResultKeys.READ_FILTER_OUTPUT_FASTA)
@@ -1496,9 +1567,17 @@ class Pipeline:
 
         self._set_result(ResultKeys.ALL_FILTERED_FASTA, str(input_fasta))
 
+        if not input_fasta.exists() or input_fasta.stat().st_size == 0:
+            self.logger.warning(
+                "Inference input FASTA is empty; skipping minimap2 alignment and inference steps"
+            )
+            self.state.results[ResultKeys.INFERENCE_INPUT_EMPTY] = True
+            return
+
         reference_mmi = self._ensure_reference_mmi()
         self._set_result(ResultKeys.REFERENCE_MMI, str(reference_mmi))
 
+        inference_tool = self._select_inference_tool()
         if inference_tool == "cresil":
             self.logger.info("Cresil selected; skipping minimap2 alignment (BAM not required)")
             return
@@ -1524,6 +1603,21 @@ class Pipeline:
 
     def _step_ecc_inference(self) -> None:
         """Step 12: Circular DNA detection - Cresil preferred, Cyrcular fallback."""
+        if self.state.results.get(ResultKeys.INFERENCE_INPUT_EMPTY):
+            self.logger.warning("Inference input FASTA empty; skipping eccDNA inference")
+            self.state.results[ResultKeys.CYRCULAR_RESULT_COUNT] = 0
+            self.state.results[ResultKeys.CYRCULAR_OVERVIEW] = None
+            return
+
+        all_filtered = self.state.results.get(ResultKeys.ALL_FILTERED_FASTA)
+        if all_filtered:
+            all_filtered_path = Path(all_filtered)
+            if all_filtered_path.exists() and all_filtered_path.stat().st_size == 0:
+                self.logger.warning("Inference input FASTA empty; skipping eccDNA inference")
+                self.state.results[ResultKeys.CYRCULAR_RESULT_COUNT] = 0
+                self.state.results[ResultKeys.CYRCULAR_OVERVIEW] = None
+                return
+
         tool = self._select_inference_tool()
         if tool == "cresil":
             self.logger.info("Using Cresil for circular DNA detection (preferred)")

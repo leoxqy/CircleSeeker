@@ -1,6 +1,6 @@
-# CircleSeeker CLI 使用手册（v0.9.5）
+# CircleSeeker CLI 使用手册（v0.9.8）
 
-本手册针对 CircleSeeker 0.9.5 的命令行界面，涵盖常用参数、调试选项、运行时行为与输出结构。默认安装后可通过 `circleseeker` 或 `CircleSeeker` 两个入口调用。
+本手册针对 CircleSeeker 0.9.8 的命令行界面，涵盖常用参数、调试选项、运行时行为与输出结构。默认安装后可通过 `circleseeker` 或 `CircleSeeker` 两个入口调用。
 
 ---
 
@@ -21,6 +21,8 @@ circleseeker -i reads.fasta -r reference.fa -o results/
 - `-p, --prefix TEXT` 输出文件前缀，默认 `sample`
 - `-t, --threads INT` 线程数，默认 8
 - `-c, --config PATH` 配置文件路径（YAML 格式）
+- `--aligner [blast|minimap2]` 候选比对引擎（默认读取配置）
+- `--blast-word-mode [fast|slow]` BLAST word_size 预设：fast=100，slow=40（仅在 `aligner=blast` 时生效）
 - `--keep-tmp / --no-keep-tmp` 保留或删除临时目录（`.tmp_work`），默认删除；可显式覆盖配置文件中的 `keep_tmp` 设置
 
 ---
@@ -69,7 +71,7 @@ circleseeker --debug show-checkpoint -o results/ -p sample
 
 ## 5. 执行生命周期
 
-1. **依赖检查** 启动时自动检测必需的外部工具（minimap2、samtools、blastn、makeblastdb、cd-hit-est）以及至少一个推断引擎（cresil 或 cyrcular）。若缺少依赖，程序会给出清晰的错误提示和安装建议。
+1. **依赖检查** 启动时自动检测必需的外部工具（minimap2、samtools、cd-hit-est，若 `tools.aligner=blast` 还会检查 blastn、makeblastdb）以及至少一个推断引擎（cresil 或 cyrcular）。若缺少依赖，程序会给出清晰的错误提示和安装建议。
 2. **临时目录** 运行时所有中间文件写入 `<output>/.tmp_work/`（可通过 `runtime.tmp_dir` 配置，支持相对路径或绝对路径）。完成后根据 `--keep-tmp` 选择是否保留。
 3. **配置与检查点** 运行期间在输出目录保存 `config.yaml` 与 `<prefix>.checkpoint`；成功完成后会自动清理。使用 `--keep-tmp` 可保留这些文件以便调试或恢复中断的运行。
 4. **自动索引**

@@ -36,11 +36,10 @@ tools:
     P: 2000000
     e: 0.1
     f: 2
-  blast:
-    word_size: 100
-    evalue: "1e-50"
-    perc_identity: 99.0
-    dbtype: "nucl"
+  minimap2_align:
+    preset: "sr"
+    max_target_seqs: 200
+    additional_args: ""
   minimap2:
     preset: "map-hifi"
     additional_args: ""

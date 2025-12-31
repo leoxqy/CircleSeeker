@@ -37,13 +37,8 @@ class ToolConfig:
     tidehunter: Dict[str, Any] = field(
         default_factory=lambda: {"k": 16, "w": 1, "p": 100, "P": 2000000, "e": 0.1, "f": 2}
     )
-    blast: Dict[str, Any] = field(
-        default_factory=lambda: {
-            "word_size": 100,
-            "evalue": "1e-50",
-            "perc_identity": 99.0,
-            "soft_masking": False,
-        }
+    minimap2_align: Dict[str, Any] = field(
+        default_factory=lambda: {"preset": "sr", "max_target_seqs": 200, "additional_args": ""}
     )
     minimap2: Dict[str, Any] = field(
         default_factory=lambda: {"preset": "map-hifi", "additional_args": ""}
@@ -65,11 +60,8 @@ class Config:
     enable_xecc: bool = True
 
     # Step skip flags (canonical new names provided as properties below)
-    skip_make_db: bool = False  # alias of skip_make_blastdb
     skip_tidehunter: bool = False
     skip_carousel: bool = False  # alias of skip_tandem_to_ring
-    skip_blast: bool = False  # alias of skip_run_blast
-    skip_gatekeeper: bool = False  # alias of skip_um_classify
     skip_organize: bool = False
 
     # Sub-configurations
@@ -125,37 +117,12 @@ class Config:
 
     # ---- New canonical skip flags via properties (backward-compatible) ----
     @property
-    def skip_make_blastdb(self) -> bool:
-        return self.skip_make_db
-
-    @skip_make_blastdb.setter
-    def skip_make_blastdb(self, value: bool) -> None:
-        self.skip_make_db = value
-
-    @property
     def skip_tandem_to_ring(self) -> bool:
         return self.skip_carousel
 
     @skip_tandem_to_ring.setter
     def skip_tandem_to_ring(self, value: bool) -> None:
         self.skip_carousel = value
-
-    @property
-    def skip_run_blast(self) -> bool:
-        return self.skip_blast
-
-    @skip_run_blast.setter
-    def skip_run_blast(self, value: bool) -> None:
-        self.skip_blast = value
-
-    @property
-    def skip_um_classify(self) -> bool:
-        return self.skip_gatekeeper
-
-    @skip_um_classify.setter
-    def skip_um_classify(self, value: bool) -> None:
-        self.skip_gatekeeper = value
-
 
 def load_config(path: Path) -> Config:
     """Load configuration from YAML file."""
@@ -176,16 +143,23 @@ def load_config(path: Path) -> Config:
             cfg.prefix = data["prefix"]
         if "enable_xecc" in data:
             cfg.enable_xecc = data["enable_xecc"]
+        if "threads" in data and data["threads"] is not None:
+            cfg.performance.threads = data["threads"]
+
+        unsupported_skip_flags = [
+            "skip_run_alignment",
+            "skip_um_classify",
+            "skip_alignment",
+            "skip_gatekeeper",
+        ]
+        present_unsupported = [flag for flag in unsupported_skip_flags if flag in data]
+        if present_unsupported:
+            raise ConfigurationError(
+                "Unsupported config option(s): " + ", ".join(present_unsupported)
+            )
 
         # Skip flags
-        skip_flags = [
-            "skip_make_db",
-            "skip_tidehunter",
-            "skip_carousel",
-            "skip_blast",
-            "skip_gatekeeper",
-            "skip_organize",
-        ]
+        skip_flags = ["skip_tidehunter", "skip_carousel", "skip_organize"]
         for flag in skip_flags:
             if flag in data:
                 setattr(cfg, flag, data[flag])
@@ -208,6 +182,8 @@ def load_config(path: Path) -> Config:
         if "tools" in data:
             for tool, params in data["tools"].items():
                 if hasattr(cfg.tools, tool):
+                    if params is None:
+                        continue
                     setattr(cfg.tools, tool, params)
 
         return cfg

@@ -1,7 +1,7 @@
 """
 U/Mecc-Classify - Simple eccDNA Classification Module
 
-This module performs initial classification of eccDNA from BLAST results:
+This module performs initial classification of eccDNA from alignment results:
 - Uecc: Unique/simple circular DNA
 - Mecc: Multiple-copy repeat circular DNA
 - Unclassified: All alignments from queries not classified as Uecc/Mecc
@@ -22,8 +22,8 @@ import logging
 class UMeccClassifier:
     """Classify eccDNA into Uecc/Mecc buckets."""
 
-    # BLAST column names
-    BLAST_COLUMNS = [
+    # Alignment column names (BLAST outfmt 6 compatible)
+    ALIGNMENT_COLUMNS = [
         "query_id",
         "subject_id",
         "identity",
@@ -60,26 +60,34 @@ class UMeccClassifier:
         # Setup logger
         self.logger = logger or get_logger(self.__class__.__name__)
 
-    def read_blast_results(self, blast_file: Path) -> pd.DataFrame:
-        """
-        Read and preprocess BLAST results
+    def _ensure_alignment_columns(self, df: pd.DataFrame, source: str) -> pd.DataFrame:
+        """Ensure alignment DataFrame has the expected columns."""
+        expected_cols = len(self.ALIGNMENT_COLUMNS)
+        if df.columns.tolist() == self.ALIGNMENT_COLUMNS:
+            return df.copy()
 
-        Args:
-            blast_file: Path to BLAST results file
+        if len(df.columns) == 0:
+            df = df.copy()
+            df.columns = self.ALIGNMENT_COLUMNS
+            return df
 
-        Returns:
-            Preprocessed DataFrame
-        """
-        self.logger.info(f"Reading BLAST results from {blast_file}")
+        if len(df.columns) != expected_cols:
+            message = (
+                f"Alignment results from {source} should have {expected_cols} columns, "
+                f"got {len(df.columns)}"
+            )
+            self.logger.error(message)
+            raise ValueError(message)
 
-        try:
-            df = pd.read_csv(blast_file, sep="\t", header=None, names=self.BLAST_COLUMNS)
-        except pd.errors.EmptyDataError:
-            self.logger.error(f"BLAST file is empty: {blast_file}")
-            raise
-        except Exception as e:
-            self.logger.error(f"Failed to read BLAST file: {e}")
-            raise
+        df = df.copy()
+        df.columns = self.ALIGNMENT_COLUMNS
+        return df
+
+    def _preprocess_alignment_df(self, df: pd.DataFrame, source: str) -> pd.DataFrame:
+        """Common preprocessing for alignment results."""
+        df = self._ensure_alignment_columns(df, source)
+        if df.empty:
+            return df
 
         # Process strand information
         df["strand"] = df["sstrand"].apply(lambda x: "+" if x == "plus" else "-")
@@ -90,7 +98,15 @@ class UMeccClassifier:
 
         # Parse query IDs with proper type conversion and standardize columns
         try:
-            split_cols = df["query_id"].str.split("|", expand=True)
+            split_cols = df["query_id"].astype(str).str.split("|", expand=True)
+            if split_cols.shape[1] < 4:
+                message = (
+                    f"Alignment query_id in {source} should have at least 4 '|' "
+                    f"fields, got {split_cols.shape[1]}"
+                )
+                self.logger.error(message)
+                raise ValueError(message)
+
             df[ColumnStandard.READS] = split_cols[0].astype(str)
             df[ColumnStandard.LENGTH] = (
                 pd.to_numeric(split_cols[2], errors="coerce").fillna(0).astype(int)
@@ -130,22 +146,48 @@ class UMeccClassifier:
             * 100
         ).round(2)
 
-        self.logger.info(f"Loaded {len(df):,} alignments from {df['query_id'].nunique():,} queries")
-
         # Store statistics
         self.stats["total_alignments"] = len(df)
         self.stats["total_queries"] = df["query_id"].nunique()
 
         return df
 
-    def classify_blast_results(
-        self, blast_df: pd.DataFrame, output_prefix: Path
-    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    def read_alignment_results(self, alignment_file: Path) -> pd.DataFrame:
         """
-        Classify eccDNA from pre-loaded BLAST DataFrame
+        Read and preprocess alignment results
 
         Args:
-            blast_df: Raw BLAST results DataFrame (without headers)
+            alignment_file: Path to alignment results file
+
+        Returns:
+            Preprocessed DataFrame
+        """
+        self.logger.info(f"Reading alignment results from {alignment_file}")
+
+        try:
+            df = pd.read_csv(alignment_file, sep="\t", header=None)
+        except pd.errors.EmptyDataError:
+            self.logger.error(f"Alignment file is empty: {alignment_file}")
+            raise
+        except Exception as e:
+            self.logger.error(f"Failed to read alignment file: {e}")
+            raise
+
+        df = self._preprocess_alignment_df(df, str(alignment_file))
+        self.logger.info(
+            f"Loaded {len(df):,} alignments from {df['query_id'].nunique():,} queries"
+        )
+
+        return df
+
+    def classify_alignment_results(
+        self, alignment_df: pd.DataFrame, output_prefix: Path
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+        """
+        Classify eccDNA from pre-loaded alignment DataFrame
+
+        Args:
+            alignment_df: Raw alignment results DataFrame (without headers)
             output_prefix: Output file prefix path (used for saving files)
 
         Returns:
@@ -155,69 +197,11 @@ class UMeccClassifier:
         self.logger.info("Starting U/Mecc classification from DataFrame")
         self.logger.info("=" * 60)
 
-        # Process raw DataFrame similar to read_blast_results
-        df = blast_df.copy()
-
-        # Assign column names if not present
-        if df.columns.tolist() != self.BLAST_COLUMNS:
-            df.columns = self.BLAST_COLUMNS
-
-        # Process strand information
-        df["strand"] = df["sstrand"].apply(lambda x: "+" if x == "plus" else "-")
-        neg_strand_mask = df["strand"] == "-"
-        df.loc[neg_strand_mask, ["s_start", "s_end"]] = df.loc[
-            neg_strand_mask, ["s_end", "s_start"]
-        ].values
-
-        # Parse query IDs with proper type conversion and standardize columns
-        try:
-            split_cols = df["query_id"].str.split("|", expand=True)
-            df[ColumnStandard.READS] = split_cols[0].astype(str)
-            df[ColumnStandard.LENGTH] = (
-                pd.to_numeric(split_cols[2], errors="coerce").fillna(0).astype(int)
-            )
-            df[ColumnStandard.COPY_NUMBER] = (
-                pd.to_numeric(split_cols[3], errors="coerce").fillna(0).astype(float)
-            )
-
-            # Validate length to avoid division by zero later
-            invalid_length = df[ColumnStandard.LENGTH] <= 0
-            if invalid_length.any():
-                self.logger.warning(
-                    f"Found {invalid_length.sum()} entries with invalid length (<=0)"
-                )
-                # Filter out invalid entries
-                df = df[~invalid_length].copy()
-
-        except Exception as e:
-            self.logger.error(f"Failed to parse query IDs: {e}")
-            raise
-
-        # Standardize coordinate columns
-        df[ColumnStandard.CHR] = df["subject_id"]
-        df[ColumnStandard.START0] = df["s_start"]
-        df[ColumnStandard.END0] = df["s_end"]
-        df[ColumnStandard.STRAND] = df["strand"]
-
-        # Calculate derived columns with safe division
-        df["Rlength"] = df[ColumnStandard.END0] - df[ColumnStandard.START0] + 1
-        df["gap_Length"] = df[ColumnStandard.LENGTH] - df["Rlength"]
-
-        # Safe division for Gap_Percentage
-        df["Gap_Percentage"] = 0.0
-        valid_mask = df[ColumnStandard.LENGTH] > 0
-        df.loc[valid_mask, "Gap_Percentage"] = (
-            (df.loc[valid_mask, "gap_Length"].abs() / df.loc[valid_mask, ColumnStandard.LENGTH])
-            * 100
-        ).round(2)
+        df = self._preprocess_alignment_df(alignment_df, "DataFrame")
 
         self.logger.info(
             f"Processed {len(df):,} alignments from {df['query_id'].nunique():,} queries"
         )
-
-        # Store statistics
-        self.stats["total_alignments"] = len(df)
-        self.stats["total_queries"] = df["query_id"].nunique()
 
         # Check if we have valid data after preprocessing
         if df.empty:
@@ -369,7 +353,7 @@ class UMeccClassifier:
 
     def _process_overlaps_for_query(self, group: pd.DataFrame) -> pd.DataFrame:
         """
-        Process overlaps for a single query's alignments
+        Process overlaps for a single query's alignments.
 
         Args:
             group: DataFrame for single query
@@ -379,60 +363,75 @@ class UMeccClassifier:
         """
         kept_alignments = []
 
-        for chr_id, chr_group in group.groupby(ColumnStandard.CHR):
-            overlapping_indices = self._find_overlaps_sweepline(chr_group)
-
-            if overlapping_indices:
-                # Select best from overlapping group
-                overlap_df = chr_group.loc[list(overlapping_indices)]
-                best_idx = overlap_df["Gap_Percentage"].idxmin()
-                kept_alignments.append(chr_group.loc[[best_idx]])
-
-                # Keep non-overlapping
-                non_overlap = chr_group[~chr_group.index.isin(overlapping_indices)]
-                if len(non_overlap) > 0:
-                    kept_alignments.append(non_overlap)
-            else:
-                kept_alignments.append(chr_group)
+        for _, chr_group in group.groupby(ColumnStandard.CHR):
+            components = self._find_overlaps_sweepline(chr_group)
+            for component in components:
+                component_df = chr_group.loc[list(component)]
+                if len(component_df) == 1:
+                    kept_alignments.append(component_df)
+                else:
+                    # Select best from each overlap component
+                    best_idx = component_df["Gap_Percentage"].idxmin()
+                    kept_alignments.append(chr_group.loc[[best_idx]])
 
         if kept_alignments:
             return pd.concat(kept_alignments, ignore_index=False)
         return pd.DataFrame()
 
-    def _find_overlaps_sweepline(self, group: pd.DataFrame) -> Set[int]:
+    def _find_overlaps_sweepline(self, group: pd.DataFrame) -> list[Set[int]]:
         """
-        Find overlapping intervals using sweep-line algorithm
+        Find overlap components using sweep-line algorithm.
 
         Args:
             group: DataFrame with alignments on same chromosome
 
         Returns:
-            Set of overlapping indices
+            List of sets, each containing indices in the same overlap component
         """
         if len(group) <= 1:
-            return set()
+            return [set(group.index)] if len(group) else []
+
+        parent = {idx: idx for idx in group.index}
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> None:
+            root_a = find(a)
+            root_b = find(b)
+            if root_a != root_b:
+                parent[root_b] = root_a
 
         events = []
         for idx, row in group.iterrows():
-            events.append((row[ColumnStandard.START0], 0, idx))  # 0 for start event
-            events.append((row[ColumnStandard.END0], 1, idx))  # 1 for end event
+            start = row[ColumnStandard.START0]
+            end = row[ColumnStandard.END0]
+            if end < start:
+                start, end = end, start
+            events.append((start, 0, idx))  # 0 for start event
+            events.append((end, 1, idx))  # 1 for end event
 
         # Sort by position, then by event type (starts before ends)
         events.sort(key=lambda x: (x[0], x[1]))
 
-        active_intervals = set()
-        overlapping_indices = set()
-
-        for pos, event_type, idx in events:
+        active_intervals: Set[int] = set()
+        for _, event_type, idx in events:
             if event_type == 0:  # start event
-                if active_intervals:
-                    overlapping_indices.add(idx)
-                    overlapping_indices.update(active_intervals)
+                for active_idx in active_intervals:
+                    union(idx, active_idx)
                 active_intervals.add(idx)
             else:  # end event
                 active_intervals.discard(idx)
 
-        return overlapping_indices
+        components: dict[int, Set[int]] = {}
+        for idx in group.index:
+            root = find(idx)
+            components.setdefault(root, set()).add(idx)
+
+        return list(components.values())
 
     def _is_full_length_repeat(self, group: pd.DataFrame) -> bool:
         """
@@ -530,12 +529,12 @@ class UMeccClassifier:
 
         return uecc_formatted, mecc_formatted
 
-    def run(self, blast_file: Path) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    def run(self, alignment_file: Path) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """
         Run complete U/Mecc classification
 
         Args:
-            blast_file: Path to BLAST results
+            alignment_file: Path to alignment results
 
         Returns:
             Tuple of (uecc_df, mecc_df, unclassified_df)
@@ -544,8 +543,8 @@ class UMeccClassifier:
         self.logger.info("Starting U/Mecc classification")
         self.logger.info("=" * 60)
 
-        # Read and preprocess BLAST results
-        df_original = self.read_blast_results(blast_file)
+        # Read and preprocess alignment results
+        df_original = self.read_alignment_results(alignment_file)
 
         # Check if we have valid data after preprocessing
         if df_original.empty:
@@ -596,9 +595,9 @@ def _parse_args():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="U/Mecc-Classify - Classify eccDNA from BLAST results"
+        description="U/Mecc-Classify - Classify eccDNA from alignment results"
     )
-    parser.add_argument("-i", "--input", required=True, help="Input BLAST result TSV file")
+    parser.add_argument("-i", "--input", required=True, help="Input alignment result TSV file")
     parser.add_argument(
         "-o",
         "--output",

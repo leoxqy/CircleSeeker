@@ -1,6 +1,6 @@
-# CircleSeeker Pipeline 模块说明（v0.9.5）
+# CircleSeeker Pipeline 模块说明（v0.9.8）
 
-本文件概述 CircleSeeker 0.9.5 的 16 个管线步骤、输入输出关系以及关键实现要点，帮助使用者理解整体流程与模块职责。
+本文件概述 CircleSeeker 0.9.8 的 16 个管线步骤、输入输出关系以及关键实现要点，帮助使用者理解整体流程与模块职责。
 
 ---
 
@@ -47,7 +47,7 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 ### 3.1 检测阶段（步骤 1-6）
 
 1. **make_blastdb**
-   使用 `makeblastdb` 为参考基因组建立核酸数据库。若数据库已存在会跳过。
+   使用 `makeblastdb` 为参考基因组建立核酸数据库。若数据库已存在会跳过；当 `tools.aligner=minimap2` 时可跳过此步。
 
 2. **tidehunter**
    调用 TideHunter 检测 reads 中的串联重复，识别潜在滚环扩增事件，生成共识序列与 repeat 信息。
@@ -56,7 +56,7 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
    将重复序列转换为候选环状 DNA。通过图结构分析 overlaps，识别简单读段、复杂读段等类型，输出 FASTA 与候选元数据。
 
 4. **run_blast**
-   使用 BLAST 将候选序列比对回参考基因组，获取 identity、覆盖度与基因组坐标。
+   使用 BLAST 或 minimap2 将候选序列比对回参考基因组，获取 identity 与基因组坐标（minimap2 会输出 PAF 并转换为 BLAST TSV）。
 
 5. **um_classify**
    对 BLAST 结果进行解析，按单一来源或多重来源划分为 UeccDNA / MeccDNA，同时保留未分类记录供后续处理。
@@ -111,7 +111,7 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 
 ## 4. 运行时注意事项
 
-- **外部依赖** 请确认 `tidehunter`, `blastn`, `cd-hit-est`, `minimap2`, `samtools`, `cresil`（或 `cyrcular`）均在 `PATH` 内。v0.9.4 新增了启动时的预检机制，会在管线执行前验证所有必需工具是否可用，并给出清晰的安装提示。
+- **外部依赖** 请确认 `tidehunter`, `cd-hit-est`, `minimap2`, `samtools`, `cresil`（或 `cyrcular`）均在 `PATH` 内；若 `tools.aligner=blast` 还需 `blastn` 与 `makeblastdb`。v0.9.4 新增了启动时的预检机制，会在管线执行前验证所有必需工具是否可用，并给出清晰的安装提示。
 - **检查点机制** 每个步骤开始前都会写入 `<prefix>.checkpoint`，一旦失败可通过 `--resume` 从最近步骤继续；`--force` 可清除状态后重跑。
 - **配置继承** 所有参数均由 `circleseeker.config.Config` 驱动，可通过 YAML 或 CLI 覆写。文档中的默认值等同于仓库内置配置。
 - **调试工具** `circleseeker --debug --show-steps` 可查看当前步骤状态；`show-checkpoint` 子命令能列出历史执行记录。

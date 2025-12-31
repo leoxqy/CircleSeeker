@@ -151,10 +151,15 @@ def find_redundant_simple(
         start_val = row.get("start0", row.get("Start0", None))
         end_val = row.get("end0", row.get("End0", None))
 
-        if chr_val is not None and start_val is not None and end_val is not None:
-            ch = str(chr_val)
-            s = int(start_val)
-            e = int(end_val)
+        if pd.notna(chr_val) and pd.notna(start_val) and pd.notna(end_val):
+            ch = str(chr_val).strip()
+            if not ch:
+                continue
+            try:
+                s = int(start_val)
+                e = int(end_val)
+            except (TypeError, ValueError):
+                continue
         else:
             # Try parsing from regions column if coordinates not available
             regions = row.get("regions", row.get("Regions", None))
@@ -442,34 +447,43 @@ def renumber_eccdna(df: pd.DataFrame) -> pd.DataFrame:
     final_ids = []
 
     for ecc_type in ["UeccDNA", "MeccDNA", "CeccDNA"]:
+        pattern = re.compile(rf"^{re.escape(ecc_type)}(\d+)$")
         # Get confirmed entries - keep their original IDs
         confirmed_df = df[(df["eccDNA_type"] == ecc_type) & (df["State"] == "Confirmed")]
+
+        valid_numbers = []
+        for orig_id in confirmed_df["original_id"].astype(str):
+            match = pattern.match(orig_id)
+            if match:
+                try:
+                    valid_numbers.append(int(match.group(1)))
+                except ValueError:
+                    continue
+
+        max_num = max(valid_numbers) if valid_numbers else 0
+        next_num = max_num
+        seen_numbers: set[int] = set()
+
         for _, row in confirmed_df.iterrows():
-            # Keep original ID if it matches the pattern
-            orig_id = row["original_id"]
-            if orig_id.startswith(ecc_type):
-                final_ids.append(orig_id)
-            else:
-                # Fallback: generate new ID
-                final_ids.append(f"{ecc_type}{len(final_ids)+1}")
+            orig_id = str(row["original_id"])
+            match = pattern.match(orig_id)
+            if match:
+                num = int(match.group(1))
+                if num not in seen_numbers:
+                    final_ids.append(orig_id)
+                    seen_numbers.add(num)
+                    continue
+
+            next_num += 1
+            final_ids.append(f"{ecc_type}{next_num}")
 
         # Get inferred entries - continue numbering from confirmed
         inferred_df = df[(df["eccDNA_type"] == ecc_type) & (df["State"] == "Inferred")]
         if len(inferred_df) > 0:
-            # Extract max number from confirmed IDs
-            max_num = 0
-            for _, row in confirmed_df.iterrows():
-                id_str = row["original_id"]
-                if id_str.startswith(ecc_type):
-                    try:
-                        num = int(id_str.replace(ecc_type, ""))
-                        max_num = max(max_num, num)
-                    except (ValueError, TypeError):
-                        pass
-
             # Continue numbering for inferred
             for i in range(len(inferred_df)):
-                final_ids.append(f"{ecc_type}{max_num + i + 1}")
+                next_num += 1
+                final_ids.append(f"{ecc_type}{next_num}")
 
     # Set the final eccDNA_id
     df["eccDNA_id"] = final_ids

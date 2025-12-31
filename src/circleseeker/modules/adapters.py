@@ -34,7 +34,7 @@ class CLIModuleAdapter(ModuleBase):
     def validate_inputs(self, **kwargs) -> bool:
         """Basic validation - check if required files exist."""
         # Check common input files
-        for key in ["input_file", "input", "fasta_file", "blast_file"]:
+        for key in ["input_file", "input", "fasta_file", "alignment_file"]:
             if key in kwargs and kwargs[key]:
                 file_path = Path(kwargs[key])
                 if not file_path.exists():
@@ -167,9 +167,9 @@ class UMClassifyAdapter(CLIModuleAdapter):
             # Create module instance
             classifier = UMeccClassifier(logger=self.logger)
 
-            # Read BLAST results
-            blast_file = Path(kwargs["blast_file"])
-            df = classifier.read_blast_results(blast_file)
+            # Read alignment results
+            alignment_file = Path(kwargs["alignment_file"])
+            df = classifier.read_alignment_results(alignment_file)
 
             # Classify
             uecc_df, mecc_df, unclassified_df = classifier.classify(df)
@@ -203,46 +203,3 @@ class UMClassifyAdapter(CLIModuleAdapter):
             # Fallback to CLI mode
             return super().execute(**kwargs)
 
-
-class ReadFilterAdapter(CLIModuleAdapter):
-    """Specific adapter for read_filter module."""
-
-    def __init__(self, **kwargs):
-        module_path = "src/circleseeker/modules/read_filter.py"
-        super().__init__(module_path=module_path, name="read_filter", **kwargs)
-
-    def execute(self, **kwargs) -> ModuleResult:
-        """Execute read_filter with specific handling."""
-        try:
-            from circleseeker.modules.read_filter import ReadFilter
-
-            # Create module instance
-            filter_module = ReadFilter(
-                fasta_file=kwargs["fasta_file"],
-                csv_file=kwargs["csv_file"],
-                output_file=kwargs.get("output_file", "filtered.fasta"),
-                logger=self.logger,
-            )
-
-            # Run filter
-            stats = filter_module.filter_reads()
-
-            # Create result
-            result = ModuleResult(success=True, module_name=self.name)
-
-            output_file = Path(kwargs.get("output_file", "filtered.fasta"))
-            if output_file.exists():
-                result.add_output("filtered_fasta", output_file)
-
-            # Add metrics
-            if stats:
-                result.add_metric("total_reads", stats.total_reads)
-                result.add_metric("filtered_reads", stats.filtered_reads)
-                result.add_metric("retained_reads", stats.retained_reads)
-                result.add_metric("filtered_percentage", stats.filtered_percentage)
-
-            return result
-
-        except ImportError:
-            # Fallback to CLI mode
-            return super().execute(**kwargs)

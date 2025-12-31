@@ -24,7 +24,6 @@ from circleseeker.modules.adapters import (
     CLIModuleAdapter,
     TandemToRingAdapter,
     UMClassifyAdapter,
-    ReadFilterAdapter,
 )
 
 __all__ = [
@@ -45,5 +44,4 @@ __all__ = [
     "CLIModuleAdapter",
     "TandemToRingAdapter",
     "UMClassifyAdapter",
-    "ReadFilterAdapter",
 ]

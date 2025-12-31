@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "circleseeker"
-version = "0.9.5"
+version = "0.9.8"
 description = "Comprehensive eccDNA detection from PacBio HiFi sequencing data"
 readme = "README.md"
 authors = [
@@ -14,10 +14,11 @@ authors = [
 maintainers = [
     {name = "Yaoxin Zhang", email = "yxzhang@ncgr.ac.cn"}
 ]
-license = "GPL-2.0-only"
+license = { file = "LICENSE" }
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",

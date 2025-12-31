@@ -1,6 +1,7 @@
 # Include documentation
 include README.md
 include LICENSE
+include COMMERCIAL_LICENSE.md
 # include CHANGELOG.md  # Add when created
 
 # Requirements are now in pyproject.toml

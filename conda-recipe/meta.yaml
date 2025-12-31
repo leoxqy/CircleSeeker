@@ -1,5 +1,5 @@
 {% set name = "circleseeker" %}
-{% set version = "0.9.5" %}
+{% set version = "0.9.8" %}
 
 package:
   name: {{ name|lower }}
@@ -65,7 +65,7 @@ test:
 
 about:
   home: https://github.com/yaoxinzhang/CircleSeeker
-  license: GPL-2.0-only
+  license: GPL-3.0-only
   license_family: GPL
   summary: Comprehensive eccDNA detection from PacBio HiFi sequencing data with dual-engine support
   description: |

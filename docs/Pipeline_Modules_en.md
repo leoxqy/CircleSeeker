@@ -1,4 +1,4 @@
-# CircleSeeker Pipeline Modules (v0.9.5)
+# CircleSeeker Pipeline Modules (v0.9.8)
 
 This document summarizes the 16-step CircleSeeker pipeline for English-speaking users.
 
@@ -46,10 +46,10 @@ Intermediates reside in `<output>/.tmp_work/`, and the final artifacts are copie
 
 ### 3.1 Detection (Steps 1-6)
 
-1. **make_blastdb** - Build BLAST index from the reference genome.
+1. **make_blastdb** - Build BLAST index from the reference genome (skipped when `tools.aligner=minimap2`).
 2. **tidehunter** - Identify tandem repeats characteristic of rolling-circle amplification.
 3. **tandem_to_ring** - Convert repeats into circular candidates via overlap graph analysis.
-4. **run_blast** - Align candidates back to the reference to obtain genomic context.
+4. **run_blast** - Align candidates back to the reference to obtain genomic context (BLAST or minimap2 with PAF-to-BLAST conversion).
 5. **um_classify** - Categorize alignments into UeccDNA or MeccDNA, retaining unclassified records.
 6. **cecc_build** - Assemble complex eccDNA (CeccDNA) structures from multi-segment hits.
 
@@ -80,7 +80,7 @@ Intermediates reside in `<output>/.tmp_work/`, and the final artifacts are copie
 
 ## 4. Operational Notes
 
-- **External dependencies** Ensure `tidehunter`, `blastn`, `cd-hit-est`, `minimap2`, `samtools`, `cresil` (or `cyrcular`) are available in `PATH`. v0.9.4 adds a pre-flight dependency check that validates all required tools before pipeline execution, with clear error messages and installation hints.
+- **External dependencies** Ensure `tidehunter`, `cd-hit-est`, `minimap2`, `samtools`, `cresil` (or `cyrcular`) are available in `PATH`. If `tools.aligner=blast`, `blastn` and `makeblastdb` are also required. v0.9.4 adds a pre-flight dependency check that validates all required tools before pipeline execution, with clear error messages and installation hints.
 - **Checkpointing** Each step updates `<prefix>.checkpoint`. Use `--resume` to continue or `--force` to rerun from scratch.
 - **Configuration** Parameters are managed through `circleseeker.config.Config`; command-line arguments override YAML.
 - **Debug tooling** `circleseeker --debug --show-steps` reveals progress; `show-checkpoint` lists checkpoint details.

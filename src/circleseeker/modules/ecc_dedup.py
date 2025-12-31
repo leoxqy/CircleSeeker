@@ -119,7 +119,10 @@ def natural_sort_eccdna_id(df: pd.DataFrame) -> pd.DataFrame:
     # Extract type prefix and numeric part for natural sorting
     df = df.copy()
     df["_type_prefix"] = df["eccDNA_id"].str.extract(r"([A-Za-z]+)", expand=False)
-    df["_id_number"] = df["eccDNA_id"].str.extract(r"(\d+)", expand=False).astype(int)
+    df["_id_number"] = to_numeric_safe(
+        df["eccDNA_id"].str.extract(r"(\d+)", expand=False),
+        default=-1,
+    )
 
     # Sort by type prefix first, then by numeric ID
     df = df.sort_values(["_type_prefix", "_id_number"]).drop(columns=["_type_prefix", "_id_number"])
@@ -1356,8 +1359,9 @@ class eccDedup:
         df[ColumnStandard.ECCDNA_TYPE] = "Uecc"
 
         df["type_prefix"] = df[ColumnStandard.ECCDNA_ID].str.extract(r"([A-Za-z]+)", expand=False)
-        df["id_number"] = (
-            df[ColumnStandard.ECCDNA_ID].str.extract(r"(\d+)", expand=False).astype(int)
+        df["id_number"] = to_numeric_safe(
+            df[ColumnStandard.ECCDNA_ID].str.extract(r"(\d+)", expand=False),
+            default=-1,
         )
         df = df.sort_values(["type_prefix", "id_number"])
         df = df.drop(columns=["type_prefix", "id_number"])
@@ -1476,7 +1480,10 @@ class eccDedup:
 
         # Sort by eccDNA_id first (natural sort), then by position for multi-site entries
         df["type_prefix"] = df["eccDNA_id"].str.extract(r"([A-Za-z]+)", expand=False)
-        df["id_number"] = df["eccDNA_id"].str.extract(r"(\d+)", expand=False).astype(int)
+        df["id_number"] = to_numeric_safe(
+            df["eccDNA_id"].str.extract(r"(\d+)", expand=False),
+            default=-1,
+        )
         df = df.sort_values(["type_prefix", "id_number", ColumnStandard.START0])
         df = df.drop(columns=["type_prefix", "id_number"])
 
@@ -1578,8 +1585,13 @@ class eccDedup:
         self.logger.info(f"Wrote {bed_file}")
 
         # Write BestSite BED
-        if "bit_score" in df.columns:
+        # Select best alignment per eccDNA using available quality metrics
+        # Priority: bit_score (if non-zero) > alignment_length > first row
+        if "bit_score" in df.columns and (df["bit_score"] != 0).any():
             best_idx = df.groupby("eccDNA_id")["bit_score"].idxmax()
+            best_df = df.loc[best_idx].copy()
+        elif "alignment_length" in df.columns:
+            best_idx = df.groupby("eccDNA_id")["alignment_length"].idxmax()
             best_df = df.loc[best_idx].copy()
         else:
             best_df = df.groupby("eccDNA_id").head(1).copy()
@@ -1671,7 +1683,10 @@ class eccDedup:
 
         # Sort by eccDNA_id first using natural sort
         df["type_prefix"] = df["eccDNA_id"].str.extract(r"([A-Za-z]+)", expand=False)
-        df["id_number"] = df["eccDNA_id"].str.extract(r"(\d+)", expand=False).astype(int)
+        df["id_number"] = to_numeric_safe(
+            df["eccDNA_id"].str.extract(r"(\d+)", expand=False),
+            default=-1,
+        )
         df = df.sort_values(["type_prefix", "id_number"])
         df = df.drop(columns=["type_prefix", "id_number"])
 

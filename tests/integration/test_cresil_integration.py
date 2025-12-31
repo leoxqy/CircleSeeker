@@ -45,19 +45,20 @@ def test_conversion():
 
     # Create mock Cresil data
     cresil_data = {
-        "id": ["ec1", "ec2", "ec3", "ec4"],
+        "id": ["ec1", "ec2", "ec3", "ec4", "ec5"],
         "merge_region": [
             "chr2:47242017-47243061_-",
             "chr2:128071984-128072363_+",
             "chr8:129264432-129269966_-",
             "chr1:1000-1500_-;chr1:2000-2500_-",
+            "chr1:3000-3500_-|chr1:3600-3700_-",
         ],
-        "merge_len": [1045, 380, 5535, 1000],
-        "num_region": [1, 1, 1, 2],
-        "ctc": [True, True, True, True],
-        "numreads": [5, 1, 14, 6],
-        "totalbase": [52522, 9120, 161471, 48000],
-        "coverage": [50.26, 24.00, 29.17, 48.0],
+        "merge_len": [1045, 380, 5535, 1000, 1200],
+        "num_region": [1, 1, 1, 2, 3],
+        "ctc": [True, True, True, True, True],
+        "numreads": [5, 1, 14, 6, 2],
+        "totalbase": [52522, 9120, 161471, 48000, 24000],
+        "coverage": [50.26, 24.00, 29.17, 48.0, 20.0],
     }
 
     df = pd.DataFrame(cresil_data)
@@ -84,6 +85,9 @@ def test_conversion():
 
         print("\n  Sample output:")
         print(result_df[["circle_id", "regions", "circle_length", "segment_count"]].head())
+
+        mismatch_row = result_df[result_df["circle_id"] == "ec5"].iloc[0]
+        assert mismatch_row["segment_count"] == 2
 
         print("\nFormat conversion test passed!\n")
 

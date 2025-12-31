@@ -89,7 +89,8 @@ class Varlociraptor(ExternalTool):
             try:
                 subprocess.run(cmd, stdout=fout, stderr=subprocess.PIPE, check=True)
             except subprocess.CalledProcessError as e:
-                raise PipelineError(f"varlociraptor call variants failed: {e.stderr}")
+                err_text = e.stderr.decode(errors="ignore") if e.stderr else ""
+                raise PipelineError(f"varlociraptor call variants failed: {err_text}")
 
     def filter_calls_fdr_local_smart(
         self,
@@ -124,14 +125,12 @@ class Varlociraptor(ExternalTool):
                 str(input_calls_bcf),
             ],
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
         )
 
         p2 = subprocess.Popen(
             [self.tool_name, "decode-phred"],
             stdin=p1.stdout,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
         )
 
         p3 = subprocess.Popen(
@@ -147,7 +146,6 @@ class Varlociraptor(ExternalTool):
                 "-",
             ],
             stdin=p2.stdout,
-            stderr=subprocess.PIPE,
         )
 
         # Ensure upstream pipes close
@@ -162,10 +160,12 @@ class Varlociraptor(ExternalTool):
 
         if rc1 != 0:
             _, err = p1.communicate()
-            raise PipelineError(f"varlociraptor filter-calls failed: {err.decode(errors='ignore')}")
+            err_text = err.decode(errors="ignore") if err else ""
+            raise PipelineError(f"varlociraptor filter-calls failed: {err_text}")
         if rc2 != 0:
             _, err = p2.communicate()
-            raise PipelineError(f"varlociraptor decode-phred failed: {err.decode(errors='ignore')}")
+            err_text = err.decode(errors="ignore") if err else ""
+            raise PipelineError(f"varlociraptor decode-phred failed: {err_text}")
         if rc3 != 0:
             err = p3.stderr.read().decode(errors="ignore") if p3.stderr else ""
             raise PipelineError(f"bcftools sort failed: {err}")

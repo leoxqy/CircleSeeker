@@ -17,7 +17,18 @@
       "Bash(/opt/homebrew/bin/gh repo fork:*)",
       "Bash(git commit:*)",
       "Bash(/opt/homebrew/bin/gh pr create:*)",
-      "Bash(/opt/homebrew/bin/gh pr edit 61619 --repo bioconda/bioconda-recipes --body \"$\\(cat <<''EOF''\n## Description\n\nThis PR adds a new recipe for **CircleSeeker**, a comprehensive bioinformatics pipeline for detection, classification, and characterization of extrachromosomal circular DNA \\(eccDNA\\) from PacBio HiFi long-read sequencing data.\n\n## Features\n\n- **Dual-engine support**: Cresil \\(preferred\\) and Cyrcular \\(fallback\\) with intelligent auto-selection\n- **Comprehensive eccDNA classification**: UeccDNA, MeccDNA, CeccDNA, XeccDNA\n- **16-step automated pipeline** with checkpoint and resumption capabilities\n- **Detailed HTML reports** and comprehensive output formats \\(CSV, BED, BEDPE, FASTA\\)\n\n## Links\n\n- **Homepage**: https://github.com/leoxqy/CircleSeeker\n- **Documentation**: https://github.com/leoxqy/CircleSeeker#readme\n- **License**: GPL-2.0-only\n\n## Checklist\n\n- [x] Tested recipe locally\n- [x] License file included\n- [x] Recipe follows bioconda guidelines\n- [x] Version pinned correctly\nEOF\n\\)\")"
+      "Bash(/opt/homebrew/bin/gh pr edit 61619 --repo bioconda/bioconda-recipes --body \"$\\(cat <<''EOF''\n## Description\n\nThis PR adds a new recipe for **CircleSeeker**, a comprehensive bioinformatics pipeline for detection, classification, and characterization of extrachromosomal circular DNA \\(eccDNA\\) from PacBio HiFi long-read sequencing data.\n\n## Features\n\n- **Dual-engine support**: Cresil \\(preferred\\) and Cyrcular \\(fallback\\) with intelligent auto-selection\n- **Comprehensive eccDNA classification**: UeccDNA, MeccDNA, CeccDNA, XeccDNA\n- **16-step automated pipeline** with checkpoint and resumption capabilities\n- **Detailed HTML reports** and comprehensive output formats \\(CSV, BED, BEDPE, FASTA\\)\n\n## Links\n\n- **Homepage**: https://github.com/leoxqy/CircleSeeker\n- **Documentation**: https://github.com/leoxqy/CircleSeeker#readme\n- **License**: GPL-2.0-only\n\n## Checklist\n\n- [x] Tested recipe locally\n- [x] License file included\n- [x] Recipe follows bioconda guidelines\n- [x] Version pinned correctly\nEOF\n\\)\")",
+      "Bash(python -m pytest:*)",
+      "Bash(xargs:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(rm:*)",
+      "Bash(mv:*)",
+      "Bash(wc:*)",
+      "Bash(tar:*)",
+      "Bash(python -m build:*)",
+      "Bash(cat:*)",
+      "Bash(git log:*)"
     ]
   }
 }

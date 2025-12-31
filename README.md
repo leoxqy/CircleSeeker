@@ -4,9 +4,9 @@
 
 # CircleSeeker
 
-[![Version](https://img.shields.io/badge/version-0.9.5-blue.svg)](https://github.com/yaoxinzhang/CircleSeeker)
+[![Version](https://img.shields.io/badge/version-0.9.8-blue.svg)](https://github.com/yaoxinzhang/CircleSeeker)
 [![Python](https://img.shields.io/badge/python-≥3.9-blue.svg)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-GPL--2.0-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
 
 Comprehensive detection and characterization of extrachromosomal circular DNA (eccDNA) from PacBio HiFi sequencing data.
 
@@ -48,7 +48,7 @@ conda install -c conda-forge -y \
 # 3. Bioinformatics tools (bioconda)
 conda install -c bioconda -c conda-forge -y \
   minimap2 samtools bcftools \
-  tidehunter blast cd-hit \
+  tidehunter cd-hit \
   varlociraptor cyrcular \
   bedtools mappy
 
@@ -106,29 +106,29 @@ circleseeker \
 
 CircleSeeker implements a 16-step analysis pipeline:
 
-### Detection Phase (Steps 1-6)
-1. **make_blastdb** - Build BLAST database from reference
-2. **tidehunter** - Detect tandem repeats in HiFi reads
-3. **tandem_to_ring** - Convert tandem repeats to circular candidates
-4. **run_blast** - Map candidates to reference genome
-5. **um_classify** - Classify eccDNA as Unique (U) or Multiple (M) origin
-6. **cecc_build** - Identify Complex (C) eccDNA
+### Detection Phase (Steps 0-5)
+0. **check_dependencies** - Validate required tools and dependencies
+1. **tidehunter** - Detect tandem repeats in HiFi reads
+2. **tandem_to_ring** - Convert tandem repeats to circular candidates
+3. **run_alignment** - Map candidates to reference genome (minimap2)
+4. **um_classify** - Classify eccDNA as Unique (U) or Multiple (M) origin
+5. **cecc_build** - Identify Complex (C) eccDNA
 
-### Processing Phase (Steps 7-10)
-7. **umc_process** - Process and cluster U/M/C types
-8. **cd_hit** - Remove redundancy (90% identity threshold)
-9. **ecc_dedup** - Deduplicate and standardize coordinates
-10. **read_filter** - Filter confirmed eccDNA reads
+### Processing Phase (Steps 6-9)
+6. **umc_process** - Process and cluster U/M/C types
+7. **cd_hit** - Remove redundancy (90% identity threshold)
+8. **ecc_dedup** - Deduplicate and standardize coordinates
+9. **read_filter** - Filter confirmed eccDNA reads
 
-### Inference Phase (Steps 11-13)
-11. **minimap2** - Prepare reference index (generates BAM only when Cyrcular is used)
-12. **ecc_inference** - Detect eccDNA (Cresil preferred, Cyrcular fallback)
-13. **iecc_curator** - Curate inferred eccDNA
+### Inference Phase (Steps 10-12)
+10. **minimap2** - Prepare reference index (generates BAM only when Cyrcular is used)
+11. **ecc_inference** - Detect eccDNA (Cresil preferred, Cyrcular fallback)
+12. **curate_inferred_ecc** - Curate inferred eccDNA
 
-### Integration Phase (Steps 14-16)
-14. **ecc_unify** - Merge confirmed and inferred results
-15. **ecc_summary** - Generate statistics and summaries
-16. **ecc_packager** - Package final outputs
+### Integration Phase (Steps 13-15)
+13. **ecc_unify** - Merge confirmed and inferred results
+14. **ecc_summary** - Generate statistics and summaries
+15. **ecc_packager** - Package final outputs
 
 ## Output Files
 
@@ -180,16 +180,11 @@ Create a custom configuration file in YAML format:
 
 ```yaml
 # Basic settings
-threads: 16
+performance:
+  threads: 16
 
 # Tool-specific parameters
 tools:
-  blast:
-    word_size: 100
-    evalue: "1e-50"
-    perc_identity: 99.0
-    soft_masking: false
-
   tidehunter:
     k: 16
     w: 1
@@ -198,8 +193,14 @@ tools:
     e: 0.1
     f: 2
 
-  minimap2:
+  minimap2_align:  # For candidate alignment (Step 3)
+    preset: "sr"
+    max_target_seqs: 200
+    additional_args: ""
+
+  minimap2:  # For read mapping (Step 10)
     preset: "map-hifi"
+    additional_args: ""
 ```
 
 For a complete list of configuration options, see the [configuration reference](docs/CLI_Reference.md).
@@ -230,12 +231,15 @@ For a complete list of configuration options, see the [configuration reference](
 | Tool | Version | Description |
 |------|---------|-------------|
 | TideHunter | ≥1.4.0 | Tandem repeat detection |
-| BLAST+ | ≥2.12.0 | Sequence alignment (makeblastdb, blastn) |
-| minimap2 | ≥2.24 | Read-to-reference mapping |
+| minimap2 | ≥2.24 | Sequence alignment and read mapping |
 | samtools | ≥1.17 | BAM file processing |
-| bcftools | ≥1.17 | BCF/VCF processing |
 | CD-HIT | ≥4.8.1 | Sequence clustering (cd-hit-est) |
-| varlociraptor | ≥5.0.0 | Variant calling (for Cyrcular) |
+
+### External Tools (Optional - for Cyrcular inference)
+| Tool | Version | Description |
+|------|---------|-------------|
+| bcftools | ≥1.17 | BCF/VCF processing |
+| varlociraptor | ≥5.0.0 | Variant calling |
 
 ### Inference Engines (At least one required)
 | Tool | Description |
@@ -264,6 +268,21 @@ circleseeker -i test.fa -r ref.fa -o test_output
 
 ### Common Issues
 
+**FASTQ Input**: CircleSeeker requires FASTA format. Convert FASTQ first:
+```bash
+seqtk seq -A reads.fastq > reads.fasta
+```
+
+**Running in Background**: Use `nohup` instead of `&` to avoid multiprocessing issues:
+```bash
+# Recommended
+nohup circleseeker -i input.fa -r ref.fa -o output -t 16 > run.log 2>&1 &
+
+# Or use screen/tmux
+screen -S circleseeker
+circleseeker -i input.fa -r ref.fa -o output -t 16
+```
+
 **Out of Memory**: Reduce thread count or increase available memory
 ```bash
 circleseeker -i input.fa -r ref.fa -t 4
@@ -272,7 +291,7 @@ circleseeker -i input.fa -r ref.fa -t 4
 **Missing Tools**: Install via conda
 ```bash
 conda install -c bioconda -c conda-forge \
-  tidehunter blast minimap2 samtools bcftools cd-hit varlociraptor
+  tidehunter minimap2 samtools bcftools cd-hit varlociraptor
 ```
 
 ## Documentation
@@ -292,7 +311,7 @@ CircleSeeker is the computational pipeline developed as part of the MMC-seq meth
 
 ## License
 
-GPL-2.0. See [LICENSE](LICENSE) for details.
+CircleSeeker is dual-licensed: GNU GPL v3.0 (see [LICENSE](LICENSE)) or a commercial license (see [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md)).
 
 ## Contact
 

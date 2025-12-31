@@ -1,6 +1,6 @@
 """Version information for CircleSeeker."""
 
-__version__ = "0.9.5"
+__version__ = "0.9.8"
 __author__ = "Yaoxin Zhang, Leo Xinqi Yu"
 __email__ = "yxzhang@ncgr.ac.cn, leoxqy@hotmail.com"
 __license__ = "GPL-2.0"

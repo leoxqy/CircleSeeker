@@ -216,10 +216,7 @@ def _execute_pipeline(opts: PipelineOptions, logger) -> None:
         click.echo(f"Using {cfg.threads} threads")
         return
 
-    # Check external tool dependencies
-    from circleseeker.utils.dependency_checker import check_dependencies
-
-    check_dependencies(logger=logger)
+    # Note: Dependency checking is now Step 0 of the pipeline
 
     # Import pipeline here to avoid circular imports
     from circleseeker.core.pipeline import Pipeline

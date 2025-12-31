@@ -14,8 +14,14 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from circleseeker.core.pipeline import (
-    PipelineStep, StepMetadata, PipelineState, Pipeline
+    PipelineStep,
+    StepMetadata,
+    PipelineState,
+    Pipeline,
+    ResultKeys,
 )
+from circleseeker.config import Config
+from circleseeker.exceptions import PipelineError
 
 
 class TestPipelineStep:
@@ -232,17 +238,20 @@ class TestPipeline:
     def test_pipeline_steps_definition(self):
         """Test that pipeline steps are properly defined."""
         steps = Pipeline.STEPS
-        assert len(steps) > 10  # Should have many steps
+        assert len(steps) >= 16  # Should have 16 steps (Step 0-15)
 
         # Check first few steps
         step_names = [step.name for step in steps]
-        assert "make_blastdb" in step_names
-        assert "tidehunter" in step_names
+        assert "check_dependencies" in step_names  # Step 0
+        assert "tidehunter" in step_names  # Step 1
         assert "tandem_to_ring" in step_names
-        assert "run_blast" in step_names
+        assert "run_alignment" in step_names
         assert "ecc_unify" in step_names
         assert "ecc_summary" in step_names
         assert "ecc_packager" in step_names
+
+        # Verify Step 0 is check_dependencies
+        assert steps[0].name == "check_dependencies"
 
     def test_result_key_aliases(self):
         """Test that Pipeline has STEPS defined."""
@@ -253,7 +262,7 @@ class TestPipeline:
         # Check some specific step names exist
         step_names = [step.name for step in Pipeline.STEPS]
         assert "tandem_to_ring" in step_names
-        assert "run_blast" in step_names
+        assert "run_alignment" in step_names
 
     @patch('circleseeker.core.pipeline.Config')
     @patch('circleseeker.core.pipeline.get_logger')
@@ -298,9 +307,55 @@ class TestPipeline:
         if "tandem_to_ring" in step_dict:
             assert step_dict["tandem_to_ring"].description == "Process TideHunter output"
 
+    def test_empty_fallback_fasta_skips_inference(self, tmp_path):
+        """Empty fallback FASTA should skip minimap2 alignment and inference."""
+        input_fasta = tmp_path / "input.fa"
+        reference = tmp_path / "ref.fa"
+
+        input_fasta.write_text(">r1\nACGT\n")
+        reference.write_text(">chr1\nACGT\n")
+
+        config = Config(
+            input_file=input_fasta,
+            reference=reference,
+            output_dir=tmp_path / "out",
+            prefix="sample",
+        )
+        pipeline = Pipeline(config)
+        pipeline._inference_tool = "cyrcular"
+
+        pipeline._step_minimap2()
+
+        assert pipeline.state.results.get(ResultKeys.INFERENCE_INPUT_EMPTY) is True
+        all_fasta = Path(pipeline.state.results[ResultKeys.ALL_FILTERED_FASTA])
+        assert all_fasta.exists()
+        assert all_fasta.stat().st_size == 0
+        assert ResultKeys.MINIMAP2_BAM not in pipeline.state.results
+
+        pipeline._step_ecc_inference()
+        assert pipeline.state.results[ResultKeys.CYRCULAR_RESULT_COUNT] == 0
+        assert pipeline.state.results[ResultKeys.CYRCULAR_OVERVIEW] is None
+
+    def test_run_validates_start_stop_range(self, tmp_path):
+        """Invalid start/stop ranges should raise a PipelineError."""
+        config = Config(output_dir=tmp_path / "out")
+        pipeline = Pipeline(config)
+
+        with pytest.raises(PipelineError):
+            pipeline.run(start_from=0)
+        with pytest.raises(PipelineError):
+            pipeline.run(stop_at=0)
+        with pytest.raises(PipelineError):
+            pipeline.run(start_from=len(Pipeline.STEPS) + 1)
+        with pytest.raises(PipelineError):
+            pipeline.run(stop_at=len(Pipeline.STEPS) + 1)
+        with pytest.raises(PipelineError):
+            pipeline.run(start_from=3, stop_at=2)
+
     @pytest.mark.parametrize("step_name,description", [
-        ("make_blastdb", "Build BLAST database"),
+        ("check_dependencies", "Check required tools and dependencies"),
         ("tidehunter", "Run TideHunter for tandem repeat detection"),
+        ("run_alignment", "Run minimap2 alignment"),
         ("ecc_unify", "Merge eccDNA tables into unified output"),
         ("ecc_summary", "Generate summary report"),
         ("ecc_packager", "Package output files"),

@@ -117,18 +117,6 @@ TOOLS = [
         min_version="1.17",
     ),
     Tool(
-        name="makeblastdb",
-        required=True,
-        purpose="BLAST database creation",
-        install_hint="conda install -c bioconda blast",
-    ),
-    Tool(
-        name="blastn",
-        required=True,
-        purpose="Sequence similarity search",
-        install_hint="conda install -c bioconda blast",
-    ),
-    Tool(
         name="cd-hit-est",
         required=True,
         purpose="Sequence clustering",
@@ -184,6 +172,7 @@ class DependencyChecker:
         self.logger.info("Checking dependencies...")
 
         for tool in TOOLS:
+            is_required = tool.required
             found_name = find_tool(tool.name, tool.alt_names)
             is_available = found_name is not None
 
@@ -209,7 +198,7 @@ class DependencyChecker:
                 else:
                     self.logger.debug(f"✓ {tool.name} found")
             else:
-                if tool.required:
+                if is_required:
                     self.missing_required.append(tool)
                     self.logger.error(f"✗ {tool.name} not found (REQUIRED)")
                 else:

@@ -312,6 +312,14 @@ class UeccProcessor:
         # Extract sequences and add IDs
         df = self.compute_sequences(df)
         df = self.add_numbering_and_export(df)
+        if "eccDNA_id" in df.columns:
+            unassigned_mask = df["eccDNA_id"].isna() | (df["eccDNA_id"] == "NA")
+            if unassigned_mask.any():
+                self.logger.warning(
+                    "Dropping %d rows without eccDNA_id assignment",
+                    int(unassigned_mask.sum()),
+                )
+                df = df[~unassigned_mask].copy()
 
         # Save outputs
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -642,6 +650,14 @@ class MeccProcessor:
         # Extract sequences and add IDs
         df = self.compute_sequences(df)
         df = self.add_numbering_and_export(df)
+        if "eccDNA_id" in df.columns:
+            unassigned_mask = df["eccDNA_id"].isna() | (df["eccDNA_id"] == "NA")
+            if unassigned_mask.any():
+                self.logger.warning(
+                    "Dropping %d rows without eccDNA_id assignment",
+                    int(unassigned_mask.sum()),
+                )
+                df = df[~unassigned_mask].copy()
 
         # Save outputs
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -965,6 +981,14 @@ class CeccProcessor:
         # Extract sequences and add IDs
         df = self.compute_sequences(df)
         df = self.add_numbering_and_export(df)
+        if "eccDNA_id" in df.columns:
+            unassigned_mask = df["eccDNA_id"].isna() | (df["eccDNA_id"] == "NA")
+            if unassigned_mask.any():
+                self.logger.warning(
+                    "Dropping %d rows without eccDNA_id assignment",
+                    int(unassigned_mask.sum()),
+                )
+                df = df[~unassigned_mask].copy()
 
         # Save outputs
         output_dir.mkdir(parents=True, exist_ok=True)

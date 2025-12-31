@@ -104,118 +104,6 @@ class TideHunterModule(ExternalToolModule):
         return result
 
 
-class BlastModule(ExternalToolModule):
-    """Wrapper for BLAST sequence similarity search."""
-
-    def __init__(self, **kwargs):
-        super().__init__(tool_name="blastn", **kwargs)
-        self.evalue = 1e-5
-        self.max_target_seqs = 100
-        self.outfmt = 6  # Tabular format
-
-    def check_tool_availability(self) -> bool:
-        """Check if BLAST is available."""
-        return shutil.which("blastn") is not None and shutil.which("makeblastdb") is not None
-
-    def get_tool_version(self) -> str:
-        """Get BLAST version."""
-        try:
-            result = subprocess.run(["blastn", "-version"], capture_output=True, text=True)
-            return result.stdout.split("\n")[0]
-        except (OSError, subprocess.SubprocessError, IndexError):
-            return "unknown"
-
-    def validate_inputs(self, **kwargs) -> bool:
-        """Validate inputs for BLAST."""
-        required = ["query_file", "db_file"]
-        for req in required:
-            if req not in kwargs:
-                raise ValueError(f"{req} is required")
-
-            file_path = Path(kwargs[req])
-            if not file_path.exists():
-                raise FileNotFoundError(f"File not found: {file_path}")
-
-        return True
-
-    def execute(self, **kwargs) -> ModuleResult:
-        """Run BLAST search."""
-        result = ModuleResult(success=False, module_name=self.name)
-
-        # Check tool availability
-        if not self.check_tool_availability():
-            result.error_message = "BLAST tools not found in PATH"
-            result.add_warning("Please install BLAST+ or add it to PATH")
-            return result
-
-        query_file = Path(kwargs["query_file"])
-        db_file = Path(kwargs["db_file"])
-        output_file = Path(kwargs.get("output_file", "blast_results.tsv"))
-        threads = kwargs.get("threads", 4)
-
-        # Get parameters from kwargs
-        self.evalue = kwargs.get("evalue", self.evalue)
-        self.max_target_seqs = kwargs.get("max_target_seqs", self.max_target_seqs)
-
-        # Create BLAST database
-        db_path = output_file.parent / "blast_db"
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-
-        try:
-            # Make BLAST database
-            self.logger.info("Creating BLAST database...")
-            cmd_makedb = [
-                "makeblastdb",
-                "-in",
-                str(db_file),
-                "-dbtype",
-                "nucl",
-                "-out",
-                str(db_path),
-            ]
-
-            subprocess.run(cmd_makedb, check=True, capture_output=True)
-
-            # Run BLAST
-            self.logger.info("Running BLAST search...")
-            cmd_blast = [
-                "blastn",
-                "-query",
-                str(query_file),
-                "-db",
-                str(db_path),
-                "-out",
-                str(output_file),
-                "-outfmt",
-                str(self.outfmt),
-                "-evalue",
-                str(self.evalue),
-                "-max_target_seqs",
-                str(self.max_target_seqs),
-                "-num_threads",
-                str(threads),
-            ]
-
-            subprocess.run(cmd_blast, capture_output=True, text=True, check=True)
-
-            result.success = True
-            result.add_output("blast_results", output_file)
-
-            # Count hits
-            if output_file.exists():
-                with open(output_file, "r") as f:
-                    num_hits = sum(1 for line in f if line.strip())
-                result.add_metric("num_hits", num_hits)
-
-            self.logger.info(f"BLAST found {num_hits} hits")
-
-        except subprocess.CalledProcessError as e:
-            result.error_message = f"BLAST failed: {e.stderr}"
-            self.logger.error(result.error_message)
-
-        return result
-
-
 class CDHitModule(ExternalToolModule):
     """Wrapper for CD-HIT sequence clustering tool."""
 
@@ -377,9 +265,7 @@ class Minimap2Module(ExternalToolModule):
             ]
 
             # Use Popen to safely pipe minimap2 output to samtools
-            minimap2_proc = subprocess.Popen(
-                minimap2_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-            )
+            minimap2_proc = subprocess.Popen(minimap2_cmd, stdout=subprocess.PIPE)
             samtools_proc = subprocess.Popen(
                 samtools_cmd, stdin=minimap2_proc.stdout,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE

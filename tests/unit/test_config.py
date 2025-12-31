@@ -82,10 +82,10 @@ class TestToolConfig:
         assert config.tidehunter["e"] == 0.1
         assert config.tidehunter["f"] == 2
 
-        # Check blast defaults
-        assert config.blast["word_size"] == 100
-        assert config.blast["evalue"] == "1e-50"
-        assert config.blast["perc_identity"] == 99.0
+        # Check minimap2_align defaults
+        assert config.minimap2_align["preset"] == "sr"
+        assert config.minimap2_align["max_target_seqs"] == 200
+        assert config.minimap2_align["additional_args"] == ""
 
         # Check minimap2 defaults
         assert config.minimap2["preset"] == "map-hifi"
@@ -98,15 +98,15 @@ class TestToolConfig:
         """Test ToolConfig with custom values."""
         config = ToolConfig(
             tidehunter={"k": 20, "w": 2},
-            blast={"word_size": 50, "evalue": "1e-10"},
+            minimap2_align={"preset": "sr", "max_target_seqs": 100, "additional_args": "--secondary=no"},
             minimap2={"preset": "map-ont", "additional_args": "-k 15"},
             samtools={"sort_memory": "4G"}
         )
 
         assert config.tidehunter["k"] == 20
         assert config.tidehunter["w"] == 2
-        assert config.blast["word_size"] == 50
-        assert config.blast["evalue"] == "1e-10"
+        assert config.minimap2_align["preset"] == "sr"
+        assert config.minimap2_align["additional_args"] == "--secondary=no"
         assert config.minimap2["preset"] == "map-ont"
         assert config.minimap2["additional_args"] == "-k 15"
         assert config.samtools["sort_memory"] == "4G"
@@ -125,11 +125,8 @@ class TestConfig:
         assert config.enable_xecc is True
 
         # Check skip flags
-        assert config.skip_make_db is False
         assert config.skip_tidehunter is False
         assert config.skip_carousel is False
-        assert config.skip_blast is False
-        assert config.skip_gatekeeper is False
         assert config.skip_organize is False
 
         # Check sub-configurations exist
@@ -149,8 +146,9 @@ class TestConfig:
             output_dir=output_dir,
             prefix="test_sample",
             enable_xecc=False,
-            skip_make_db=True,
-            skip_tidehunter=True
+            skip_tidehunter=True,
+            skip_carousel=True,
+            skip_organize=True,
         )
 
         assert config.input_file == input_file
@@ -158,8 +156,9 @@ class TestConfig:
         assert config.output_dir == output_dir
         assert config.prefix == "test_sample"
         assert config.enable_xecc is False
-        assert config.skip_make_db is True
         assert config.skip_tidehunter is True
+        assert config.skip_carousel is True
+        assert config.skip_organize is True
 
     def test_config_threads_property(self):
         """Test threads property getter and setter."""
@@ -189,29 +188,11 @@ class TestConfig:
         """Test canonical skip flag properties."""
         config = Config()
 
-        # Test skip_make_blastdb property
-        assert config.skip_make_blastdb is False
-        config.skip_make_blastdb = True
-        assert config.skip_make_blastdb is True
-        assert config.skip_make_db is True
-
         # Test skip_tandem_to_ring property
         assert config.skip_tandem_to_ring is False
         config.skip_tandem_to_ring = True
         assert config.skip_tandem_to_ring is True
         assert config.skip_carousel is True
-
-        # Test skip_run_blast property
-        assert config.skip_run_blast is False
-        config.skip_run_blast = True
-        assert config.skip_run_blast is True
-        assert config.skip_blast is True
-
-        # Test skip_um_classify property
-        assert config.skip_um_classify is False
-        config.skip_um_classify = True
-        assert config.skip_um_classify is True
-        assert config.skip_gatekeeper is True
 
     def test_config_validate_missing_required(self):
         """Test config validation with missing required fields."""
@@ -345,9 +326,9 @@ class TestLoadConfig:
                 "threads": 16
             },
             "tools": {
-                "blast": {
-                    "evalue": "1e-10",
-                    "word_size": 50
+                "minimap2_align": {
+                    "preset": "sr",
+                    "max_target_seqs": 100
                 }
             }
         }
@@ -361,8 +342,44 @@ class TestLoadConfig:
 
             assert config.input_file == Path("test.fasta")
             assert config.performance.threads == 16
-            assert config.tools.blast["evalue"] == "1e-10"
-            assert config.tools.blast["word_size"] == 50
+            assert config.tools.minimap2_align["preset"] == "sr"
+            assert config.tools.minimap2_align["max_target_seqs"] == 100
+        finally:
+            config_path.unlink()
+
+    def test_load_config_ignores_null_tool_config(self):
+        """Test that null tool configs do not override defaults."""
+        config_data = {
+            "tools": {
+                "minimap2_align": None,
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(config_data, f)
+            config_path = Path(f.name)
+
+        try:
+            config = load_config(config_path)
+            assert isinstance(config.tools.minimap2_align, dict)
+            assert config.tools.minimap2_align["preset"] == "sr"
+        finally:
+            config_path.unlink()
+
+    def test_load_config_top_level_threads(self):
+        """Test loading top-level threads alias."""
+        config_data = {
+            "threads": 12,
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(config_data, f)
+            config_path = Path(f.name)
+
+        try:
+            config = load_config(config_path)
+            assert config.performance.threads == 12
+            assert config.threads == 12
         finally:
             config_path.unlink()
 
@@ -371,9 +388,9 @@ class TestLoadConfig:
         config_data = {
             "input_file": "test.fasta",
             "reference": "ref.fa",
-            "skip_make_db": True,
             "skip_tidehunter": True,
-            "skip_blast": True
+            "skip_carousel": True,
+            "skip_organize": True,
         }
 
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
@@ -383,12 +400,29 @@ class TestLoadConfig:
         try:
             config = load_config(config_path)
 
-            assert config.skip_make_db is True
             assert config.skip_tidehunter is True
-            assert config.skip_blast is True
+            assert config.skip_carousel is True
+            assert config.skip_organize is True
             # Test canonical properties
-            assert config.skip_make_blastdb is True
-            assert config.skip_run_blast is True
+            assert config.skip_tandem_to_ring is True
+        finally:
+            config_path.unlink()
+
+    def test_load_config_rejects_removed_skip_flags(self):
+        """Test loading config with removed skip flags."""
+        config_data = {
+            "input_file": "test.fasta",
+            "reference": "ref.fa",
+            "skip_run_alignment": True,
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(config_data, f)
+            config_path = Path(f.name)
+
+        try:
+            with pytest.raises(ConfigurationError):
+                load_config(config_path)
         finally:
             config_path.unlink()
 
@@ -433,7 +467,7 @@ class TestConfigIntegration:
         original_config = Config()
         original_config.prefix = "roundtrip_test"
         original_config.threads = 12
-        original_config.skip_make_blastdb = True
+        original_config.skip_tandem_to_ring = True
 
         # Save to YAML
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
@@ -447,7 +481,7 @@ class TestConfigIntegration:
             # Compare important values
             assert loaded_config.prefix == "roundtrip_test"
             assert loaded_config.performance.threads == 12
-            assert loaded_config.skip_make_db is True  # Note: uses legacy field name
-            assert loaded_config.skip_make_blastdb is True  # But canonical property works
+            assert loaded_config.skip_carousel is True
+            assert loaded_config.skip_tandem_to_ring is True
         finally:
             config_path.unlink()
