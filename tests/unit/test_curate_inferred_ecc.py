@@ -15,7 +15,7 @@ if str(SRC) not in sys.path:
 
 def _load_curate_inferred_ecc_module():
     package_name = "circleseeker.modules"
-    module_name = f"{package_name}.Iecc_curator"
+    module_name = f"{package_name}.iecc_curator"
 
     if module_name in sys.modules:
         return sys.modules[module_name]
@@ -29,7 +29,7 @@ def _load_curate_inferred_ecc_module():
 
     spec = importlib.util.spec_from_file_location(
         module_name,
-        SRC / "circleseeker" / "modules" / "Iecc_curator.py",
+        SRC / "circleseeker" / "modules" / "iecc_curator.py",
     )
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
