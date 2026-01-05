@@ -4,8 +4,8 @@
 
 # CircleSeeker
 
-[![Version](https://img.shields.io/badge/version-0.9.15-blue.svg)](https://github.com/yaoxinzhang/CircleSeeker)
-[![CI](https://github.com/yaoxinzhang/CircleSeeker/actions/workflows/ci.yml/badge.svg)](https://github.com/yaoxinzhang/CircleSeeker/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-0.9.15-blue.svg)](https://github.com/leoxqy/CircleSeeker)
+[![CI](https://github.com/leoxqy/CircleSeeker/actions/workflows/ci.yml/badge.svg)](https://github.com/leoxqy/CircleSeeker/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-≥3.9-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
 
@@ -17,7 +17,7 @@ Comprehensive detection and characterization of extrachromosomal circular DNA (e
 
 ```bash
 # Clone repository
-git clone https://github.com/yaoxinzhang/CircleSeeker.git
+git clone https://github.com/leoxqy/CircleSeeker.git
 cd CircleSeeker
 
 # Create and activate environment

@@ -9,7 +9,7 @@ source:
   # For local builds from the working tree
   path: ..
   # For Bioconda, replace the above with an sdist or GitHub tag URL and sha256, e.g.:
-  # url: https://github.com/yaoxinzhang/CircleSeeker/archive/refs/tags/v{{ version }}.tar.gz
+  # url: https://github.com/leoxqy/CircleSeeker/archive/refs/tags/v{{ version }}.tar.gz
   # sha256: <fill-in-from-release>
 
 build:
@@ -63,7 +63,7 @@ test:
     - python -m pip check
 
 about:
-  home: https://github.com/yaoxinzhang/CircleSeeker
+  home: https://github.com/leoxqy/CircleSeeker
   license: GPL-3.0-only
   license_family: GPL
   summary: Comprehensive eccDNA detection from PacBio HiFi sequencing data with dual-engine support
@@ -80,10 +80,9 @@ about:
     - Detailed HTML reports and comprehensive output formats
     - Modular architecture with 16 processing steps
 
-  doc_url: https://github.com/yaoxinzhang/CircleSeeker#readme
-  dev_url: https://github.com/yaoxinzhang/CircleSeeker
+  doc_url: https://github.com/leoxqy/CircleSeeker#readme
+  dev_url: https://github.com/leoxqy/CircleSeeker
 
 extra:
   recipe-maintainers:
     - leoxqy
-    - yaoxinzhang

@@ -60,10 +60,10 @@ circleseeker = "circleseeker.cli:main"
 CircleSeeker = "circleseeker.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/yaoxinzhang/CircleSeeker"
-Documentation = "https://github.com/yaoxinzhang/CircleSeeker#readme"
-Repository = "https://github.com/yaoxinzhang/CircleSeeker.git"
-"Bug Tracker" = "https://github.com/yaoxinzhang/CircleSeeker/issues"
+Homepage = "https://github.com/leoxqy/CircleSeeker"
+Documentation = "https://github.com/leoxqy/CircleSeeker#readme"
+Repository = "https://github.com/leoxqy/CircleSeeker.git"
+"Bug Tracker" = "https://github.com/leoxqy/CircleSeeker/issues"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
