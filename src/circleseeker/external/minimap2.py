@@ -101,6 +101,8 @@ class Minimap2(ExternalTool):
                 index_path = Path(ref_str[:-6] + ".mmi")
             elif ref_str.endswith(".fa"):
                 index_path = Path(ref_str[:-3] + ".mmi")
+            elif ref_str.endswith(".fna"):
+                index_path = Path(ref_str[:-4] + ".mmi")
             else:
                 index_path = Path(ref_str + ".mmi")
         else:

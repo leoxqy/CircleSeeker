@@ -1,0 +1,5 @@
+eccDNA_id	chr	start0	end0	strand	length	eccdna_type	state	seg_index	seg_total	junction_role
+ICeccDNA1	chr1	399	500	+	500	Cecc	Inferred	1	2	head
+ICeccDNA1	chr1	599	650	+	500	Cecc	Inferred	2	2	tail
+ICeccDNA2	chr2	99	150	+	400	Cecc	Inferred	1	2	head
+ICeccDNA2	chr3	199	250	+	400	Cecc	Inferred	2	2	tail

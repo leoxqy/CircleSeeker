@@ -33,6 +33,11 @@ def validate_installation(full_check: bool = False) -> List[str]:
         except ImportError:
             issues.append(f"Missing Python module: {module}")
 
+    # If core Python dependencies are missing, importing CircleSeeker modules will be noisy
+    # and redundant. Report missing modules first and skip deeper checks.
+    if any(issue.startswith("Missing Python module:") for issue in issues):
+        return issues
+
     # Check external tools (basic check)
     if full_check:
         # CircleSeeker external tools with alternative names
@@ -59,10 +64,10 @@ def validate_installation(full_check: bool = False) -> List[str]:
 
     # Check CircleSeeker modules
     try:
-        from circleseeker.core.pipeline import Pipeline  # noqa: F401
-        from circleseeker.config import Config  # noqa: F401
-        from circleseeker.modules.tandem_to_ring import TandemToRing  # noqa: F401
-        from circleseeker.modules.um_classify import UMeccClassifier  # noqa: F401
+        importlib.import_module("circleseeker.core.pipeline")
+        importlib.import_module("circleseeker.config")
+        importlib.import_module("circleseeker.modules.tandem_to_ring")
+        importlib.import_module("circleseeker.modules.um_classify")
     except ImportError as e:
         issues.append(f"CircleSeeker module import error: {e}")
 

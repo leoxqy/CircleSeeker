@@ -90,10 +90,10 @@ class TestExternalToolError:
 
     def test_external_tool_error_with_command(self):
         """Test ExternalToolError with command information."""
-        command = ["blast", "-query", "input.fasta"]
-        error = ExternalToolError("BLAST failed", command=command)
+        command = ["minimap2", "-x", "sr", "ref.fa", "query.fa"]
+        error = ExternalToolError("minimap2 failed", command=command)
 
-        assert str(error) == "BLAST failed"
+        assert str(error) == "minimap2 failed"
         assert error.command == command
         assert error.returncode is None
         assert error.stderr is None
@@ -310,11 +310,11 @@ class TestExternalToolErrorSpecialFeatures:
     def test_external_tool_error_with_complex_command(self):
         """Test ExternalToolError with complex command structure."""
         complex_command = [
-            "blast", "-query", "input.fasta", "-db", "reference.fa",
-            "-out", "results.txt", "-evalue", "1e-5", "-num_threads", "8"
+            "minimap2", "-ax", "map-hifi", "-t", "8",
+            "ref.fa", "reads.fq", "-o", "results.sam", "--cs", "--secondary=yes"
         ]
 
-        error = ExternalToolError("BLAST execution failed", command=complex_command)
+        error = ExternalToolError("minimap2 execution failed", command=complex_command)
         assert error.command == complex_command
         assert len(error.command) == 11
 

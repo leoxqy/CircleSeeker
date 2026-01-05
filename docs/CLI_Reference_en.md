@@ -1,6 +1,6 @@
-# CircleSeeker CLI Reference (v0.9.8)
+# CircleSeeker CLI Reference (v0.9.15)
 
-This document describes the CircleSeeker 0.9.8 command-line interface for English-speaking users.
+This document describes the CircleSeeker 0.9.15 command-line interface for English-speaking users.
 
 ---
 
@@ -21,9 +21,7 @@ Common optional flags:
 - `-p, --prefix TEXT` Filename prefix (`sample` by default)
 - `-t, --threads INT` Number of threads (default 8)
 - `-c, --config PATH` Configuration file (YAML format)
-- `--aligner [blast|minimap2]` Candidate aligner (overrides config when set)
-- `--blast-word-mode [fast|slow]` BLAST word_size preset: fast=100, slow=40 (applies when `aligner=blast`)
-- `--keep-tmp / --no-keep-tmp` Retain or remove the temporary `.tmp_work` directory (default: remove); explicitly overrides the `keep_tmp` setting in config file
+- `--keep-tmp` Retain the temporary `.tmp_work` directory (default: remove); overrides `keep_tmp` in config
 
 ---
 
@@ -71,7 +69,7 @@ circleseeker --debug show-checkpoint -o results/ -p sample
 
 ## 5. Execution Lifecycle
 
-1. **Dependency check** At startup, CircleSeeker verifies that all required external tools (minimap2, samtools, cd-hit-est; plus blastn/makeblastdb when `tools.aligner=blast`) and at least one inference engine (cresil or cyrcular) are available. If dependencies are missing, clear error messages with installation hints are shown.
+1. **Dependency check** At startup, CircleSeeker verifies that all required external tools (minimap2, samtools, cd-hit-est) and at least one inference engine (cresil or cyrcular) are available. If dependencies are missing, clear error messages with installation hints are shown.
 2. **Temporary workspace** Intermediates live under `<output>/.tmp_work/` (configurable via `runtime.tmp_dir`, supports relative or absolute paths). Use `--keep-tmp` to retain them.
 3. **Config & checkpoints** During execution, `config.yaml` and `<prefix>.checkpoint` are saved in the output directory; they are automatically cleaned up on successful completion. Use `--keep-tmp` to preserve them for debugging or resuming interrupted runs.
 4. **Auto indexing** Missing `.mmi` or `.fai` triggers `minimap2 -d` and `samtools faidx` automatically.
@@ -83,10 +81,10 @@ circleseeker --debug show-checkpoint -o results/ -p sample
 
 | # | Name | Purpose |
 |---|------|---------|
-| 1 | `make_blastdb` | Build BLAST database |
+| 1 | `check_dependencies` | Verify required tools and inference engine |
 | 2 | `tidehunter` | Detect tandem repeats |
 | 3 | `tandem_to_ring` | Convert repeats to circular candidates |
-| 4 | `run_blast` | Align candidates back to the reference |
+| 4 | `run_alignment` | Align candidates back to the reference (minimap2) |
 | 5 | `um_classify` | Classify into UeccDNA / MeccDNA |
 | 6 | `cecc_build` | Assemble complex eccDNA |
 | 7 | `umc_process` | Consolidate U/M/C outputs |
@@ -95,7 +93,7 @@ circleseeker --debug show-checkpoint -o results/ -p sample
 |10 | `read_filter` | Filter confirmed eccDNA reads |
 |11 | `minimap2` | Prepare reference index / alignments |
 |12 | `ecc_inference` | Cresil inference (Cyrcular fallback) |
-|13 | `iecc_curator` | Curate inferred eccDNA |
+|13 | `curate_inferred_ecc` | Curate inferred eccDNA tables (`iecc_curator`) |
 |14 | `ecc_unify` | Merge confirmed and inferred tables using segment overlap algorithm for chimeric redundancy detection |
 |15 | `ecc_summary` | Generate statistics and reports |
 |16 | `ecc_packager` | Package final deliverables |

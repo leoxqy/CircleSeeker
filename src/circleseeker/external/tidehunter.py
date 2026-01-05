@@ -54,6 +54,8 @@ class TideHunter(ExternalTool):
         f: int = 2,
     ) -> None:
         """Run TideHunter analysis."""
+        import subprocess
+
         cmd = [
             self.tool_name,
             "-f",
@@ -76,30 +78,48 @@ class TideHunter(ExternalTool):
         # Create output directory
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # Run TideHunter with output redirection
-        with open(output_file, "w") as out_handle:
-            import subprocess
+        log_file = output_file.parent / "tidehunter.log"
 
+        def _read_tail(path: Path, max_bytes: int = 32_000) -> str:
             try:
-                subprocess.run(
-                    cmd, stdout=out_handle, stderr=subprocess.PIPE, text=True, check=True
-                )
+                with open(path, "rb") as handle:
+                    try:
+                        handle.seek(0, 2)
+                        size = handle.tell()
+                        offset = max(0, size - max_bytes)
+                        handle.seek(offset)
+                    except OSError:
+                        pass
+                    data = handle.read()
+                return data.decode(errors="replace")
+            except OSError:
+                return ""
 
-                self.logger.info("TideHunter completed successfully")
-                self.logger.info(f"Output saved to: {output_file}")
+        # Run TideHunter with stdout redirected to output file and stderr to a persistent log.
+        try:
+            with open(output_file, "w") as out_handle, open(log_file, "w") as log_handle:
+                subprocess.run(cmd, stdout=out_handle, stderr=log_handle, text=True, check=True)
 
-                # Log output file size
-                output_size = output_file.stat().st_size
-                self.logger.debug(f"Output file size: {output_size} bytes")
+            self.logger.info("TideHunter completed successfully")
+            self.logger.info(f"Output saved to: {output_file}")
 
-            except subprocess.CalledProcessError as e:
-                self.logger.error(f"TideHunter failed with exit code {e.returncode}")
-                self.logger.error(f"Error message: {e.stderr}")
-                from circleseeker.exceptions import ExternalToolError
+            # Log output file size
+            output_size = output_file.stat().st_size
+            self.logger.debug(f"Output file size: {output_size} bytes")
 
-                raise ExternalToolError(
-                    "TideHunter failed", command=cmd, returncode=e.returncode, stderr=e.stderr
-                )
+        except subprocess.CalledProcessError as e:
+            stderr_tail = _read_tail(log_file)
+            self.logger.error(f"TideHunter failed with exit code {e.returncode}")
+            if stderr_tail:
+                self.logger.error("Last TideHunter log output:\n%s", stderr_tail[-2000:])
+            from circleseeker.exceptions import ExternalToolError
+
+            raise ExternalToolError(
+                "TideHunter failed",
+                command=cmd,
+                returncode=e.returncode,
+                stderr=stderr_tail or None,
+            ) from e
 
 
 class TideHunterRunner(TideHunter):

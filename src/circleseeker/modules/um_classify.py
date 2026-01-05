@@ -14,7 +14,7 @@ from __future__ import annotations
 from circleseeker.utils.logging import get_logger
 from circleseeker.utils.column_standards import ColumnStandard
 from pathlib import Path
-from typing import Tuple, Set, Optional
+from typing import Any, Tuple, Set, Optional, Dict, List, Iterable
 import pandas as pd
 import logging
 
@@ -22,7 +22,13 @@ import logging
 class UMeccClassifier:
     """Classify eccDNA into Uecc/Mecc buckets."""
 
-    # Alignment column names (BLAST outfmt 6 compatible)
+    # Heuristic thresholds used for evidence flags and score scaling.
+    # These do NOT affect classification unless mapq_u_min is explicitly enabled.
+    MAPQ_MAX = 60  # minimap2 typically caps MAPQ at ~60
+    MAPQ_LOW_THRESHOLD = 20
+    IDENTITY_LOW_THRESHOLD = 95.0
+
+    # Alignment column names (BLAST outfmt 6 compatible + optional MAPQ)
     ALIGNMENT_COLUMNS = [
         "query_id",
         "subject_id",
@@ -38,11 +44,23 @@ class UMeccClassifier:
         "bit_score",
         "sstrand",
     ]
+    ALIGNMENT_COLUMNS_WITH_MAPQ = ALIGNMENT_COLUMNS + ["mapq"]
 
     def __init__(
         self,
         gap_threshold: float = 10.0,
         min_full_length_coverage: float = 95.0,
+        max_identity_gap_for_mecc: float = 5.0,
+        theta_full: Optional[float] = None,
+        theta_u: Optional[float] = None,
+        theta_m: Optional[float] = None,
+        theta_u2_max: Optional[float] = None,
+        mapq_u_min: int = 0,
+        u_secondary_min_frac: float = 0.01,
+        u_secondary_min_bp: int = 50,
+        u_contig_gap_bp: int = 1000,
+        theta_locus: float = 0.95,
+        pos_tol_bp: int = 50,
         logger: Optional[logging.Logger] = None,
     ):
         """
@@ -50,20 +68,167 @@ class UMeccClassifier:
 
         Args:
             gap_threshold: Maximum gap percentage for quality filtering (default: 10%)
-            min_full_length_coverage: Minimum coverage for full-length classification (default: 95%)
+            min_full_length_coverage: Legacy full-length threshold; accepts either percent
+                (e.g. 95) or fraction (e.g. 0.95). Kept for backward compatibility.
+            max_identity_gap_for_mecc: Legacy parameter kept for backward compatibility
+                (not used by the coverage model).
+            theta_full: Coverage fraction threshold for U/Mecc decisions (default: 0.95).
+            theta_u: Coverage fraction threshold for Uecc decisions (default: theta_full).
+            theta_m: Coverage fraction threshold for Mecc decisions (default: theta_full).
+            theta_u2_max: Upper bound on the 2nd-best locus coverage for Uecc (default: 0.05).
+                Set to 1.0 to disable the uniqueness constraint.
+            mapq_u_min: If >0, require best-locus minimap2 MAPQ >= this threshold for Uecc.
+                Intended to reduce false-positive Uecc calls in repetitive regions. Default 0 (off).
+            u_secondary_min_frac: Secondary coverage fraction threshold that triggers a
+                contiguity check when attempting to call Uecc (default: 0.01).
+            u_secondary_min_bp: Secondary coverage absolute bp threshold that triggers a
+                contiguity check when attempting to call Uecc (default: 50).
+            u_contig_gap_bp: Maximum allowed genomic gap (bp) between alignments considered
+                part of the same locus when attempting to call Uecc (default: 1000).
+            theta_locus: Locus clustering reciprocal-overlap threshold (default: 0.95).
+            pos_tol_bp: Locus clustering boundary tolerance in bp (default: 50).
             logger: Optional logger instance
         """
         self.gap_threshold = gap_threshold
         self.min_full_length_coverage = min_full_length_coverage
+        self.max_identity_gap_for_mecc = max_identity_gap_for_mecc
+
+        theta_full_frac = (
+            self._as_fraction(theta_full)
+            if theta_full is not None
+            else self._as_fraction(min_full_length_coverage)
+        )
+        self.theta_u = (
+            self._as_fraction(theta_u) if theta_u is not None else float(theta_full_frac)
+        )
+        self.theta_m = (
+            self._as_fraction(theta_m) if theta_m is not None else float(theta_full_frac)
+        )
+        # For backward compatibility: keep theta_full as an alias of the historical threshold.
+        self.theta_full = float(theta_full_frac)
+
+        # U-second-locus constraint: strict uniqueness by default; set to 1.0 to disable.
+        self.theta_u2_max = (
+            self._as_fraction(theta_u2_max) if theta_u2_max is not None else 0.05
+        )
+        self.mapq_u_min = int(mapq_u_min) if mapq_u_min is not None else 0
+        self.u_secondary_min_frac = self._as_fraction(u_secondary_min_frac)
+        self.u_secondary_min_bp = int(u_secondary_min_bp)
+        self.u_contig_gap_bp = int(u_contig_gap_bp)
+        self.theta_locus = self._as_fraction(theta_locus)
+        self.pos_tol_bp = int(pos_tol_bp)
         self.stats = {}
 
         # Setup logger
         self.logger = logger or get_logger(self.__class__.__name__)
 
+    def _u_has_significant_secondary_mapping(
+        self,
+        all_alignments: pd.DataFrame,
+        *,
+        best_chr: str,
+        best_start0: int,
+        best_end0: int,
+        cons_len: int,
+        q_style: str,
+    ) -> bool:
+        """Return True if non-contiguous / multi-chr mappings are strong enough to veto Uecc."""
+        if all_alignments.empty or cons_len <= 0:
+            return False
+
+        gap_bp = int(self.u_contig_gap_bp)
+        chr_col = ColumnStandard.CHR
+        start_col = ColumnStandard.START0
+        end_col = ColumnStandard.END0
+
+        chrs = all_alignments.get(chr_col)
+        if chrs is None:
+            return False
+
+        start0 = pd.to_numeric(all_alignments.get(start_col), errors="coerce")
+        end0 = pd.to_numeric(all_alignments.get(end_col), errors="coerce")
+        if start0 is None or end0 is None:
+            return False
+
+        best_chr_str = str(best_chr)
+        other_chr_mask = chrs.astype(str) != best_chr_str
+        same_chr_mask = ~other_chr_mask
+
+        far_mask = same_chr_mask & (
+            (end0 < (int(best_start0) - gap_bp)) | (start0 > (int(best_end0) + gap_bp))
+        )
+        secondary_df = all_alignments[other_chr_mask | far_mask]
+        if secondary_df.empty:
+            return False
+
+        secondary_cov = self._coverage_fraction_for_alignments(secondary_df, cons_len, q_style)
+        secondary_bp = secondary_cov * float(cons_len)
+        return (secondary_cov >= float(self.u_secondary_min_frac)) or (
+            secondary_bp >= float(self.u_secondary_min_bp)
+        )
+
+    @staticmethod
+    def _as_fraction(value: float) -> float:
+        """Accept either a fraction (0-1) or a percent (0-100) and return a fraction."""
+        if value is None:
+            return 0.0
+        try:
+            val = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        if val > 1.0:
+            return val / 100.0
+        return val
+
+    @staticmethod
+    def _clamp01(value: float) -> float:
+        try:
+            x = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        if x < 0.0:
+            return 0.0
+        if x > 1.0:
+            return 1.0
+        return x
+
+    @classmethod
+    def _norm_mapq(cls, mapq: float) -> float:
+        """Normalize minimap2 MAPQ into [0,1]."""
+        try:
+            val = float(mapq)
+        except (TypeError, ValueError):
+            return 0.0
+        cap = float(cls.MAPQ_MAX) if float(cls.MAPQ_MAX) > 0 else 60.0
+        return cls._clamp01(val / cap)
+
+    @classmethod
+    def _norm_identity(cls, identity_pct: float) -> float:
+        """Normalize identity (%) into [0,1] with a conservative floor."""
+        try:
+            val = float(identity_pct)
+        except (TypeError, ValueError):
+            return 0.0
+        # Map [90,100] -> [0,1] (clamped). Below 90 is treated as very weak evidence.
+        return cls._clamp01((val - 90.0) / 10.0)
+
+    @staticmethod
+    def _geom_mean(values: Iterable[float]) -> float:
+        vals = [float(v) for v in values]
+        if not vals:
+            return 0.0
+        prod = 1.0
+        for v in vals:
+            if v <= 0.0:
+                return 0.0
+            prod *= v
+        return prod ** (1.0 / float(len(vals)))
+
     def _ensure_alignment_columns(self, df: pd.DataFrame, source: str) -> pd.DataFrame:
         """Ensure alignment DataFrame has the expected columns."""
         expected_cols = len(self.ALIGNMENT_COLUMNS)
-        if df.columns.tolist() == self.ALIGNMENT_COLUMNS:
+        expected_cols_with_mapq = len(self.ALIGNMENT_COLUMNS_WITH_MAPQ)
+        if df.columns.tolist() in (self.ALIGNMENT_COLUMNS, self.ALIGNMENT_COLUMNS_WITH_MAPQ):
             return df.copy()
 
         if len(df.columns) == 0:
@@ -71,16 +236,20 @@ class UMeccClassifier:
             df.columns = self.ALIGNMENT_COLUMNS
             return df
 
-        if len(df.columns) != expected_cols:
+        if len(df.columns) not in (expected_cols, expected_cols_with_mapq):
             message = (
-                f"Alignment results from {source} should have {expected_cols} columns, "
-                f"got {len(df.columns)}"
+                f"Alignment results from {source} should have {expected_cols} columns "
+                f"(or {expected_cols_with_mapq} with mapq), got {len(df.columns)}"
             )
             self.logger.error(message)
             raise ValueError(message)
 
         df = df.copy()
-        df.columns = self.ALIGNMENT_COLUMNS
+        df.columns = (
+            self.ALIGNMENT_COLUMNS
+            if len(df.columns) == expected_cols
+            else self.ALIGNMENT_COLUMNS_WITH_MAPQ
+        )
         return df
 
     def _preprocess_alignment_df(self, df: pd.DataFrame, source: str) -> pd.DataFrame:
@@ -88,6 +257,14 @@ class UMeccClassifier:
         df = self._ensure_alignment_columns(df, source)
         if df.empty:
             return df
+
+        # Cast key numeric columns early (robust to minimap2/blast adapters)
+        for col in ["identity", "alignment_length", "q_start", "q_end", "s_start", "s_end"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+        if "mapq" in df.columns:
+            df["mapq"] = pd.to_numeric(df["mapq"], errors="coerce").fillna(0).astype(int)
+        else:
+            df["mapq"] = 0
 
         # Process strand information
         df["strand"] = df["sstrand"].apply(lambda x: "+" if x == "plus" else "-")
@@ -130,12 +307,26 @@ class UMeccClassifier:
 
         # Standardize coordinate columns
         df[ColumnStandard.CHR] = df["subject_id"]
-        df[ColumnStandard.START0] = df["s_start"]
-        df[ColumnStandard.END0] = df["s_end"]
+        # Alignment inputs (BLAST/minimap2_align) use 1-based, strand-oriented coordinates.
+        # Convert to 0-based, half-open coordinates for internal use.
+        s_start_num = pd.to_numeric(df["s_start"], errors="coerce")
+        s_end_num = pd.to_numeric(df["s_end"], errors="coerce")
+        invalid_coords = s_start_num.isna() | s_end_num.isna()
+        if invalid_coords.any():
+            self.logger.warning(
+                "Found %d entries with invalid subject coordinates; dropping",
+                int(invalid_coords.sum()),
+            )
+            df = df[~invalid_coords].copy()
+            s_start_num = s_start_num[~invalid_coords]
+            s_end_num = s_end_num[~invalid_coords]
+
+        df[ColumnStandard.START0] = (s_start_num - 1).astype(int)
+        df[ColumnStandard.END0] = s_end_num.astype(int)
         df[ColumnStandard.STRAND] = df["strand"]
 
         # Calculate derived columns with safe division
-        df["Rlength"] = df[ColumnStandard.END0] - df[ColumnStandard.START0] + 1
+        df["Rlength"] = df[ColumnStandard.END0] - df[ColumnStandard.START0]
         df["gap_Length"] = df[ColumnStandard.LENGTH] - df["Rlength"]
 
         # Safe division for Gap_Percentage
@@ -151,6 +342,163 @@ class UMeccClassifier:
         self.stats["total_queries"] = df["query_id"].nunique()
 
         return df
+
+    @staticmethod
+    def _infer_query_coords_style(df: pd.DataFrame) -> str:
+        """Infer whether q_start/q_end look 0-based half-open or 1-based inclusive (BLAST-like)."""
+        if df.empty:
+            return "blast"
+        required = {"q_start", "q_end", "alignment_length"}
+        if not required.issubset(df.columns):
+            return "blast"
+
+        sample = df[list(required)].dropna()
+        if sample.empty:
+            return "blast"
+
+        qs = pd.to_numeric(sample["q_start"], errors="coerce")
+        qe = pd.to_numeric(sample["q_end"], errors="coerce")
+        alen = pd.to_numeric(sample["alignment_length"], errors="coerce")
+        sample = pd.DataFrame({"qs": qs, "qe": qe, "alen": alen}).dropna()
+        if sample.empty:
+            return "blast"
+
+        diff0 = (sample["qe"] - sample["qs"]).abs()
+        diff1 = (sample["qe"] - sample["qs"] + 1).abs()
+        err0 = (diff0 - sample["alen"]).abs().median()
+        err1 = (diff1 - sample["alen"]).abs().median()
+        return "0based" if err0 + 1e-6 < err1 else "blast"
+
+    @staticmethod
+    def _query_interval_0based_half_open(
+        q_start: float, q_end: float, style: str
+    ) -> Tuple[int, int]:
+        """Convert q_start/q_end to 0-based, half-open interval."""
+        qs = int(q_start)
+        qe = int(q_end)
+        if style != "0based":
+            qs -= 1
+        if qe < qs:
+            qs, qe = qe, qs
+        return qs, qe
+
+    @classmethod
+    def _project_query_interval_to_ring(
+        cls, q_start: float, q_end: float, cons_len: int, style: str
+    ) -> List[Tuple[int, int]]:
+        """Project a query interval on doubled sequence onto ring coordinates [0, L)."""
+        L = int(cons_len)
+        if L <= 0:
+            return []
+
+        qs, qe = cls._query_interval_0based_half_open(q_start, q_end, style)
+        if qe - qs >= L:
+            return [(0, L)]
+
+        u = qs % L
+        v = qe % L
+        if u < v:
+            return [(u, v)]
+        return [(u, L), (0, v)]
+
+    @staticmethod
+    def _union_len(segments: Iterable[Tuple[int, int]]) -> int:
+        """Compute union length of half-open segments."""
+        segs = [(int(s), int(e)) for s, e in segments if e > s]
+        if not segs:
+            return 0
+        segs.sort(key=lambda x: x[0])
+        start, end = segs[0]
+        total = 0
+        for s, e in segs[1:]:
+            if s <= end:
+                end = max(end, e)
+            else:
+                total += end - start
+                start, end = s, e
+        total += end - start
+        return int(total)
+
+    @classmethod
+    def _coverage_fraction_for_alignments(
+        cls, df: pd.DataFrame, cons_len: int, style: str
+    ) -> float:
+        """Compute ring coverage fraction from q_start/q_end intervals."""
+        L = int(cons_len)
+        if df.empty or L <= 0:
+            return 0.0
+        segments: List[Tuple[int, int]] = []
+        q_start_series = df.get("q_start")
+        q_end_series = df.get("q_end")
+        if q_start_series is None or q_end_series is None:
+            return 0.0
+        # Avoid iterrows (slow); iterate over numpy arrays.
+        q_start_vals = q_start_series.to_numpy()
+        q_end_vals = q_end_series.to_numpy()
+        for q_start, q_end in zip(q_start_vals, q_end_vals):
+            if pd.isna(q_start) or pd.isna(q_end):
+                continue
+            segments.extend(cls._project_query_interval_to_ring(q_start, q_end, L, style))
+        covered = cls._union_len(segments)
+        return float(covered) / float(L) if L > 0 else 0.0
+
+    def _cluster_loci(self, group: pd.DataFrame) -> Dict[int, List[int]]:
+        """Cluster alignments into loci for a single query."""
+        if group.empty:
+            return {}
+
+        indices = list(group.index)
+        parent: Dict[int, int] = {idx: idx for idx in indices}
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> None:
+            ra = find(a)
+            rb = find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        for _, sub in group.groupby([ColumnStandard.CHR, ColumnStandard.STRAND], sort=False):
+            sub_idx = list(sub.index)
+            if len(sub_idx) <= 1:
+                continue
+
+            starts = sub[ColumnStandard.START0].to_numpy(dtype="int64", copy=False)
+            ends = sub[ColumnStandard.END0].to_numpy(dtype="int64", copy=False)
+            pos_tol = int(self.pos_tol_bp)
+            theta = float(self.theta_locus)
+
+            for i in range(len(sub_idx)):
+                start_a = int(starts[i])
+                end_a = int(ends[i])
+                for j in range(i + 1, len(sub_idx)):
+                    start_b = int(starts[j])
+                    end_b = int(ends[j])
+
+                    if abs(start_a - start_b) <= pos_tol and abs(end_a - end_b) <= pos_tol:
+                        union(sub_idx[i], sub_idx[j])
+                        continue
+
+                    ov = max(0, min(end_a, end_b) - max(start_a, start_b))
+                    min_len = min(max(0, end_a - start_a), max(0, end_b - start_b))
+                    if min_len <= 0:
+                        continue
+                    if (ov / float(min_len)) >= theta:
+                        union(sub_idx[i], sub_idx[j])
+
+        clusters: Dict[int, List[int]] = {}
+        for idx in indices:
+            root = find(idx)
+            clusters.setdefault(root, []).append(idx)
+
+        relabeled: Dict[int, List[int]] = {}
+        for locus_id, root in enumerate(sorted(clusters.keys(), key=lambda x: str(x))):
+            relabeled[locus_id] = clusters[root]
+        return relabeled
 
     def read_alignment_results(self, alignment_file: Path) -> pd.DataFrame:
         """
@@ -288,7 +636,7 @@ class UMeccClassifier:
 
     def classify_uecc_mecc(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, Set[str]]:
         """
-        Classify Uecc and Mecc based on high-quality alignments
+        Classify Uecc and Mecc using a ring-coverage model on high-quality alignments.
 
         Args:
             df: Full DataFrame
@@ -297,9 +645,19 @@ class UMeccClassifier:
             Tuple of (uecc_df, mecc_df, classified_query_ids)
         """
         self.logger.info("=" * 60)
-        self.logger.info("Step 1: Classify using high-quality alignments")
+        self.logger.info("Step 1: Classify using ring coverage on high-quality alignments")
 
-        # Filter by quality
+        theta_u = float(self.theta_u)
+        theta_m = float(self.theta_m)
+        theta_u2_max = float(self.theta_u2_max)
+        if theta_u <= 0.0 and theta_m <= 0.0:
+            self.logger.warning("theta_u and theta_m are <= 0; nothing will be classified")
+            return pd.DataFrame(), pd.DataFrame(), set()
+
+        # Filter by quality (keep original df for downstream unclassified extraction)
+        # Note: we still consult all alignments (including low-quality partial hits) when deciding
+        # whether a U candidate has significant non-contiguous / multi-chr evidence.
+        all_groups = df.groupby("query_id", sort=False).groups
         high_quality = df[df["Gap_Percentage"] <= self.gap_threshold].copy()
         self.logger.info(f"High-quality alignments: {len(high_quality):,} / {len(df):,}")
 
@@ -307,47 +665,197 @@ class UMeccClassifier:
             self.logger.warning("No high-quality alignments found")
             return pd.DataFrame(), pd.DataFrame(), set()
 
-        # Process each query based on high-quality alignments
-        uecc_list = []
-        mecc_list = []
-        classified_queries = set()
+        q_style = self._infer_query_coords_style(high_quality)
 
-        for query_id, group in high_quality.groupby("query_id"):
-            if len(group) == 1:
-                # Single alignment -> Uecc
-                group_copy = group.copy()
-                group_copy["eccdna_type"] = "Uecc"
-                group_copy["classification_reason"] = "Single alignment"
-                uecc_list.append(group_copy)
+        uecc_rows: List[dict[str, Any]] = []
+        mecc_rows: List[dict[str, Any]] = []
+        classified_queries: Set[str] = set()
+
+        for query_id, group in high_quality.groupby("query_id", sort=False):
+            cons_len = int(group[ColumnStandard.LENGTH].iloc[0])
+            if cons_len <= 0:
+                continue
+
+            loci = self._cluster_loci(group)
+            if not loci:
+                continue
+
+            locus_cov: Dict[int, float] = {}
+            for locus_id, idxs in loci.items():
+                locus_df = group.loc[idxs]
+                locus_cov[locus_id] = self._coverage_fraction_for_alignments(
+                    locus_df, cons_len, q_style
+                )
+
+            cov_sorted = sorted(locus_cov.items(), key=lambda kv: kv[1], reverse=True)
+            u_cov = cov_sorted[0][1] if cov_sorted else 0.0
+            u_cov_2nd = cov_sorted[1][1] if len(cov_sorted) > 1 else 0.0
+            best_lid = cov_sorted[0][0] if cov_sorted else None
+            second_lid = cov_sorted[1][0] if len(cov_sorted) > 1 else None
+
+            def locus_evidence(lid: Optional[int]) -> tuple[int, int, float, float]:
+                if lid is None:
+                    return 0, 0, 0.0, 0.0
+                idxs = loci.get(lid)
+                if not idxs:
+                    return 0, 0, 0.0, 0.0
+                locus_df_local = group.loc[idxs]
+                if locus_df_local.empty:
+                    return 0, 0, 0.0, 0.0
+                # Columns were normalized to numeric in `_preprocess_alignment_df`.
+                try:
+                    mapq_best_local = int(locus_df_local["mapq"].max())
+                    mapq_min_local = int(locus_df_local["mapq"].min())
+                except Exception:
+                    mapq_best_local = 0
+                    mapq_min_local = 0
+
+                try:
+                    id_best_local = float(locus_df_local["identity"].max())
+                    id_min_local = float(locus_df_local["identity"].min())
+                except Exception:
+                    id_best_local = 0.0
+                    id_min_local = 0.0
+
+                return int(mapq_best_local), int(mapq_min_local), float(id_best_local), float(id_min_local)
+
+            full_loci = [lid for lid, cov in locus_cov.items() if cov >= theta_m]
+            m_count = len(full_loci)
+
+            if m_count >= 2:
+                best_mapq_best, best_mapq_min, best_id_best, best_id_min = locus_evidence(best_lid)
+                second_mapq_best, second_mapq_min, second_id_best, second_id_min = locus_evidence(
+                    second_lid
+                )
+                mapq_best = max(best_mapq_best, second_mapq_best)
+                mapq_min = (
+                    min(best_mapq_min, second_mapq_min)
+                    if second_lid is not None
+                    else int(best_mapq_min)
+                )
+                identity_best = max(best_id_best, second_id_best)
+                identity_min = (
+                    min(best_id_min, second_id_min)
+                    if second_lid is not None
+                    else float(best_id_min)
+                )
+                low_mapq = mapq_best < int(self.MAPQ_LOW_THRESHOLD)
+                low_identity = identity_best < float(self.IDENTITY_LOW_THRESHOLD)
+                conf = self._geom_mean(
+                    [
+                        self._norm_mapq(mapq_best),
+                        self._norm_identity(identity_best),
+                        self._clamp01(u_cov),
+                        self._clamp01(u_cov_2nd),
+                    ]
+                )
+                for lid in full_loci:
+                    idxs = loci[lid]
+                    locus_df = group.loc[idxs]
+                    try:
+                        best_idx = locus_df["alignment_length"].idxmax()
+                        rep_row = locus_df.loc[best_idx]
+                    except Exception:
+                        rep_row = locus_df.iloc[0]
+
+                    row = dict(rep_row.to_dict())
+                    row["eccdna_type"] = "Mecc"
+                    row["classification_reason"] = ">=2 loci with full ring coverage"
+                    row["locus_id"] = int(lid)
+                    row["locus_cov"] = round(float(locus_cov[lid]), 6)
+                    row["U_cov"] = round(float(u_cov), 6)
+                    row["U_cov_2nd"] = round(float(u_cov_2nd), 6)
+                    row["M_count"] = int(m_count)
+                    row[ColumnStandard.MAPQ_BEST] = int(mapq_best)
+                    row[ColumnStandard.MAPQ_MIN] = int(mapq_min)
+                    row[ColumnStandard.IDENTITY_BEST] = round(float(identity_best), 3)
+                    row[ColumnStandard.IDENTITY_MIN] = round(float(identity_min), 3)
+                    row[ColumnStandard.QUERY_COV_BEST] = round(float(u_cov), 6)
+                    row[ColumnStandard.QUERY_COV_2ND] = round(float(u_cov_2nd), 6)
+                    row[ColumnStandard.CONFIDENCE_SCORE] = round(float(conf), 6)
+                    row[ColumnStandard.LOW_MAPQ] = bool(low_mapq)
+                    row[ColumnStandard.LOW_IDENTITY] = bool(low_identity)
+                    mecc_rows.append(row)
                 classified_queries.add(query_id)
-            else:
-                # Multiple alignments - check for overlaps
-                processed_group = self._process_overlaps_for_query(group)
+                continue
 
-                if len(processed_group) == 1:
-                    # After overlap removal -> Uecc
-                    processed_copy = processed_group.copy()
-                    processed_copy["eccdna_type"] = "Uecc"
-                    processed_copy["classification_reason"] = "Single after overlap removal"
-                    uecc_list.append(processed_copy)
-                    classified_queries.add(query_id)
-                else:
-                    # Check if it's Mecc (full-length repeats)
-                    if self._is_full_length_repeat(processed_group):
-                        processed_copy = processed_group.copy()
-                        processed_copy["eccdna_type"] = "Mecc"
-                        mecc_list.append(processed_copy)
-                        classified_queries.add(query_id)
-                    # If not Mecc, it remains unclassified
+            if u_cov >= theta_u and u_cov_2nd <= theta_u2_max:
+                # Uecc requires one strong locus explanation and no substantial 2nd locus.
+                lid = best_lid if best_lid is not None else cov_sorted[0][0]
+                locus_df = group.loc[loci[lid]]
+                if self.mapq_u_min > 0:
+                    try:
+                        best_locus_mapq = int(locus_df["mapq"].max())
+                    except Exception:
+                        best_locus_mapq = 0
+                    if best_locus_mapq < int(self.mapq_u_min):
+                        self.stats["uecc_vetoed_low_mapq"] = self.stats.get(
+                            "uecc_vetoed_low_mapq", 0
+                        ) + 1
+                        continue
+                best_chr = str(locus_df[ColumnStandard.CHR].iloc[0])
+                try:
+                    best_start0 = int(locus_df[ColumnStandard.START0].min())
+                    best_end0 = int(locus_df[ColumnStandard.END0].max())
+                except Exception:
+                    best_start0 = 0
+                    best_end0 = 0
+                all_idx = all_groups.get(query_id)
+                all_alignments = df.loc[all_idx] if all_idx is not None else group
+                if self._u_has_significant_secondary_mapping(
+                    all_alignments,
+                    best_chr=best_chr,
+                    best_start0=best_start0,
+                    best_end0=best_end0,
+                    cons_len=cons_len,
+                    q_style=q_style,
+                ):
+                    continue
+                try:
+                    best_idx = locus_df["alignment_length"].idxmax()
+                    rep_row = locus_df.loc[best_idx]
+                except Exception:
+                    rep_row = locus_df.iloc[0]
 
-        # Combine results
-        uecc_df = pd.concat(uecc_list, ignore_index=False) if uecc_list else pd.DataFrame()
-        mecc_df = pd.concat(mecc_list, ignore_index=False) if mecc_list else pd.DataFrame()
+                mapq_best, mapq_min, identity_best, identity_min = locus_evidence(lid)
+                low_mapq = mapq_best < int(self.MAPQ_LOW_THRESHOLD)
+                low_identity = identity_best < float(self.IDENTITY_LOW_THRESHOLD)
+                denom = float(max(theta_u2_max, 0.05))
+                uniq = self._clamp01(1.0 - (float(u_cov_2nd) / denom)) if denom > 0 else 1.0
+                conf = self._geom_mean(
+                    [
+                        self._norm_mapq(mapq_best),
+                        self._norm_identity(identity_best),
+                        self._clamp01(u_cov),
+                        uniq,
+                    ]
+                )
+                row = dict(rep_row.to_dict())
+                row["eccdna_type"] = "Uecc"
+                row["classification_reason"] = "single locus with full ring coverage"
+                row["locus_id"] = int(lid)
+                row["locus_cov"] = round(float(locus_cov[lid]), 6)
+                row["U_cov"] = round(float(u_cov), 6)
+                row["U_cov_2nd"] = round(float(u_cov_2nd), 6)
+                row["M_count"] = int(m_count)
+                row[ColumnStandard.MAPQ_BEST] = int(mapq_best)
+                row[ColumnStandard.MAPQ_MIN] = int(mapq_min)
+                row[ColumnStandard.IDENTITY_BEST] = round(float(identity_best), 3)
+                row[ColumnStandard.IDENTITY_MIN] = round(float(identity_min), 3)
+                row[ColumnStandard.QUERY_COV_BEST] = round(float(u_cov), 6)
+                row[ColumnStandard.QUERY_COV_2ND] = round(float(u_cov_2nd), 6)
+                row[ColumnStandard.CONFIDENCE_SCORE] = round(float(conf), 6)
+                row[ColumnStandard.LOW_MAPQ] = bool(low_mapq)
+                row[ColumnStandard.LOW_IDENTITY] = bool(low_identity)
+                uecc_rows.append(row)
+                classified_queries.add(query_id)
+                continue
 
-        uecc_queries = set(uecc_df["query_id"].unique()) if not uecc_df.empty else set()
-        mecc_queries = set(mecc_df["query_id"].unique()) if not mecc_df.empty else set()
-        self.logger.info(f"Uecc: {len(classified_queries & uecc_queries)} queries")
-        self.logger.info(f"Mecc: {len(classified_queries & mecc_queries)} queries")
+        uecc_df = pd.DataFrame(uecc_rows) if uecc_rows else pd.DataFrame()
+        mecc_df = pd.DataFrame(mecc_rows) if mecc_rows else pd.DataFrame()
+
+        self.logger.info("Uecc: %d queries", uecc_df["query_id"].nunique() if not uecc_df.empty else 0)
+        self.logger.info("Mecc: %d queries", mecc_df["query_id"].nunique() if not mecc_df.empty else 0)
 
         return uecc_df, mecc_df, classified_queries
 
@@ -454,6 +962,22 @@ class UMeccClassifier:
         full_length_count = (coverages >= self.min_full_length_coverage).sum()
 
         return full_length_count >= 2
+
+    def _passes_identity_gap(self, group: pd.DataFrame) -> bool:
+        """Check if identity gap between top two alignments is within Mecc threshold."""
+        if self.max_identity_gap_for_mecc is None:
+            return True
+
+        if group.empty or "identity" not in group.columns:
+            return False
+
+        identities = pd.to_numeric(group["identity"], errors="coerce").dropna()
+        if len(identities) < 2:
+            return False
+
+        identities = identities.sort_values(ascending=False)
+        gap = identities.iloc[0] - identities.iloc[1]
+        return gap <= self.max_identity_gap_for_mecc
 
     def extract_unclassified(
         self, df_original: pd.DataFrame, classified_queries: Set[str]

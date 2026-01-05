@@ -44,6 +44,17 @@ class ColumnStandard:
     MATCH_DEGREE = "match_degree"  # Match percentage (0-100)
     REPEAT_NUMBER = "repeat_number"  # Number of repeats
 
+    # === Confidence / Evidence (0-1 unless otherwise noted) ===
+    CONFIDENCE_SCORE = "confidence_score"
+    MAPQ_BEST = "mapq_best"  # max MAPQ among supporting alignments
+    MAPQ_MIN = "mapq_min"  # min MAPQ among supporting alignments
+    IDENTITY_BEST = "identity_best"  # max identity (%) among supporting alignments
+    IDENTITY_MIN = "identity_min"  # min identity (%) among supporting alignments
+    QUERY_COV_BEST = "query_cov_best"  # best-locus (or best-chain) ring coverage
+    QUERY_COV_2ND = "query_cov_2nd"  # 2nd-best locus/chain ring coverage
+    LOW_MAPQ = "low_mapq"  # boolean flag
+    LOW_IDENTITY = "low_identity"  # boolean flag
+
     # === Type and Classification ===
     ECCDNA_TYPE = "eccdna_type"  # UeccDNA, MeccDNA, CeccDNA, etc.
     STATE = "state"  # Confirmed, Inferred, etc.
@@ -109,9 +120,9 @@ LEGACY_MAPPINGS = {
 # Coordinate conversion requirements
 COORDINATE_CONVERSIONS = {
     "eStart": lambda x: x - 1,  # 1-based to 0-based
-    "eEnd": lambda x: x,  # Already 0-based end
-    "s_start": lambda x: x - 1,  # BLAST 1-based to 0-based
-    "s_end": lambda x: x,  # BLAST end already 0-based
+    "eEnd": lambda x: x,  # 1-based inclusive end -> 0-based end (half-open)
+    "s_start": lambda x: x - 1,  # BLAST-like 1-based -> 0-based
+    "s_end": lambda x: x,  # BLAST-like end -> 0-based end (half-open)
 }
 
 

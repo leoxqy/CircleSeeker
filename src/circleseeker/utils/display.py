@@ -14,7 +14,7 @@ import time
 try:
     from circleseeker.__version__ import __version__
 except ImportError:
-    __version__ = "2.1.2"  # Fallback version
+    __version__ = "unknown"  # Fallback version
 
 
 def supports_emoji() -> bool:

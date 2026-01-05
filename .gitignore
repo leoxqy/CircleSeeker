@@ -1,3 +1,31 @@
 __pycache__/
-*.pyc
+*.py[cod]
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+
+# Test / coverage
 .pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtualenv / tooling
+.venv/
+.mypy_cache/
+.tox/
+
+# Runtime temp
+.tmp_work/
+.tmp_*/
+
+# Local assistant / tooling
+**/.claude/
+
+# Local scratch
+backup/
+
+# OS
+.DS_Store

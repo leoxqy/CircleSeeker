@@ -1,6 +1,6 @@
-# CircleSeeker Pipeline 模块说明（v0.9.8）
+# CircleSeeker Pipeline 模块说明（v0.9.15）
 
-本文件概述 CircleSeeker 0.9.8 的 16 个管线步骤、输入输出关系以及关键实现要点，帮助使用者理解整体流程与模块职责。
+本文件概述 CircleSeeker 0.9.15 的 16 个管线步骤、输入输出关系以及关键实现要点，帮助使用者理解整体流程与模块职责。
 
 ---
 
@@ -23,19 +23,19 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 
 | 序号 | 名称 | 类型 | 主要输入 | 主要输出 |
 |------|------|------|----------|----------|
-| 1 | make_blastdb | 外部（BLAST+） | 参考基因组 FASTA | `*.nsq` 等 BLAST 数据库 |
+| 1 | check_dependencies | 内部 | 配置/环境 | 依赖检查报告（失败则中止） |
 | 2 | tidehunter | 外部 | HiFi reads FASTA | 重复片段列表、共识序列 |
 | 3 | tandem_to_ring | 内部 | TideHunter 输出 | 环状候选 FASTA/CSV |
-| 4 | run_blast | 外部（BLAST+） | 候选 FASTA、数据库 | BLAST TSV |
-| 5 | um_classify | 内部 | BLAST TSV | `um_classify.uecc.csv` / `mecc.csv` |
-| 6 | cecc_build | 内部 | 未分类 BLAST 记录 | `cecc_build.csv` |
+| 4 | run_alignment | 外部（minimap2） | 候选 FASTA、参考基因组 | alignment TSV |
+| 5 | um_classify | 内部 | alignment TSV | `um_classify.uecc.csv` / `mecc.csv` |
+| 6 | cecc_build | 内部 | 未分类对齐记录 | `cecc_build.csv` |
 | 7 | umc_process | 内部 | U/M/C CSV | 标准化表格、FASTA |
 | 8 | cd_hit | 外部（CD-HIT） | FASTA | 去冗余 FASTA |
 | 9 | ecc_dedup | 内部 | 各类 CSV/FASTA | 去重后的坐标与序列 |
 |10 | read_filter | 内部 | 去重结果、reads | 确认的 eccDNA reads FASTA |
 |11 | minimap2 | 外部（minimap2） | 参考基因组 | `.mmi` 索引（必要时自动生成） |
 |12 | ecc_inference | 外部 + 内部 | Cresil/Cyrcular 所需文件 | 推断结果 TSV/FASTA |
-|13 | iecc_curator | 内部 | 推断结果 | 精炼后的表格与 FASTA |
+|13 | curate_inferred_ecc | 内部 | 推断结果 | 精炼后的表格与 FASTA（内部调用 `iecc_curator`） |
 |14 | ecc_unify | 内部 | 确认/推断 CSV | 合并表格、重叠统计 |
 |15 | ecc_summary | 内部 | 合并表、原始统计 | HTML 报告、TXT 摘要、all.fasta |
 |16 | ecc_packager | 内部 | 各类目录与单文件 | 最终输出目录树 |
@@ -46,8 +46,8 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 
 ### 3.1 检测阶段（步骤 1-6）
 
-1. **make_blastdb**
-   使用 `makeblastdb` 为参考基因组建立核酸数据库。若数据库已存在会跳过；当 `tools.aligner=minimap2` 时可跳过此步。
+1. **check_dependencies**
+   启动时预检外部工具与推断引擎（至少需要 Cresil 或 Cyrcular 之一）。缺失依赖会中止运行并给出安装提示。
 
 2. **tidehunter**
    调用 TideHunter 检测 reads 中的串联重复，识别潜在滚环扩增事件，生成共识序列与 repeat 信息。
@@ -55,14 +55,14 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 3. **tandem_to_ring**
    将重复序列转换为候选环状 DNA。通过图结构分析 overlaps，识别简单读段、复杂读段等类型，输出 FASTA 与候选元数据。
 
-4. **run_blast**
-   使用 BLAST 或 minimap2 将候选序列比对回参考基因组，获取 identity 与基因组坐标（minimap2 会输出 PAF 并转换为 BLAST TSV）。
+4. **run_alignment**
+   使用 minimap2 将候选序列比对回参考基因组，获得 identity 与基因组坐标（输出为 BLAST outfmt 6-like 的 TSV，末尾额外追加 `mapq` 字段供下游解析）。
 
 5. **um_classify**
-   对 BLAST 结果进行解析，按单一来源或多重来源划分为 UeccDNA / MeccDNA，同时保留未分类记录供后续处理。
+   对对齐结果进行解析，基于“环坐标覆盖度 + locus 聚类”的参数化模型划分 UeccDNA / MeccDNA；可选通过 `tools.um_classify.mapq_u_min` 对 Uecc 判定做 MAPQ gate；并输出标准化的 `um_classify.all.csv` 供后续 Cecc/歧义分析使用。判别模型详见 `docs/UMC_Classification_Model.md`。
 
 6. **cecc_build**
-   针对未分类结果进行多段识别，构建复杂环状结构（CeccDNA）的片段组合及连接信息。
+   基于 `um_classify.all.csv`（或回退到 `um_classify.unclassified.csv`）进行多段链构建，输出 `cecc_build.csv`。同时拦截并单独输出 `ambiguous_uc.csv` / `ambiguous_mc.csv`（不进入后续主流程），用于后续研究与参数调优。
 
 ### 3.2 处理阶段（步骤 7-10）
 
@@ -70,7 +70,7 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
    统一整理 U/M/C 三类结果，生成标准化 CSV 与 FASTA，并统计对应数量。
 
 8. **cd_hit**
-   对 FASTA 进行 90% identity 去冗余，减少重复候选。
+   对 FASTA 进行 99% identity 去冗余，减少重复候选。
 
 9. **ecc_dedup**
    整理并去重坐标信息，生成规范化 BED/CSV，确保重复记录合并到统一 ID。
@@ -88,8 +88,8 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
     - 若 Cresil 不可用且检测到 Cyrcular，则使用后者作为备选。
     输出推断的简单/嵌合 eccDNA。
 
-13. **iecc_curator**
-    对推断结果进行清洗、格式化，生成 CSV/FASTA，并与既有标准列名称对齐。
+13. **curate_inferred_ecc**
+    对推断结果进行清洗、格式化，生成 CSV/FASTA，并与既有标准列名称对齐（内部调用 `iecc_curator` 模块）。
 
 ### 3.4 整合阶段（步骤 14-16）
 
@@ -111,7 +111,7 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 
 ## 4. 运行时注意事项
 
-- **外部依赖** 请确认 `tidehunter`, `cd-hit-est`, `minimap2`, `samtools`, `cresil`（或 `cyrcular`）均在 `PATH` 内；若 `tools.aligner=blast` 还需 `blastn` 与 `makeblastdb`。v0.9.4 新增了启动时的预检机制，会在管线执行前验证所有必需工具是否可用，并给出清晰的安装提示。
+- **外部依赖** 请确认 `tidehunter`, `cd-hit-est`, `minimap2`, `samtools`, `cresil`（或 `cyrcular`）均在 `PATH` 内。启动时的预检机制会在管线执行前验证所有必需工具是否可用，并给出清晰的安装提示。
 - **检查点机制** 每个步骤开始前都会写入 `<prefix>.checkpoint`，一旦失败可通过 `--resume` 从最近步骤继续；`--force` 可清除状态后重跑。
 - **配置继承** 所有参数均由 `circleseeker.config.Config` 驱动，可通过 YAML 或 CLI 覆写。文档中的默认值等同于仓库内置配置。
 - **调试工具** `circleseeker --debug --show-steps` 可查看当前步骤状态；`show-checkpoint` 子命令能列出历史执行记录。

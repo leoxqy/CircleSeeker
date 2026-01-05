@@ -236,6 +236,34 @@ class TestConfig:
                 config.validate()
             assert "Threads must be >= 1" in str(exc_info.value)
 
+    def test_config_validate_rejects_tmp_dir_dot(self):
+        """runtime.tmp_dir must not be '.' (would risk deleting outputs)."""
+        with tempfile.NamedTemporaryFile(suffix=".fasta") as input_f, \
+             tempfile.NamedTemporaryFile(suffix=".fa") as ref_f:
+
+            config = Config()
+            config.input_file = Path(input_f.name)
+            config.reference = Path(ref_f.name)
+            config.runtime.tmp_dir = Path(".")
+
+            with pytest.raises(ConfigurationError) as exc_info:
+                config.validate()
+            assert "runtime.tmp_dir" in str(exc_info.value)
+
+    def test_config_validate_rejects_tmp_dir_parent_escape(self):
+        """runtime.tmp_dir must not contain '..' when relative."""
+        with tempfile.NamedTemporaryFile(suffix=".fasta") as input_f, \
+             tempfile.NamedTemporaryFile(suffix=".fa") as ref_f:
+
+            config = Config()
+            config.input_file = Path(input_f.name)
+            config.reference = Path(ref_f.name)
+            config.runtime.tmp_dir = Path("../tmp_work")
+
+            with pytest.raises(ConfigurationError) as exc_info:
+                config.validate()
+            assert "runtime.tmp_dir" in str(exc_info.value)
+
     def test_config_validate_success(self):
         """Test successful config validation."""
         with tempfile.NamedTemporaryFile(suffix=".fasta") as input_f, \

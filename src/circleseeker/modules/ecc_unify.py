@@ -907,9 +907,8 @@ def merge_eccdna_tables(
             overlap_stats_json = confirmed_path.parent / f"{confirmed_path.stem}_overlap_stats.json"
     else:
         confirmed_df = confirmed_file
-        # Use a default name if no file path available
-        if overlap_stats_json is None:
-            overlap_stats_json = "overlap_stats.json"
+        # If the caller passes a DataFrame and doesn't provide an output path,
+        # avoid writing overlap stats into the current working directory.
 
     # Load inferred tables if needed
     simple_df = None

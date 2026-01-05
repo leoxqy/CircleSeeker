@@ -169,6 +169,10 @@ class Cresil(ExternalTool):
         """
         self.logger.info("Running Cresil full pipeline")
 
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = output_dir.resolve()
+
         # Cresil substep 1: trim
         self.logger.info("  → Cresil substep 1/2: trim")
         trim_file = self.trim(
@@ -182,19 +186,50 @@ class Cresil(ExternalTool):
         self.logger.info("  → Cresil substep 2/2: identify")
 
         # Check for .fai file
+        reference_fasta = Path(reference_fasta).resolve()
         reference_fai = reference_fasta.with_suffix(reference_fasta.suffix + ".fai")
+        reference_fasta_for_identify = reference_fasta
         if not reference_fai.exists():
             self.logger.info(f"Reference FASTA index not found: {reference_fai}")
             self.logger.info("Attempting to create FASTA index with samtools faidx")
             try:
-                samtools = Samtools(
-                    logger=self.logger.getChild("samtools"), threads=max(1, threads)
-                )
-                samtools.faidx(reference_fasta)
+                samtools = Samtools(logger=self.logger.getChild("samtools"), threads=max(1, threads))
+                samtools.faidx(reference_fasta_for_identify)
             except ExternalToolError as exc:
-                raise FileNotFoundError(
-                    f"Reference FASTA index missing and automatic creation failed: {reference_fai}"
-                ) from exc
+                # Fallback: if reference is not writable, create a symlink in output_dir so samtools
+                # can write the .fai alongside it without touching the original reference directory.
+                self.logger.warning(
+                    "samtools faidx failed for reference FASTA (%s). "
+                    "Trying to create index in output_dir via symlink.",
+                    exc,
+                )
+
+                link_candidate = output_dir / reference_fasta.name
+                try:
+                    if link_candidate.exists() and link_candidate.resolve() != reference_fasta.resolve():
+                        link_candidate = output_dir / f"{reference_fasta.stem}.circleseeker{reference_fasta.suffix}"
+                except Exception:
+                    link_candidate = output_dir / f"{reference_fasta.stem}.circleseeker{reference_fasta.suffix}"
+
+                if not link_candidate.exists():
+                    try:
+                        link_candidate.symlink_to(reference_fasta)
+                    except OSError as link_exc:
+                        raise FileNotFoundError(
+                            "Reference FASTA index missing and automatic creation failed; "
+                            "could not create symlink for fallback faidx in output_dir"
+                        ) from link_exc
+
+                reference_fasta_for_identify = link_candidate
+                reference_fai = reference_fasta_for_identify.with_suffix(
+                    reference_fasta_for_identify.suffix + ".fai"
+                )
+                try:
+                    samtools.faidx(reference_fasta_for_identify)
+                except ExternalToolError as exc2:
+                    raise FileNotFoundError(
+                        f"Reference FASTA index missing and automatic creation failed: {reference_fai}"
+                    ) from exc2
 
             if not reference_fai.exists():
                 raise FileNotFoundError(
@@ -203,7 +238,7 @@ class Cresil(ExternalTool):
 
         eccDNA_output = self.identify(
             fasta_query=fasta_query,
-            reference_fasta=reference_fasta,
+            reference_fasta=reference_fasta_for_identify,
             reference_fai=reference_fai,
             trim_file=trim_file,
             output_dir=output_dir,

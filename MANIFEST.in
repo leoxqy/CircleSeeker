@@ -2,7 +2,8 @@
 include README.md
 include LICENSE
 include COMMERCIAL_LICENSE.md
-# include CHANGELOG.md  # Add when created
+include CHANGELOG.md
+recursive-include docs *.md *.png
 
 # Requirements are now in pyproject.toml
 
@@ -12,19 +13,14 @@ recursive-include src/circleseeker/resources *.yaml *.json
 recursive-include src/circleseeker/data *.fa *.fasta *.txt
 
 # Include test files
-recursive-include tests *.py *.yaml *.json
-recursive-include tests/data *.fasta *.fa *.csv *.txt
+recursive-include tests *.py *.yaml *.json *.csv *.tsv *.fa *.fai *.fasta *.txt
 
 # Include configuration files
 include pytest.ini
 include .gitignore
-include .pre-commit-config.yaml
 
 # Include conda recipe
 recursive-include conda-recipe *.yaml *.sh *.txt
-
-# Include scripts
-recursive-include scripts *.sh *.py
 
 # Exclude unnecessary files
 global-exclude *.pyc

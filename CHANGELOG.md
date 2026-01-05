@@ -5,6 +5,30 @@ All notable changes to CircleSeeker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.15] - Unreleased
+
+### Added
+- **MAPQ-aware Uecc gating**: Preserve minimap2 PAF `mapq` into alignment TSV and optionally veto Uecc calls below `tools.um_classify.mapq_u_min` (default 0 disables)
+- **Simulation validation**: Add synthetic U/M/C validation and recall benchmark scripts (`tests/simulation/`) and documentation
+- **Confidence scoring**: Emit `confidence_score` plus evidence fields (MAPQ/identity/coverage/2nd-locus) in confirmed/merged tables for traceable filtering
+- **Negative control**: Add low-MAPQ negative-control tests to cap high-confidence false positives
+
+### Fixed
+- **Performance regression**: Avoid redundant CECC analysis on already-classified reads and speed up `um_classify` pandas-heavy code paths
+- **Temporary directory safety**: Validate `runtime.tmp_dir` and restrict auto-cleanup to subdirectories under the output directory
+- **Coordinate conventions**: Standardized subject coordinates to 0-based half-open (`start0/end0`) across minimap2 alignment conversion and downstream modules
+- **CD-HIT outputs**: Pipeline now detects representative FASTA whether `cd-hit-est -o` is given with or without a `.fasta` suffix
+- **Pipeline logs**: Step numbers in runtime logs are now 1-based (consistent with `--show-steps`, `--start-from`, `--stop-at`)
+- **Large FASTA merge**: Stream large combined FASTA writes to avoid high memory use
+- **Minimap2 index handling**: Reuse existing `.mmi` next to reference when available; otherwise build in the pipeline temp directory
+- **Cresil reference indexing**: Fallback `.fai` creation via output-dir symlink when reference directory is not writable
+
+### Changed
+- **Alignment TSV format**: Append a trailing `mapq` column when converting minimap2 PAF output; U/M classifier accepts both 13- and 14-column inputs for compatibility
+- **Documentation**: Updated CLI/pipeline docs to reflect minimap2-only alignment (BLAST references removed)
+- **Packaging metadata**: Aligned version/license metadata across README/conda recipe and code
+- **Pipeline structure**: Split monolithic `pipeline.py` into step executors + IO contracts with schema validation
+
 ## [0.9.8] - 2025-12-31
 
 ### Changed

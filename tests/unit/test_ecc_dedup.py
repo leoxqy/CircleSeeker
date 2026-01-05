@@ -2,8 +2,6 @@ from pathlib import Path
 import sys
 
 import pandas as pd
-import pytest
-from Bio import SeqIO
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
@@ -12,169 +10,206 @@ if str(SRC) not in sys.path:
 
 from circleseeker.modules.ecc_dedup import CDHitClusters, eccDedup
 
-DATA_DIR = Path(__file__).parent / "data" / "ecc_dedup"
-DATA_AVAILABLE = DATA_DIR.exists()
-EXPECTED = DATA_DIR / "expected"
-
-LEGACY_TO_SNAKE = {
-    'eccDNA_id': 'eccdna_id',
-    'eChr': 'chr',
-    'eStart0': 'start_0based',
-    'eEnd0': 'end_0based',
-    'eStrand': 'strand',
-    'eLength': 'length',
-    'MatDegree': 'match_degree',
-    'copyNum': 'copy_number',
-    'eRepeatNum': 'repeat_number',
-    'eClass': 'eccdna_type',
-    # readName removed - only using read_name now
-    'orig_eccDNA_id': 'orig_eccdna_id',
-}
-SNAKE_TO_LEGACY = {v: k for k, v in LEGACY_TO_SNAKE.items()}
-
-
-def _prepare(df: pd.DataFrame, sort_cols: list[str]) -> pd.DataFrame:
-    if df.empty:
-        return df
-    return df.sort_values(sort_cols).reset_index(drop=True)
-
-
-def _load_expected(name: str, sort_cols: list[str]) -> pd.DataFrame:
-    df = pd.read_csv(EXPECTED / name)
-    return _prepare(df, sort_cols)
-
-
-def _coerce_str(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
-    df = df.copy()
-    for col in cols:
-        if col in df.columns:
-            df[col] = df[col].astype(str)
-    return df
-
-
-def _project_to_expected(df: pd.DataFrame, expected_columns: list[str]) -> pd.DataFrame:
-    df = df.copy()
-    for old in expected_columns:
-        if old not in df.columns:
-            snake = LEGACY_TO_SNAKE.get(old)
-            if snake and snake in df.columns:
-                df[old] = df[snake]
-    return df[expected_columns]
-
-
-def _load_actual(path: Path, columns: pd.Index, sort_cols: list[str]) -> pd.DataFrame:
-    df = pd.read_csv(path)
-    df = _project_to_expected(df, list(columns))
-    return _prepare(df, sort_cols)
-
-
-def _load_fasta(path: Path) -> list[tuple[str, str]]:
-    records = list(SeqIO.parse(path, "fasta"))
-    records.sort(key=lambda rec: rec.id)
-    return [(rec.id, str(rec.seq)) for rec in records]
-
-
-def _rename_to_legacy(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    for old, new in LEGACY_TO_SNAKE.items():
-        if new in df.columns:
-            if old in df.columns:
-                df = df.drop(columns=[new])
-            else:
-                df = df.rename(columns={new: old})
-    df = df.loc[:, ~df.columns.duplicated()]
-    return df
-
-
-@pytest.mark.skipif(not DATA_AVAILABLE, reason="Test data not found")
 def test_ecc_dedup_subset(tmp_path):
+    input_dir = tmp_path / "inputs"
+    input_dir.mkdir()
+
+    uecc_csv = input_dir / "uecc_input.csv"
+    uecc_clstr = input_dir / "uecc.id2cluster.csv"
+    mecc_csv = input_dir / "mecc_input.csv"
+    mecc_clstr = input_dir / "mecc.id2cluster.csv"
+    cecc_csv = input_dir / "cecc_input.csv"
+    cecc_clstr = input_dir / "cecc.id2cluster.csv"
+
+    pd.DataFrame(
+        [
+            {
+                "eccDNA_id": "U1",
+                "chr": "chr1",
+                "start0": 0,
+                "end0": 100,
+                "strand": "+",
+                "length": 100,
+                "match_degree": 99.5,
+                "copy_number": 1,
+                "reads": "readA",
+                "eSeq": "A" * 100,
+            },
+            {
+                "eccDNA_id": "U2",
+                "chr": "chr1",
+                "start0": 0,
+                "end0": 100,
+                "strand": "+",
+                "length": 100,
+                "match_degree": 98.0,
+                "copy_number": 2,
+                "reads": "readB",
+                "eSeq": "C" * 100,
+            },
+            {
+                "eccDNA_id": "U3",
+                "chr": "chr2",
+                "start0": 200,
+                "end0": 300,
+                "strand": "-",
+                "length": 100,
+                "match_degree": 97.0,
+                "copy_number": 1,
+                "reads": "readC",
+                "eSeq": "G" * 100,
+            },
+        ]
+    ).to_csv(uecc_csv, index=False)
+    uecc_clstr.write_text(
+        "id,cluster,is_representative\n"
+        "U1,grp1,false\n"
+        "U2,grp1,true\n"
+        "U3,grp2,true\n"
+    )
+
+    pd.DataFrame(
+        [
+            {
+                "eccDNA_id": "M1",
+                "chr": "chr1",
+                "start0": 1000,
+                "end0": 1100,
+                "strand": "+",
+                "length": 100,
+                "match_degree": 98.0,
+                "copy_number": 2,
+                "reads": "mread1",
+                "alignment_length": 100,
+            },
+            {
+                "eccDNA_id": "M2",
+                "chr": "chr1",
+                "start0": 2000,
+                "end0": 2100,
+                "strand": "+",
+                "length": 100,
+                "match_degree": 99.0,
+                "copy_number": 2,
+                "reads": "mread2",
+                "alignment_length": 100,
+            },
+            {
+                "eccDNA_id": "M2",
+                "chr": "chr2",
+                "start0": 3000,
+                "end0": 3100,
+                "strand": "+",
+                "length": 100,
+                "match_degree": 97.0,
+                "copy_number": 2,
+                "reads": "mread3",
+                "alignment_length": 90,
+            },
+        ]
+    ).to_csv(mecc_csv, index=False)
+    mecc_clstr.write_text(
+        "id,cluster,is_representative\n"
+        "M1,mgrp1,false\n"
+        "M2,mgrp1,true\n"
+    )
+
+    pd.DataFrame(
+        [
+            {
+                "eccDNA_id": "C1",
+                "chr": "chr1",
+                "start0": 0,
+                "end0": 100,
+                "strand": "+",
+                "length": 200,
+                "match_degree": 90.0,
+                "copy_number": 1,
+                "reads": "cread1",
+            },
+            {
+                "eccDNA_id": "C2",
+                "chr": "chr1",
+                "start0": 100,
+                "end0": 200,
+                "strand": "+",
+                "length": 200,
+                "match_degree": 95.0,
+                "copy_number": 1,
+                "reads": "cread2",
+            },
+            {
+                "eccDNA_id": "C2",
+                "chr": "chr1",
+                "start0": 300,
+                "end0": 400,
+                "strand": "+",
+                "length": 200,
+                "match_degree": 95.0,
+                "copy_number": 1,
+                "reads": "cread3",
+            },
+        ]
+    ).to_csv(cecc_csv, index=False)
+    cecc_clstr.write_text(
+        "id,cluster,is_representative\n"
+        "C1,cgrp1,false\n"
+        "C2,cgrp1,true\n"
+    )
+
     processor = eccDedup()
     results = processor.process_all_types(
-        uecc_csv=DATA_DIR / "uecc_input.csv",
-        uecc_clstr=DATA_DIR / "uecc.clstr",
-        mecc_csv=DATA_DIR / "mecc_input.csv",
-        mecc_clstr=DATA_DIR / "mecc.clstr",
-        cecc_csv=DATA_DIR / "cecc_input.csv",
-        cecc_clstr=DATA_DIR / "cecc.clstr",
+        uecc_csv=uecc_csv,
+        uecc_clstr=uecc_clstr,
+        mecc_csv=mecc_csv,
+        mecc_clstr=mecc_clstr,
+        cecc_csv=cecc_csv,
+        cecc_clstr=cecc_clstr,
         output_dir=tmp_path,
         prefix="step8",
-        drop_seq=False,
+        drop_seq=True,
+        generate_confirmed_tables=False,
+        organize_output_files=False,
     )
 
-    # Uecc assertions
-    expected_uecc = _load_expected("uecc_processed.csv", ["eccDNA_id"])
-    actual_uecc = _prepare(results["Uecc"], ["eccdna_id"])
-    assert {"eccdna_id", "chr", "start_0based", "end_0based", "strand", "match_degree", "copy_number", "eccdna_type"}.issubset(actual_uecc.columns)
-    assert pd.api.types.is_integer_dtype(actual_uecc['copy_number'])
-    assert actual_uecc['match_degree'].dropna().between(0, 100).all()
-    actual_uecc_legacy = _rename_to_legacy(actual_uecc)
-    actual_uecc_cmp = _coerce_str(actual_uecc_legacy[expected_uecc.columns], ["cluster_id"])
-    expected_uecc_cmp = _coerce_str(expected_uecc, ["cluster_id"])
-    pd.testing.assert_frame_equal(actual_uecc_cmp, expected_uecc_cmp, check_dtype=False)
-    assert (actual_uecc["num_merged"] > 1).any()
+    assert set(results.keys()) == {"Uecc", "Mecc", "Cecc"}
 
-    uecc_core = _load_actual(
-        tmp_path / "step8_Uecc_C" / "step8_UeccDNA.core.csv",
-        pd.read_csv(EXPECTED / "step8_UeccDNA.core.csv").columns,
-        ["eccDNA_id"],
-    )
-    expected_uecc_core = _load_expected("step8_UeccDNA.core.csv", ["eccDNA_id"])
-    pd.testing.assert_frame_equal(uecc_core, expected_uecc_core)
+    uecc = results["Uecc"]
+    assert uecc["cluster_id"].nunique() == 2
+    assert uecc["eccDNA_id"].str.startswith("UeccDNA").all()
+    grp1 = uecc.loc[uecc["cluster_id"] == "grp1"].iloc[0]
+    assert grp1["num_merged"] == 2
+    assert grp1["merged_from_ids"] == "U1;U2"
 
-    # Mecc assertions
-    expected_mecc = _load_expected("mecc_processed.csv", ["eccDNA_id", "q_start"])
-    actual_mecc = _prepare(results["Mecc"], ["eccdna_id", "q_start"])
-    assert {"eccdna_id", "chr", "start_0based", "end_0based", "strand", "copy_number", "eccdna_type"}.issubset(actual_mecc.columns)
-    assert pd.api.types.is_integer_dtype(actual_mecc['copy_number'])
-    assert actual_mecc['match_degree'].dropna().between(0, 100).all()
-    actual_mecc_cmp = _coerce_str(_rename_to_legacy(actual_mecc)[expected_mecc.columns], ["cluster_id"])
-    expected_mecc_cmp = _coerce_str(expected_mecc, ["cluster_id"])
-    pd.testing.assert_frame_equal(actual_mecc_cmp, expected_mecc_cmp, check_dtype=False)
-    assert (actual_mecc["num_merged"] > 1).any()
-    assert (actual_mecc["num_merged"] == 1).any()
+    mecc = results["Mecc"]
+    assert mecc["cluster_id"].nunique() == 1
+    assert mecc["eccDNA_id"].str.startswith("MeccDNA").all()
+    assert len(mecc) == 2  # two loci retained for the representative ID
+    assert mecc["num_merged"].dropna().astype(int).eq(2).all()
+    assert mecc["merged_from_ids"].iloc[0] == "M1;M2"
 
-    mecc_core_cols = pd.read_csv(EXPECTED / "step8_MeccSites.core.csv").columns
-    mecc_core = _load_actual(
-        tmp_path / "step8_Mecc_C" / "step8_MeccSites.core.csv",
-        mecc_core_cols,
-        ["eccDNA_id", "hit_index"],
-    )
-    expected_mecc_core = _load_expected("step8_MeccSites.core.csv", ["eccDNA_id", "hit_index"])
-    pd.testing.assert_frame_equal(mecc_core, expected_mecc_core, check_dtype=False)
+    cecc = results["Cecc"]
+    assert cecc["cluster_id"].nunique() == 1
+    assert cecc["eccDNA_id"].str.startswith("CeccDNA").all()
+    assert len(cecc) == 2  # two segments retained for the representative ID
+    assert cecc["num_merged"].dropna().astype(int).eq(2).all()
+    assert cecc["merged_from_ids"].iloc[0] == "C1;C2"
 
-    assert _load_fasta(tmp_path / "step8_Mecc_C" / "step8_MeccDNA_C.fasta") == _load_fasta(EXPECTED / "step8_Mecc.fa")
-    assert (tmp_path / "step8_Mecc_C" / "step8_MeccBestSite.bed").read_text() == (
-        EXPECTED / "step8_MeccBestSite.bed"
-    ).read_text()
-
-    # Cecc assertions
-    expected_cecc = _load_expected("cecc_processed.csv", ["eccDNA_id", "eChr", "eStart0"])
-    actual_cecc = _prepare(results["Cecc"], ["eccdna_id", "chr", "start_0based"])
-    assert {"eccdna_id", "chr", "start_0based", "end_0based", "strand", "eccdna_type"}.issubset(actual_cecc.columns)
-    assert set(actual_cecc['strand'].dropna().unique()).issubset({'+', '-'})
-    actual_cecc_cmp = _coerce_str(_rename_to_legacy(actual_cecc)[expected_cecc.columns], ["cluster_id"])
-    expected_cecc_cmp = _coerce_str(expected_cecc, ["cluster_id"])
-    pd.testing.assert_frame_equal(actual_cecc_cmp, expected_cecc_cmp, check_dtype=False)
-    assert (actual_cecc["num_merged"] > 1).any()
-    assert (actual_cecc["num_merged"] == 1).any()
-
-    cecc_core = _load_actual(
-        tmp_path / "step8_Cecc_C" / "step8_CeccSegments.core.csv",
-        pd.read_csv(EXPECTED / "step8_CeccSegments.core.csv").columns,
-        ["eccDNA_id", "seg_index"],
-    )
-    expected_cecc_core = _load_expected("step8_CeccSegments.core.csv", ["eccDNA_id", "seg_index"])
-    pd.testing.assert_frame_equal(cecc_core, expected_cecc_core, check_dtype=False)
-
-    assert _load_fasta(tmp_path / "step8_Cecc_C" / "step8_CeccDNA_C.fasta") == _load_fasta(EXPECTED / "step8_Cecc.fa")
-    assert (tmp_path / "step8_Cecc_C" / "step8_CeccJunctions.bedpe").read_text() == (
-        EXPECTED / "step8_CeccJunctions.bedpe"
-    ).read_text()
-
-    # Uecc BED output exists
-    assert (tmp_path / "step8_Uecc_C" / "step8_UeccDNA.bed").read_text() == (
-        EXPECTED / "step8_UeccDNA.bed"
-    ).read_text()
+    expected_outputs = [
+        tmp_path / "step8_UeccDNA.core.csv",
+        tmp_path / "step8_UeccDNA.bed",
+        tmp_path / "step8_UeccDNA_C.fasta",
+        tmp_path / "step8_MeccSites.core.csv",
+        tmp_path / "step8_MeccSites.bed",
+        tmp_path / "step8_MeccBestSite.bed",
+        tmp_path / "step8_MeccDNA_C.fasta",
+        tmp_path / "step8_CeccSegments.core.csv",
+        tmp_path / "step8_CeccSegments.bed",
+        tmp_path / "step8_CeccJunctions.bedpe",
+        tmp_path / "step8_CeccDNA_C.fasta",
+    ]
+    for path in expected_outputs:
+        assert path.exists(), f"Expected output missing: {path}"
 
 
 def test_ecc_dedup_csv_cluster_merging(tmp_path):

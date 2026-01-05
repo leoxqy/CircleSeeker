@@ -68,6 +68,10 @@ LEGACY_TO_SNAKE_CASE = {
 STRAND_POSITIVE = {"+", "plus", "positive", "forward", "f", "pos"}
 STRAND_NEGATIVE = {"-", "minus", "negative", "reverse", "rev", "r", "neg"}
 
+# Confidence/evidence heuristics (used for flags only; does not gate calls).
+CONF_MAPQ_LOW_THRESHOLD = 20
+CONF_IDENTITY_LOW_THRESHOLD = 95.0
+
 
 def _normalize_strand(value: Optional[str]) -> Optional[str]:
     """Normalise strand annotations to '+'/'-' where possible."""
@@ -290,6 +294,19 @@ def build_u_confirmed_table(u_df: pd.DataFrame) -> pd.DataFrame:
     if ColumnStandard.STRAND in df.columns:
         agg_dict[ColumnStandard.STRAND] = "first"
 
+    # Optional confidence/evidence columns (max over merged members).
+    for col in (
+        ColumnStandard.CONFIDENCE_SCORE,
+        ColumnStandard.QUERY_COV_BEST,
+        ColumnStandard.QUERY_COV_2ND,
+        ColumnStandard.MAPQ_BEST,
+        ColumnStandard.IDENTITY_BEST,
+        ColumnStandard.LOW_MAPQ,
+        ColumnStandard.LOW_IDENTITY,
+    ):
+        if col in df.columns:
+            agg_dict[col] = "max"
+
     g = df.groupby("eccDNA_id", as_index=False, sort=False).agg(agg_dict)
 
     # Add standard fields
@@ -307,18 +324,28 @@ def build_u_confirmed_table(u_df: pd.DataFrame) -> pd.DataFrame:
     # Apply natural sorting by eccDNA_id
     g = natural_sort_eccdna_id(g)
 
-    return g[
-        [
-            "eccDNA_id",
-            "Regions",
-            "Strand",
-            "Length",
-            "eccDNA_type",
-            "State",
-            "Seg_total",
-            "Hit_count",
-        ]
+    cols = [
+        "eccDNA_id",
+        "Regions",
+        "Strand",
+        "Length",
+        "eccDNA_type",
+        "State",
+        "Seg_total",
+        "Hit_count",
     ]
+    for col in (
+        ColumnStandard.CONFIDENCE_SCORE,
+        ColumnStandard.QUERY_COV_BEST,
+        ColumnStandard.QUERY_COV_2ND,
+        ColumnStandard.MAPQ_BEST,
+        ColumnStandard.IDENTITY_BEST,
+        ColumnStandard.LOW_MAPQ,
+        ColumnStandard.LOW_IDENTITY,
+    ):
+        if col in g.columns:
+            cols.append(col)
+    return g[cols]
 
 
 def build_m_confirmed_table(m_df: pd.DataFrame) -> pd.DataFrame:
@@ -387,6 +414,18 @@ def build_m_confirmed_table(m_df: pd.DataFrame) -> pd.DataFrame:
     if ColumnStandard.STRAND in df.columns:
         agg[ColumnStandard.STRAND] = lambda x: "|".join(list(x))  # Join multiple strands with |
 
+    for col in (
+        ColumnStandard.CONFIDENCE_SCORE,
+        ColumnStandard.QUERY_COV_BEST,
+        ColumnStandard.QUERY_COV_2ND,
+        ColumnStandard.MAPQ_BEST,
+        ColumnStandard.IDENTITY_BEST,
+        ColumnStandard.LOW_MAPQ,
+        ColumnStandard.LOW_IDENTITY,
+    ):
+        if col in df.columns:
+            agg[col] = "max"
+
     out = df.groupby("eccDNA_id", sort=False).agg(agg).reset_index()
 
     # Add standard fields
@@ -403,18 +442,28 @@ def build_m_confirmed_table(m_df: pd.DataFrame) -> pd.DataFrame:
     # Apply natural sorting by eccDNA_id
     out = natural_sort_eccdna_id(out)
 
-    return out[
-        [
-            "eccDNA_id",
-            "Regions",
-            "Strand",
-            "Length",
-            "eccDNA_type",
-            "State",
-            "Seg_total",
-            "Hit_count",
-        ]
+    cols = [
+        "eccDNA_id",
+        "Regions",
+        "Strand",
+        "Length",
+        "eccDNA_type",
+        "State",
+        "Seg_total",
+        "Hit_count",
     ]
+    for col in (
+        ColumnStandard.CONFIDENCE_SCORE,
+        ColumnStandard.QUERY_COV_BEST,
+        ColumnStandard.QUERY_COV_2ND,
+        ColumnStandard.MAPQ_BEST,
+        ColumnStandard.IDENTITY_BEST,
+        ColumnStandard.LOW_MAPQ,
+        ColumnStandard.LOW_IDENTITY,
+    ):
+        if col in out.columns:
+            cols.append(col)
+    return out[cols]
 
 
 def build_c_confirmed_table(c_df: pd.DataFrame) -> pd.DataFrame:
@@ -485,6 +534,18 @@ def build_c_confirmed_table(c_df: pd.DataFrame) -> pd.DataFrame:
             list(x)
         )  # Join multiple strands with ;
 
+    for col in (
+        ColumnStandard.CONFIDENCE_SCORE,
+        ColumnStandard.QUERY_COV_BEST,
+        ColumnStandard.QUERY_COV_2ND,
+        ColumnStandard.MAPQ_BEST,
+        ColumnStandard.IDENTITY_BEST,
+        ColumnStandard.LOW_MAPQ,
+        ColumnStandard.LOW_IDENTITY,
+    ):
+        if col in df.columns:
+            agg_dict[col] = "max"
+
     out = df.groupby("eccDNA_id", sort=False).agg(agg_dict).reset_index()
 
     # Add standard fields
@@ -501,18 +562,28 @@ def build_c_confirmed_table(c_df: pd.DataFrame) -> pd.DataFrame:
     # Apply natural sorting by eccDNA_id
     out = natural_sort_eccdna_id(out)
 
-    return out[
-        [
-            "eccDNA_id",
-            "Regions",
-            "Strand",
-            "Length",
-            "eccDNA_type",
-            "State",
-            "Seg_total",
-            "Hit_count",
-        ]
+    cols = [
+        "eccDNA_id",
+        "Regions",
+        "Strand",
+        "Length",
+        "eccDNA_type",
+        "State",
+        "Seg_total",
+        "Hit_count",
     ]
+    for col in (
+        ColumnStandard.CONFIDENCE_SCORE,
+        ColumnStandard.QUERY_COV_BEST,
+        ColumnStandard.QUERY_COV_2ND,
+        ColumnStandard.MAPQ_BEST,
+        ColumnStandard.IDENTITY_BEST,
+        ColumnStandard.LOW_MAPQ,
+        ColumnStandard.LOW_IDENTITY,
+    ):
+        if col in out.columns:
+            cols.append(col)
+    return out[cols]
 
 
 def detect_related_files(base_dir: Path | str, prefix: str, ecc_type: str) -> List[Path]:
@@ -1153,6 +1224,23 @@ class eccDedup:
                 merge_read_lists
             )
 
+        # Confidence/evidence aggregation (numeric; conservative defaults).
+        numeric_aggs = {
+            ColumnStandard.CONFIDENCE_SCORE: "max",
+            ColumnStandard.MAPQ_BEST: "max",
+            ColumnStandard.MAPQ_MIN: "min",
+            ColumnStandard.IDENTITY_BEST: "max",
+            ColumnStandard.IDENTITY_MIN: "min",
+            ColumnStandard.QUERY_COV_BEST: "max",
+            ColumnStandard.QUERY_COV_2ND: "max",
+        }
+        for col, how in numeric_aggs.items():
+            if col not in df.columns:
+                continue
+            series = pd.to_numeric(df[col], errors="coerce")
+            grouped = series.groupby(df["cluster_id"])
+            agg_dict[col] = grouped.max() if how == "max" else grouped.min()
+
         if "repeat_number" in df.columns:
             unique_by_id = (
                 df[["cluster_id", ColumnStandard.ECCDNA_ID, "repeat_number"]]
@@ -1182,11 +1270,26 @@ class eccDedup:
         # Merge aggregated data
         result = result.merge(agg_df, on="cluster_id", how="left", suffixes=("", "_agg"))
 
-        for col in [ColumnStandard.READS, "repeat_number", ColumnStandard.STRAND]:
-            col_agg = col + "_agg"
+        for col in agg_dict.keys():
+            col_agg = f"{col}_agg"
             if col_agg in result.columns:
                 result[col] = result[col_agg].where(result[col_agg].notna(), result.get(col))
                 result = result.drop(columns=[col_agg])
+
+        # Recompute evidence flags from aggregated maxima when possible.
+        if ColumnStandard.MAPQ_BEST in result.columns:
+            mapq_best = (
+                pd.to_numeric(result[ColumnStandard.MAPQ_BEST], errors="coerce")
+                .fillna(0)
+                .astype(int)
+            )
+            result[ColumnStandard.LOW_MAPQ] = mapq_best < int(CONF_MAPQ_LOW_THRESHOLD)
+
+        if ColumnStandard.IDENTITY_BEST in result.columns:
+            identity_best = pd.to_numeric(
+                result[ColumnStandard.IDENTITY_BEST], errors="coerce"
+            ).fillna(0.0)
+            result[ColumnStandard.LOW_IDENTITY] = identity_best < float(CONF_IDENTITY_LOW_THRESHOLD)
 
         # Add merge tracking
         cluster_counts = df.groupby("cluster_id")[ColumnStandard.ECCDNA_ID].nunique()
@@ -1281,6 +1384,23 @@ class eccDedup:
                 ColumnStandard.READS
             ].apply(merge_read_lists)
             # readName column removed - only using read_name now
+
+        numeric_aggs = {
+            ColumnStandard.CONFIDENCE_SCORE: "max",
+            ColumnStandard.MAPQ_BEST: "max",
+            ColumnStandard.MAPQ_MIN: "min",
+            ColumnStandard.IDENTITY_BEST: "max",
+            ColumnStandard.IDENTITY_MIN: "min",
+            ColumnStandard.QUERY_COV_BEST: "max",
+            ColumnStandard.QUERY_COV_2ND: "max",
+        }
+        for col, how in numeric_aggs.items():
+            if col not in full_df.columns:
+                continue
+            series = pd.to_numeric(full_df[col], errors="coerce")
+            grouped = series.groupby(full_df["cluster_id"])
+            agg_dict[col] = grouped.max() if how == "max" else grouped.min()
+
         if ColumnStandard.COPY_NUMBER in full_df.columns:
             unique_by_id = (
                 full_df[["cluster_id", ColumnStandard.ECCDNA_ID, ColumnStandard.COPY_NUMBER]]
@@ -1304,6 +1424,20 @@ class eccDedup:
                     # Always use aggregated value, don't fallback to original
                     result[col] = result[col_agg]
                     result = result.drop(columns=[col_agg])
+
+        if ColumnStandard.MAPQ_BEST in result.columns:
+            mapq_best = (
+                pd.to_numeric(result[ColumnStandard.MAPQ_BEST], errors="coerce")
+                .fillna(0)
+                .astype(int)
+            )
+            result[ColumnStandard.LOW_MAPQ] = mapq_best < int(CONF_MAPQ_LOW_THRESHOLD)
+
+        if ColumnStandard.IDENTITY_BEST in result.columns:
+            identity_best = pd.to_numeric(
+                result[ColumnStandard.IDENTITY_BEST], errors="coerce"
+            ).fillna(0.0)
+            result[ColumnStandard.LOW_IDENTITY] = identity_best < float(CONF_IDENTITY_LOW_THRESHOLD)
 
         cluster_counts = full_df.groupby("cluster_id")[ColumnStandard.ECCDNA_ID].nunique()
         result["num_merged"] = result["cluster_id"].map(cluster_counts).fillna(1).astype(int)
@@ -1390,6 +1524,13 @@ class eccDedup:
                 "match_degree": df.get(ColumnStandard.MATCH_DEGREE, pd.NA).apply(
                     format_two_decimals
                 ),
+                ColumnStandard.CONFIDENCE_SCORE: df.get(ColumnStandard.CONFIDENCE_SCORE, pd.NA),
+                ColumnStandard.QUERY_COV_BEST: df.get(ColumnStandard.QUERY_COV_BEST, pd.NA),
+                ColumnStandard.QUERY_COV_2ND: df.get(ColumnStandard.QUERY_COV_2ND, pd.NA),
+                ColumnStandard.MAPQ_BEST: df.get(ColumnStandard.MAPQ_BEST, pd.NA),
+                ColumnStandard.IDENTITY_BEST: df.get(ColumnStandard.IDENTITY_BEST, pd.NA),
+                ColumnStandard.LOW_MAPQ: df.get(ColumnStandard.LOW_MAPQ, pd.NA),
+                ColumnStandard.LOW_IDENTITY: df.get(ColumnStandard.LOW_IDENTITY, pd.NA),
                 "copy_number": copy_number,
                 "repeat_number": repeat_number,
                 "eccdna_type": "Uecc",
@@ -1528,6 +1669,13 @@ class eccDedup:
                 "match_degree": df.get(ColumnStandard.MATCH_DEGREE, pd.NA).apply(
                     format_two_decimals
                 ),
+                ColumnStandard.CONFIDENCE_SCORE: df.get(ColumnStandard.CONFIDENCE_SCORE, pd.NA),
+                ColumnStandard.QUERY_COV_BEST: df.get(ColumnStandard.QUERY_COV_BEST, pd.NA),
+                ColumnStandard.QUERY_COV_2ND: df.get(ColumnStandard.QUERY_COV_2ND, pd.NA),
+                ColumnStandard.MAPQ_BEST: df.get(ColumnStandard.MAPQ_BEST, pd.NA),
+                ColumnStandard.IDENTITY_BEST: df.get(ColumnStandard.IDENTITY_BEST, pd.NA),
+                ColumnStandard.LOW_MAPQ: df.get(ColumnStandard.LOW_MAPQ, pd.NA),
+                ColumnStandard.LOW_IDENTITY: df.get(ColumnStandard.LOW_IDENTITY, pd.NA),
                 "copy_number": df.get(ColumnStandard.COPY_NUMBER, pd.NA),
                 "eccdna_type": "Mecc",
                 "hit_index": df["hit_index"],
@@ -1763,6 +1911,13 @@ class eccDedup:
                 "match_degree": df.get(ColumnStandard.MATCH_DEGREE, pd.NA).apply(
                     format_two_decimals
                 ),
+                ColumnStandard.CONFIDENCE_SCORE: df.get(ColumnStandard.CONFIDENCE_SCORE, pd.NA),
+                ColumnStandard.QUERY_COV_BEST: df.get(ColumnStandard.QUERY_COV_BEST, pd.NA),
+                ColumnStandard.QUERY_COV_2ND: df.get(ColumnStandard.QUERY_COV_2ND, pd.NA),
+                ColumnStandard.MAPQ_BEST: df.get(ColumnStandard.MAPQ_BEST, pd.NA),
+                ColumnStandard.IDENTITY_BEST: df.get(ColumnStandard.IDENTITY_BEST, pd.NA),
+                ColumnStandard.LOW_MAPQ: df.get(ColumnStandard.LOW_MAPQ, pd.NA),
+                ColumnStandard.LOW_IDENTITY: df.get(ColumnStandard.LOW_IDENTITY, pd.NA),
                 "copy_number": df.get(ColumnStandard.COPY_NUMBER, pd.NA),
                 "num_merged": df.get("num_merged", 1),
                 "merged_from_ids": df.get("merged_from_ids", df["eccDNA_id"]),

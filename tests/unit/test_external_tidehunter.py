@@ -20,7 +20,7 @@ class TestTideHunter:
     def test_tidehunter_initialization(self, mock_check):
         """Test TideHunter initialization."""
         tidehunter = TideHunter()
-        assert tidehunter.tool_name == "TideHunter"
+        assert tidehunter.tool_name in {"TideHunter", "tidehunter"}
         assert tidehunter.threads == 1  # Default from base class
         mock_check.assert_called_once()
 
@@ -62,14 +62,16 @@ class TestTideHunter:
         # Verify subprocess was called
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
-        assert "TideHunter" in call_args
+        assert call_args[0] in {"TideHunter", "tidehunter"}
         assert "-f" in call_args
         assert "-t" in call_args
         assert "-k" in call_args
         assert str(input_file) in call_args
 
         # Verify output file was opened for writing
-        mock_file.assert_called_once_with(output_file, 'w')
+        assert mock_file.call_count == 2
+        mock_file.assert_any_call(output_file, "w")
+        mock_file.assert_any_call(output_file.parent / "tidehunter.log", "w")
 
     @patch.object(TideHunter, '_check_installation')
     @patch('subprocess.run')

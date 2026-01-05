@@ -37,6 +37,54 @@ class ToolConfig:
     tidehunter: Dict[str, Any] = field(
         default_factory=lambda: {"k": 16, "w": 1, "p": 100, "P": 2000000, "e": 0.1, "f": 2}
     )
+    um_classify: Dict[str, Any] = field(
+        default_factory=lambda: {
+            "gap_threshold": 10.0,
+            # Coverage model parameters (preferred, fractions 0-1)
+            "theta_full": 0.95,
+            # Split thresholds (preferred): U and M can use different cutoffs.
+            # If unset, code falls back to theta_full for both.
+            "theta_u": 0.95,
+            "theta_m": 0.95,
+            # U requires the 2nd-best locus coverage to be low (fractions 0-1).
+            # Set to 1.0 to disable.
+            "theta_u2_max": 0.05,
+            # Optional: require minimap2 MAPQ >= this threshold for Uecc (0 disables).
+            "mapq_u_min": 0,
+            # When attempting to call U, veto if there is significant secondary evidence
+            # (other-chr or far-away mappings) beyond these thresholds.
+            "u_secondary_min_frac": 0.01,
+            "u_secondary_min_bp": 50,
+            "u_contig_gap_bp": 1000,
+            "theta_locus": 0.95,
+            "pos_tol_bp": 50,
+            # Ambiguity interception (fractions 0-1)
+            "delta_uc": 0.05,
+            "epsilon_mc": 0.05,
+            # Legacy keys (accepted for backward compatibility)
+            "min_full_length_coverage": 95.0,
+            "max_identity_gap_for_mecc": 5.0,
+        }
+    )
+    cecc_build: Dict[str, Any] = field(
+        default_factory=lambda: {
+            "overlap_threshold": 0.95,
+            "min_segments": 2,
+            # Gap tolerance on query (bp)
+            "edge_tolerance": 20,
+            "tau_gap": 20,
+            # Position tolerance used by legacy closure checks (bp)
+            "position_tolerance": 50,
+            # Reciprocal-overlap threshold to treat two genomic intervals as the same locus
+            # in the final overlap filter (fractions 0-1; accepts percents for convenience)
+            "locus_overlap_threshold": 0.95,
+            # Chain coverage threshold (preferred, fraction 0-1)
+            "theta_chain": 0.95,
+            # Legacy key (percent 0-100)
+            "min_match_degree": 95.0,
+            "max_rotations": 20,
+        }
+    )
     minimap2_align: Dict[str, Any] = field(
         default_factory=lambda: {"preset": "sr", "max_target_seqs": 200, "additional_args": ""}
     )
@@ -100,6 +148,24 @@ class Config:
         # Validate numeric ranges
         if self.performance.threads < 1:
             raise ConfigurationError("Threads must be >= 1")
+
+        # Validate runtime tmp_dir safety.
+        # - Relative tmp_dir must be a subdirectory name/path (not '.', not escaping via '..')
+        # - If you want temp files outside the output dir, use an absolute path.
+        tmp_dir = self.runtime.tmp_dir
+        if not isinstance(tmp_dir, Path):
+            tmp_dir = Path(tmp_dir)
+        if not tmp_dir.is_absolute():
+            if tmp_dir == Path(".") or str(tmp_dir).strip() in {"", "."}:
+                raise ConfigurationError(
+                    "Invalid runtime.tmp_dir: must be a subdirectory (not '.'). "
+                    "Use an absolute path if you want an external temp directory."
+                )
+            if ".." in tmp_dir.parts:
+                raise ConfigurationError(
+                    "Invalid runtime.tmp_dir: must not contain '..'. "
+                    "Use an absolute path if you want an external temp directory."
+                )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""

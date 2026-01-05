@@ -13,15 +13,17 @@ if str(SRC) not in sys.path:
 from circleseeker.modules.tandem_to_ring import TandemToRing
 
 
-DATA_DIR = Path(__file__).parent / "data" / "tandem_to_ring"
-DATA_AVAILABLE = DATA_DIR.exists()
-
-
-@pytest.mark.skipif(not DATA_AVAILABLE, reason="Test data not found")
 def test_tandem_to_ring_process_subset(tmp_path):
-    input_tsv = DATA_DIR / "step1_subset.tsv"
-    expected_csv = DATA_DIR / "expected_classification.csv"
-    expected_fasta = DATA_DIR / "expected_circular.fasta"
+    input_tsv = tmp_path / "step1_subset.tsv"
+
+    # Input format matches TideHunter TSV (11 columns, no header)
+    rows = [
+        # Effective_Length = (1000 / 1000) * 100 = 100 -> CtcR-perfect
+        ["readA", 1, 1.0, 1000, 1, 1000, 4, 99.0, 0, "0,1", "ATCG"],
+        # Effective_Length = (800 / 1000) * 100 = 80 -> CtcR-hybrid
+        ["readB", 1, 1.0, 1000, 1, 800, 4, 99.0, 0, "0,1", "GGCC"],
+    ]
+    pd.DataFrame(rows).to_csv(input_tsv, sep="\t", header=False, index=False)
 
     output_csv = tmp_path / "step2_processed.csv"
     output_fasta = tmp_path / "step2_circular.fasta"
@@ -35,7 +37,9 @@ def test_tandem_to_ring_process_subset(tmp_path):
     df_main, df_classification = module.process()
 
     produced_csv = pd.read_csv(output_csv).sort_values("readName").reset_index(drop=True)
-    expected_df = pd.read_csv(expected_csv).sort_values("readName").reset_index(drop=True)
+    expected_df = pd.DataFrame(
+        {"readName": ["readA", "readB"], "readClass": ["CtcR-perfect", "CtcR-hybrid"]}
+    ).sort_values("readName").reset_index(drop=True)
 
     pd.testing.assert_frame_equal(produced_csv, expected_df)
     pd.testing.assert_frame_equal(
@@ -43,15 +47,15 @@ def test_tandem_to_ring_process_subset(tmp_path):
     )
 
     produced_records = list(SeqIO.parse(output_fasta, "fasta"))
-    expected_records = list(SeqIO.parse(expected_fasta, "fasta"))
-
-    assert len(produced_records) == len(expected_records)
     produced_records.sort(key=lambda rec: rec.id)
-    expected_records.sort(key=lambda rec: rec.id)
 
-    for prod, exp in zip(produced_records, expected_records):
-        assert prod.id == exp.id
-        assert str(prod.seq) == str(exp.seq)
+    expected_fasta = {
+        "readA|1|4|1|circular": "ATCGATCG",
+        "readB|1|4|1|circular": "GGCCGGCC",
+    }
+    assert [rec.id for rec in produced_records] == sorted(expected_fasta.keys())
+    for rec in produced_records:
+        assert str(rec.seq) == expected_fasta[rec.id]
 
     assert not df_main.empty
     unique_ids = {f"{uid}|circular" for uid in df_main["unique_id"].tolist()}

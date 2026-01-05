@@ -4,7 +4,8 @@
 
 # CircleSeeker
 
-[![Version](https://img.shields.io/badge/version-0.9.8-blue.svg)](https://github.com/yaoxinzhang/CircleSeeker)
+[![Version](https://img.shields.io/badge/version-0.9.15-blue.svg)](https://github.com/yaoxinzhang/CircleSeeker)
+[![CI](https://github.com/yaoxinzhang/CircleSeeker/actions/workflows/ci.yml/badge.svg)](https://github.com/yaoxinzhang/CircleSeeker/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-≥3.9-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
 
@@ -106,29 +107,29 @@ circleseeker \
 
 CircleSeeker implements a 16-step analysis pipeline:
 
-### Detection Phase (Steps 0-5)
-0. **check_dependencies** - Validate required tools and dependencies
-1. **tidehunter** - Detect tandem repeats in HiFi reads
-2. **tandem_to_ring** - Convert tandem repeats to circular candidates
-3. **run_alignment** - Map candidates to reference genome (minimap2)
-4. **um_classify** - Classify eccDNA as Unique (U) or Multiple (M) origin
-5. **cecc_build** - Identify Complex (C) eccDNA
+### Detection Phase (Steps 1-6)
+1. **check_dependencies** - Validate required tools and dependencies
+2. **tidehunter** - Detect tandem repeats in HiFi reads
+3. **tandem_to_ring** - Convert tandem repeats to circular candidates
+4. **run_alignment** - Map candidates to reference genome (minimap2)
+5. **um_classify** - Classify eccDNA as Unique (U) or Multiple (M) origin
+6. **cecc_build** - Identify Complex (C) eccDNA
 
-### Processing Phase (Steps 6-9)
-6. **umc_process** - Process and cluster U/M/C types
-7. **cd_hit** - Remove redundancy (90% identity threshold)
-8. **ecc_dedup** - Deduplicate and standardize coordinates
-9. **read_filter** - Filter confirmed eccDNA reads
+### Processing Phase (Steps 7-10)
+7. **umc_process** - Process and cluster U/M/C types
+8. **cd_hit** - Remove redundancy (99% identity threshold)
+9. **ecc_dedup** - Deduplicate and standardize coordinates
+10. **read_filter** - Filter confirmed eccDNA reads
 
-### Inference Phase (Steps 10-12)
-10. **minimap2** - Prepare reference index (generates BAM only when Cyrcular is used)
-11. **ecc_inference** - Detect eccDNA (Cresil preferred, Cyrcular fallback)
-12. **curate_inferred_ecc** - Curate inferred eccDNA
+### Inference Phase (Steps 11-13)
+11. **minimap2** - Prepare reference index (generates BAM only when Cyrcular is used)
+12. **ecc_inference** - Detect eccDNA (Cresil preferred, Cyrcular fallback)
+13. **curate_inferred_ecc** - Curate inferred eccDNA
 
-### Integration Phase (Steps 13-15)
-13. **ecc_unify** - Merge confirmed and inferred results
-14. **ecc_summary** - Generate statistics and summaries
-15. **ecc_packager** - Package final outputs
+### Integration Phase (Steps 14-16)
+14. **ecc_unify** - Merge confirmed and inferred results
+15. **ecc_summary** - Generate statistics and summaries
+16. **ecc_packager** - Package final outputs
 
 ## Output Files
 
@@ -165,7 +166,7 @@ The merged output file (`sample_name_merged_output.csv`) contains:
 | Column | Description |
 |--------|-------------|
 | eccDNA_id | Unique identifier (e.g., UeccDNA1, MeccDNA1, CeccDNA1) |
-| original | Original eccDNA ID from processing |
+| original_id | Original eccDNA ID prior to final renumbering |
 | Regions | Genomic coordinates (chr:start-end format) |
 | Strand | DNA strand (+/-) |
 | Length | eccDNA size in base pairs |
@@ -173,6 +174,15 @@ The merged output file (`sample_name_merged_output.csv`) contains:
 | State | Detection method (Confirmed/Inferred) |
 | Seg_total | Number of segments (for complex eccDNA) |
 | Hit_count | Number of genomic hits |
+| confidence_score | Confidence score in [0,1] (higher = stronger evidence) |
+| query_cov_best | Best-locus (or best-chain) ring coverage fraction |
+| query_cov_2nd | 2nd-best locus/chain ring coverage fraction |
+| mapq_best | Best supporting minimap2 MAPQ (0–60) |
+| identity_best | Best supporting alignment identity (%) |
+| low_mapq | Flag: mapq_best < 20 |
+| low_identity | Flag: identity_best < 95 |
+
+> Note: confidence/evidence fields are primarily populated for **Confirmed** U/M/C calls; inferred entries may be empty.
 
 ## Configuration
 
@@ -300,6 +310,7 @@ For detailed documentation, see the `docs/` directory:
 
 - [Pipeline Modules](docs/Pipeline_Modules.md) - Detailed algorithm descriptions
 - [CLI Reference](docs/CLI_Reference.md) - Complete command-line options
+- [Simulation Validation](docs/Simulation_Validation_en.md) - Synthetic U/M/C validation and recall benchmark
 
 ## Citation
 

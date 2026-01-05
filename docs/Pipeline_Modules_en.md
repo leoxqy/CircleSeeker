@@ -1,4 +1,4 @@
-# CircleSeeker Pipeline Modules (v0.9.8)
+# CircleSeeker Pipeline Modules (v0.9.15)
 
 This document summarizes the 16-step CircleSeeker pipeline for English-speaking users.
 
@@ -23,12 +23,12 @@ Intermediates reside in `<output>/.tmp_work/`, and the final artifacts are copie
 
 | # | Name | Type | Main Input | Main Output |
 |---|------|------|------------|-------------|
-| 1 | make_blastdb | External (BLAST+) | Reference FASTA | BLAST database |
+| 1 | check_dependencies | Internal | Config/environment | Dependency report (fails fast) |
 | 2 | tidehunter | External | HiFi reads FASTA | Tandem repeat consensus |
 | 3 | tandem_to_ring | Internal | TideHunter output | Candidate FASTA/CSV |
-| 4 | run_blast | External (BLAST+) | Candidates & DB | BLAST TSV |
-| 5 | um_classify | Internal | BLAST TSV | `um_classify.uecc.csv`, `um_classify.mecc.csv` |
-| 6 | cecc_build | Internal | Unclassified hits | `cecc_build.csv` |
+| 4 | run_alignment | External (minimap2) | Candidates & reference | Alignment TSV |
+| 5 | um_classify | Internal | Alignment TSV | `um_classify.uecc.csv`, `um_classify.mecc.csv` |
+| 6 | cecc_build | Internal | Unclassified alignments | `cecc_build.csv` |
 | 7 | umc_process | Internal | U/M/C tables | Harmonized CSV & FASTA |
 | 8 | cd_hit | External (CD-HIT) | FASTA | Non-redundant FASTA |
 | 9 | ecc_dedup | Internal | CSV/FASTA | Deduplicated coordinates |
@@ -46,17 +46,17 @@ Intermediates reside in `<output>/.tmp_work/`, and the final artifacts are copie
 
 ### 3.1 Detection (Steps 1-6)
 
-1. **make_blastdb** - Build BLAST index from the reference genome (skipped when `tools.aligner=minimap2`).
+1. **check_dependencies** - Validate required external tools and at least one inference engine (Cresil or Cyrcular).
 2. **tidehunter** - Identify tandem repeats characteristic of rolling-circle amplification.
 3. **tandem_to_ring** - Convert repeats into circular candidates via overlap graph analysis.
-4. **run_blast** - Align candidates back to the reference to obtain genomic context (BLAST or minimap2 with PAF-to-BLAST conversion).
-5. **um_classify** - Categorize alignments into UeccDNA or MeccDNA, retaining unclassified records.
-6. **cecc_build** - Assemble complex eccDNA (CeccDNA) structures from multi-segment hits.
+4. **run_alignment** - Align candidates back to the reference to obtain genomic context (minimap2; emits a BLAST outfmt 6-like TSV with an additional trailing `mapq` column).
+5. **um_classify** - Categorize alignments into UeccDNA or MeccDNA using a parameterized ring-coverage + locus-clustering model; optionally gate Uecc calls by `tools.um_classify.mapq_u_min`; emits a standardized `um_classify.all.csv` for downstream Cecc/ambiguity analysis (see `docs/UMC_Classification_Model.md`).
+6. **cecc_build** - Build multi-segment chains from `um_classify.all.csv` (or fall back to `um_classify.unclassified.csv`) and emit `cecc_build.csv`; ambiguous cases are intercepted into `ambiguous_uc.csv` / `ambiguous_mc.csv` and do not flow into downstream steps.
 
 ### 3.2 Processing (Steps 7-10)
 
 7. **umc_process** - Normalize U/M/C results, produce FASTA/CSV inventories.
-8. **cd_hit** - Remove redundant sequences at 90% identity.
+8. **cd_hit** - Remove redundant sequences at 99% identity.
 9. **ecc_dedup** - Harmonize coordinates and collapse duplicates.
 10. **read_filter** - Filter confirmed eccDNA reads into an exportable FASTA.
 
@@ -64,7 +64,7 @@ Intermediates reside in `<output>/.tmp_work/`, and the final artifacts are copie
 
 11. **minimap2** - Ensure the reference `.mmi` index exists (create it if needed).
 12. **ecc_inference** - Prefer Cresil; fall back to Cyrcular. Missing `.fai` triggers a `samtools faidx` attempt.
-13. **iecc_curator** - Clean and standardize inferred outputs.
+13. **curate_inferred_ecc** - Clean and standardize inferred outputs (`iecc_curator`).
 
 ### 3.4 Integration (Steps 14-16)
 
@@ -80,7 +80,7 @@ Intermediates reside in `<output>/.tmp_work/`, and the final artifacts are copie
 
 ## 4. Operational Notes
 
-- **External dependencies** Ensure `tidehunter`, `cd-hit-est`, `minimap2`, `samtools`, `cresil` (or `cyrcular`) are available in `PATH`. If `tools.aligner=blast`, `blastn` and `makeblastdb` are also required. v0.9.4 adds a pre-flight dependency check that validates all required tools before pipeline execution, with clear error messages and installation hints.
+- **External dependencies** Ensure `tidehunter`, `cd-hit-est`, `minimap2`, `samtools`, `cresil` (or `cyrcular`) are available in `PATH`. The pre-flight dependency check validates required tools before pipeline execution.
 - **Checkpointing** Each step updates `<prefix>.checkpoint`. Use `--resume` to continue or `--force` to rerun from scratch.
 - **Configuration** Parameters are managed through `circleseeker.config.Config`; command-line arguments override YAML.
 - **Debug tooling** `circleseeker --debug --show-steps` reveals progress; `show-checkpoint` lists checkpoint details.

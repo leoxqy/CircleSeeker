@@ -57,7 +57,9 @@ class TestMinimap2:
     @patch('circleseeker.external.minimap2.shutil.which')
     def test_minimap2_initialization(self, mock_which):
         """Test Minimap2 initialization."""
-        mock_which.side_effect = lambda tool: tool in ["minimap2", "samtools"]
+        mock_which.side_effect = (
+            lambda tool: f"/usr/bin/{tool}" if tool in {"minimap2", "samtools"} else None
+        )
 
         minimap2 = Minimap2()
         assert minimap2.tool_name == "minimap2"
@@ -68,7 +70,9 @@ class TestMinimap2:
     @patch('circleseeker.external.minimap2.shutil.which')
     def test_minimap2_custom_config(self, mock_which):
         """Test Minimap2 with custom config."""
-        mock_which.side_effect = lambda tool: tool in ["minimap2", "samtools"]
+        mock_which.side_effect = (
+            lambda tool: f"/usr/bin/{tool}" if tool in {"minimap2", "samtools"} else None
+        )
 
         config = MiniMapConfig(threads=4, preset="map-ont")
         minimap2 = Minimap2(config=config)
@@ -83,14 +87,10 @@ class TestMinimap2:
         with pytest.raises(Exception):  # Should raise PipelineError
             Minimap2()
 
-    @pytest.mark.skip(reason="Complex mock setup needed for shutil.which inside _check_installation")
     @patch('circleseeker.external.minimap2.shutil.which')
     def test_minimap2_missing_samtools(self, mock_which):
         """Test Minimap2 with missing samtools."""
-        def tool_check(tool):
-            return tool == "minimap2"  # Only minimap2 available
-
-        mock_which.side_effect = tool_check
+        mock_which.side_effect = lambda tool: "/usr/bin/minimap2" if tool == "minimap2" else None
 
         minimap2 = Minimap2()
         assert minimap2.has_samtools is False
@@ -101,7 +101,9 @@ class TestMinimap2:
     @patch('subprocess.run')
     def test_build_index(self, mock_run, mock_which, tmp_path):
         """Test build_index method."""
-        mock_which.side_effect = lambda tool: tool in ["minimap2", "samtools"]
+        mock_which.side_effect = (
+            lambda tool: f"/usr/bin/{tool}" if tool in {"minimap2", "samtools"} else None
+        )
         mock_run.return_value = MagicMock(returncode=0, stderr="")
 
         reference_fasta = tmp_path / "reference.fasta"
@@ -123,7 +125,9 @@ class TestMinimap2:
     @patch('circleseeker.external.minimap2.shutil.which')
     def test_build_index_existing(self, mock_which, tmp_path):
         """Test build_index with existing index."""
-        mock_which.side_effect = lambda tool: tool in ["minimap2", "samtools"]
+        mock_which.side_effect = (
+            lambda tool: f"/usr/bin/{tool}" if tool in {"minimap2", "samtools"} else None
+        )
 
         reference_fasta = tmp_path / "reference.fasta"
         index_path = tmp_path / "reference.mmi"
@@ -140,7 +144,9 @@ class TestMinimap2:
     @patch('subprocess.run')
     def test_build_index_failure(self, mock_run, mock_which, tmp_path):
         """Test build_index failure handling."""
-        mock_which.side_effect = lambda tool: tool in ["minimap2", "samtools"]
+        mock_which.side_effect = (
+            lambda tool: f"/usr/bin/{tool}" if tool in {"minimap2", "samtools"} else None
+        )
 
         from subprocess import CalledProcessError
         mock_run.side_effect = CalledProcessError(1, "minimap2", stderr="Error building index")
@@ -153,12 +159,11 @@ class TestMinimap2:
         with pytest.raises(Exception):  # Should raise PipelineError
             minimap2.build_index(reference_fasta)
 
-    @pytest.mark.skip(reason="Needs mocking of build_index which calls subprocess.run")
     @patch('circleseeker.external.minimap2.shutil.which')
     @patch('circleseeker.external.minimap2.Minimap2._run_alignment_simple')
     def test_align_simple(self, mock_align, mock_which, tmp_path):
         """Test align method with simple alignment."""
-        mock_which.side_effect = lambda tool: tool in ["minimap2"]  # No samtools
+        mock_which.side_effect = lambda tool: f"/usr/bin/{tool}" if tool == "minimap2" else None
 
         reference = tmp_path / "reference.fasta"
         query = tmp_path / "query.fasta"
@@ -167,7 +172,7 @@ class TestMinimap2:
         reference.write_text(">ref\nATCG\n")
         query.write_text(">query\nATCG\n")
 
-        config = MiniMapConfig(sort_bam=False, index_bam=False)
+        config = MiniMapConfig(output_format="sam", build_index=False, sort_bam=False, index_bam=False)
         minimap2 = Minimap2(config=config)
 
         result = minimap2.align(reference, query, output)
@@ -175,14 +180,15 @@ class TestMinimap2:
         mock_align.assert_called_once()
         assert result == output
 
-    @pytest.mark.skip(reason="Needs mocking of build_index which calls subprocess.run")
     @patch('circleseeker.external.minimap2.shutil.which')
     @patch('circleseeker.external.minimap2.Minimap2._run_alignment_safe')
     @patch('circleseeker.external.minimap2.Minimap2._index_bam')
     @patch('circleseeker.external.minimap2.Minimap2._print_stats')
     def test_align_bam_with_processing(self, mock_stats, mock_index, mock_align, mock_which, tmp_path):
         """Test align method with BAM processing."""
-        mock_which.side_effect = lambda tool: tool in ["minimap2", "samtools"]
+        mock_which.side_effect = (
+            lambda tool: f"/usr/bin/{tool}" if tool in {"minimap2", "samtools"} else None
+        )
 
         reference = tmp_path / "reference.fasta"
         query = tmp_path / "query.fasta"
@@ -191,7 +197,7 @@ class TestMinimap2:
         reference.write_text(">ref\nATCG\n")
         query.write_text(">query\nATCG\n")
 
-        minimap2 = Minimap2()
+        minimap2 = Minimap2(config=MiniMapConfig(build_index=False))
         result = minimap2.align(reference, query, output)
 
         mock_align.assert_called_once()
@@ -202,7 +208,9 @@ class TestMinimap2:
     @patch('circleseeker.external.minimap2.shutil.which')
     def test_align_missing_query(self, mock_which, tmp_path):
         """Test align with missing query file."""
-        mock_which.side_effect = lambda tool: tool in ["minimap2", "samtools"]
+        mock_which.side_effect = (
+            lambda tool: f"/usr/bin/{tool}" if tool in {"minimap2", "samtools"} else None
+        )
 
         reference = tmp_path / "reference.fasta"
         query = tmp_path / "missing.fasta"
@@ -219,7 +227,9 @@ class TestMinimap2:
     @patch('subprocess.run')
     def test_run_alignment_safe(self, mock_run, mock_which, tmp_path):
         """Test _run_alignment_safe method."""
-        mock_which.side_effect = lambda tool: tool in ["minimap2", "samtools"]
+        mock_which.side_effect = (
+            lambda tool: f"/usr/bin/{tool}" if tool in {"minimap2", "samtools"} else None
+        )
 
         # Mock successful runs for both minimap2 and samtools
         def run_side_effect(cmd, **kwargs):
@@ -253,7 +263,9 @@ class TestMinimap2:
     @patch('subprocess.run')
     def test_run_alignment_simple(self, mock_run, mock_which, tmp_path):
         """Test _run_alignment_simple method."""
-        mock_which.side_effect = lambda tool: tool in ["minimap2", "samtools"]
+        mock_which.side_effect = (
+            lambda tool: f"/usr/bin/{tool}" if tool in {"minimap2", "samtools"} else None
+        )
         mock_run.return_value = MagicMock(returncode=0, stderr="")
 
         reference = tmp_path / "reference.fasta"
@@ -273,7 +285,9 @@ class TestMinimap2:
     @patch('subprocess.run')
     def test_index_bam(self, mock_run, mock_which, tmp_path):
         """Test _index_bam method."""
-        mock_which.side_effect = lambda tool: tool in ["minimap2", "samtools"]
+        mock_which.side_effect = (
+            lambda tool: f"/usr/bin/{tool}" if tool in {"minimap2", "samtools"} else None
+        )
         mock_run.return_value = MagicMock(returncode=0, stderr="")
 
         bam_file = tmp_path / "test.bam"
@@ -292,7 +306,9 @@ class TestMinimap2:
     @patch('subprocess.run')
     def test_print_stats(self, mock_run, mock_which, tmp_path):
         """Test _print_stats method."""
-        mock_which.side_effect = lambda tool: tool in ["minimap2", "samtools"]
+        mock_which.side_effect = (
+            lambda tool: f"/usr/bin/{tool}" if tool in {"minimap2", "samtools"} else None
+        )
 
         # Mock flagstat output
         mock_run.return_value = MagicMock(
@@ -316,7 +332,9 @@ class TestMinimap2:
     @patch('circleseeker.external.minimap2.Minimap2.align')
     def test_map_reads_legacy(self, mock_align, mock_which):
         """Test legacy map_reads method."""
-        mock_which.side_effect = lambda tool: tool in ["minimap2", "samtools"]
+        mock_which.side_effect = (
+            lambda tool: f"/usr/bin/{tool}" if tool in {"minimap2", "samtools"} else None
+        )
 
         reference = Path("reference.fasta")
         reads = Path("reads.fasta")

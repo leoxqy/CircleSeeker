@@ -336,6 +336,70 @@ class TestPipeline:
         assert pipeline.state.results[ResultKeys.CYRCULAR_RESULT_COUNT] == 0
         assert pipeline.state.results[ResultKeys.CYRCULAR_OVERVIEW] is None
 
+    def test_inference_failure_does_not_abort_pipeline_state(self, tmp_path):
+        """Inference step should soft-fail so confirmed eccDNA can still be output."""
+        input_fasta = tmp_path / "input.fa"
+        reference = tmp_path / "ref.fa"
+
+        input_fasta.write_text(">r1\nACGT\n")
+        reference.write_text(">chr1\nACGT\n")
+
+        config = Config(
+            input_file=input_fasta,
+            reference=reference,
+            output_dir=tmp_path / "out",
+            prefix="sample",
+        )
+        pipeline = Pipeline(config)
+
+        # Provide a non-empty inference input FASTA so ecc_inference does not short-circuit.
+        config.output_dir.mkdir(parents=True, exist_ok=True)
+        all_fasta = config.output_dir / f"{config.prefix}_all_filtered.fasta"
+        all_fasta.write_text(">r1\nACGT\n")
+        pipeline.state.results[ResultKeys.ALL_FILTERED_FASTA] = str(all_fasta)
+
+        pipeline._inference_tool = "cresil"
+        with patch.object(pipeline, "_run_cresil_inference", side_effect=RuntimeError("boom")):
+            pipeline._step_ecc_inference()
+
+        assert pipeline.state.results.get(ResultKeys.INFERENCE_FAILED) is True
+        assert "boom" in str(pipeline.state.results.get(ResultKeys.INFERENCE_ERROR))
+        assert pipeline.state.results.get(ResultKeys.CYRCULAR_OVERVIEW) is None
+        assert pipeline.state.results.get(ResultKeys.CYRCULAR_RESULT_COUNT) == 0
+
+        marker = pipeline.state.results.get(ResultKeys.INFERENCE_ERROR_FILE)
+        assert marker
+        marker_path = pipeline._resolve_stored_path(marker, [])
+        assert marker_path and marker_path.exists()
+
+    def test_inference_failure_soft_fails_for_cyrcular(self, tmp_path):
+        """Cyrcular inference errors should also soft-fail."""
+        input_fasta = tmp_path / "input.fa"
+        reference = tmp_path / "ref.fa"
+
+        input_fasta.write_text(">r1\nACGT\n")
+        reference.write_text(">chr1\nACGT\n")
+
+        config = Config(
+            input_file=input_fasta,
+            reference=reference,
+            output_dir=tmp_path / "out",
+            prefix="sample",
+        )
+        pipeline = Pipeline(config)
+
+        config.output_dir.mkdir(parents=True, exist_ok=True)
+        all_fasta = config.output_dir / f"{config.prefix}_all_filtered.fasta"
+        all_fasta.write_text(">r1\nACGT\n")
+        pipeline.state.results[ResultKeys.ALL_FILTERED_FASTA] = str(all_fasta)
+
+        pipeline._inference_tool = "cyrcular"
+        with patch.object(pipeline, "_run_cyrcular_inference", side_effect=RuntimeError("boom")):
+            pipeline._step_ecc_inference()
+
+        assert pipeline.state.results.get(ResultKeys.INFERENCE_FAILED) is True
+        assert "boom" in str(pipeline.state.results.get(ResultKeys.INFERENCE_ERROR))
+
     def test_run_validates_start_stop_range(self, tmp_path):
         """Invalid start/stop ranges should raise a PipelineError."""
         config = Config(output_dir=tmp_path / "out")
@@ -455,3 +519,66 @@ class TestPipelineStateIntegration:
         runtime = state.get_total_runtime()
         assert runtime is not None
         assert runtime >= 99.0  # Should be around 100 seconds
+
+
+def test_cecc_build_uses_unclassified_only(tmp_path):
+    """CeccBuild should only analyze um_classify.unclassified.csv (not the full alignments table)."""
+    import pandas as pd
+
+    config = Config(output_dir=tmp_path / "out", prefix="sample")
+    pipeline = Pipeline(config)
+
+    # Minimal um_classify artifacts required by _step_cecc_build
+    pipeline.config.output_dir.mkdir(parents=True, exist_ok=True)
+    # Even if a legacy/leftover full table exists, cecc_build should not use it.
+    (pipeline.config.output_dir / "um_classify.all.csv").write_text("query_id\nread_all\n")
+
+    # Provide an unclassified alignment row (header + 1 row so the step runs).
+    (pipeline.config.output_dir / "um_classify.unclassified.csv").write_text(
+        "\n".join(
+            [
+                "query_id,subject_id,q_start,q_end,s_start,s_end,strand,alignment_length,reads,length,copy_number",
+                "read_c,chr1,1,100,100,199,+,100,read_c,100,1",
+            ]
+        )
+        + "\n"
+    )
+
+    pd.DataFrame(
+        [
+            {"query_id": "read_u", "U_cov": 0.98},
+        ]
+    ).to_csv(pipeline.config.output_dir / "um_classify.uecc.csv", index=False)
+    pd.DataFrame([{"query_id": "read_mc"}]).to_csv(
+        pipeline.config.output_dir / "um_classify.mecc.csv", index=False
+    )
+
+    cecc_rows = [
+        # A (misbehaving) CeccBuild implementation could emit IDs that belong to Mecc.
+        # The step must not move Mecc to Cecc; it should instead filter such rows out.
+        {
+            "query_id": "read_mc",
+            "C_cov_best": 0.96,
+            "C_cov_2nd": 0.95,
+            "second_chain_signature": "chr3:1000-2000",
+        },
+        # Normal C from unclassified input
+        {"query_id": "read_c", "C_cov_best": 0.97, "C_cov_2nd": 0.50},
+    ]
+
+    with patch("circleseeker.core.pipeline.CeccBuild") as mock_cecc_build:
+        def fake_run_pipeline(*, input_csv, output_csv, **_kwargs):
+            assert str(input_csv).endswith("um_classify.unclassified.csv")
+            pd.DataFrame(cecc_rows).to_csv(output_csv, index=False)
+
+        mock_cecc_build.return_value.run_pipeline.side_effect = fake_run_pipeline
+
+        pipeline._step_cecc_build()
+
+    mecc_after = pd.read_csv(pipeline.config.output_dir / "um_classify.mecc.csv")
+    assert "read_mc" in set(mecc_after.get("query_id", pd.Series([], dtype=str)).astype(str))
+
+    cecc_after = pd.read_csv(pipeline.config.output_dir / "cecc_build.csv")
+    cecc_ids = set(cecc_after.get("query_id", pd.Series([], dtype=str)).astype(str))
+    assert "read_mc" not in cecc_ids
+    assert "read_c" in cecc_ids

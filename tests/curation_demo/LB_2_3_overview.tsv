@@ -1,0 +1,5 @@
+regions	circle_length	segment_count	num_split_reads	prob_present	prob_artifact	af_nanopore
+chr1:100-200	1000	1	10	0.90	0.10	0.01
+chr1:100-200	1000	1	5	0.20	0.40	0.01
+chr1:400-500;chr1:600-650	500	2	12	0.80	0.20	0.02
+chr2:100-150;chr3:200-250	400	2	8	0.70	0.30	0.03

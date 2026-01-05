@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "circleseeker"
-version = "0.9.8"
+version = "0.9.15"
 description = "Comprehensive eccDNA detection from PacBio HiFi sequencing data"
 readme = "README.md"
 authors = [
@@ -110,17 +110,6 @@ warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
 ignore_missing_imports = true
-
-[tool.pytest.ini_options]
-minversion = "7.0"
-addopts = "-ra -q --strict-markers"
-pythonpath = ["src"]
-testpaths = ["tests"]
-markers = [
-    "slow: marks tests as slow",
-    "integration: marks tests as integration tests",
-    "unit: marks tests as unit tests",
-]
 
 [tool.coverage.run]
 source = ["src/circleseeker"]

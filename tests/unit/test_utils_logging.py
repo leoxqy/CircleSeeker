@@ -42,11 +42,11 @@ class TestLoggingUtilities:
         """Test get_logger with different module names."""
         logger1 = get_logger("module1")
         logger2 = get_logger("module2")
-        logger3 = get_logger("external.blast")
+        logger3 = get_logger("external.minimap2")
 
         assert logger1.name == "circleseeker.module1"
         assert logger2.name == "circleseeker.module2"
-        assert logger3.name == "circleseeker.external.blast"
+        assert logger3.name == "circleseeker.external.minimap2"
 
         # Should return different logger instances
         assert logger1 != logger2
@@ -160,11 +160,11 @@ class TestLoggingUtilities:
 
         # Get child loggers
         parent_logger = get_logger("external")
-        child_logger = get_logger("external.blast")
+        child_logger = get_logger("external.minimap2")
 
         # Check names
         assert parent_logger.name == "circleseeker.external"
-        assert child_logger.name == "circleseeker.external.blast"
+        assert child_logger.name == "circleseeker.external.minimap2"
 
         # Child logger should inherit from parent
         assert child_logger.parent == parent_logger
@@ -287,16 +287,16 @@ class TestLoggingIntegration:
 
             # Step 2: Get loggers for different modules
             pipeline_logger = get_logger("pipeline")
-            blast_logger = get_logger("external.blast")
+            minimap2_logger = get_logger("external.minimap2")
             utils_logger = get_logger("utils.progress")
 
             # Step 3: Verify logger names
             assert pipeline_logger.name == "circleseeker.pipeline"
-            assert blast_logger.name == "circleseeker.external.blast"
+            assert minimap2_logger.name == "circleseeker.external.minimap2"
             assert utils_logger.name == "circleseeker.utils.progress"
 
             # Step 4: Verify all loggers are properly configured
-            for logger in [pipeline_logger, blast_logger, utils_logger]:
+            for logger in [pipeline_logger, minimap2_logger, utils_logger]:
                 assert logger.isEnabledFor(logging.DEBUG)
                 # They should have an effective level from the parent logger
                 assert logger.getEffectiveLevel() <= logging.DEBUG

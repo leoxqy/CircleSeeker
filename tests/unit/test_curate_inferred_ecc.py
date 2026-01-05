@@ -532,19 +532,19 @@ class TestRealData:
         simple_df = pd.DataFrame({
             'eccDNA_id': ['IUeccDNA1', 'IUeccDNA2'],
             'chr': ['chr1', 'chr2'],
-            'start0': [1000, 2000],  # 0-based coordinates
-            'end0': [2000, 3000],
-            'length': [1000, 1000]
+            'start0': [100, 200],  # 0-based coordinates
+            'end0': [200, 300],
+            'length': [100, 100]
         })
 
         chimeric_df = pd.DataFrame({
             'eccDNA_id': ['ICeccDNA1', 'ICeccDNA1', 'ICeccDNA2', 'ICeccDNA2'],
             'chr': ['chr1', 'chr1', 'chr2', 'chr3'],
-            'start0': [5000, 7000, 10000, 15000],
-            'end0': [6000, 8000, 11000, 16000],
+            'start0': [400, 600, 700, 800],
+            'end0': [500, 650, 800, 900],
             'seg_index': [1, 2, 1, 2],
             'seg_total': [2, 2, 2, 2],
-            'length': [2000, 2000, 2000, 2000]
+            'length': [200, 200, 200, 200]
         })
 
         output_prefix = tmp_path / "fasta_test"

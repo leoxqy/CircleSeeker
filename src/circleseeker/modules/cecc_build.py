@@ -31,6 +31,12 @@ except ImportError:
 class CeccBuild:
     """Circular eccDNA analysis using segment rotation and path detection."""
 
+    # Heuristic thresholds used for evidence flags and score scaling.
+    # These do NOT affect Cecc detection logic (which remains thresholded by match_degree).
+    MAPQ_MAX = 60
+    MAPQ_LOW_THRESHOLD = 20
+    IDENTITY_LOW_THRESHOLD = 95.0
+
     # Base required columns (independent of legacy vs standard names)
     BASE_REQUIRED_COLS = [
         "query_id",
@@ -46,9 +52,52 @@ class CeccBuild:
 
     CANDIDATE_DELIMITERS = [",", "\t", ";", "|"]
 
+    @staticmethod
+    def _clamp01(value: float) -> float:
+        try:
+            x = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        if x < 0.0:
+            return 0.0
+        if x > 1.0:
+            return 1.0
+        return x
+
+    @classmethod
+    def _norm_mapq(cls, mapq: float) -> float:
+        try:
+            val = float(mapq)
+        except (TypeError, ValueError):
+            return 0.0
+        cap = float(cls.MAPQ_MAX) if float(cls.MAPQ_MAX) > 0 else 60.0
+        return cls._clamp01(val / cap)
+
+    @classmethod
+    def _norm_identity(cls, identity_pct: float) -> float:
+        try:
+            val = float(identity_pct)
+        except (TypeError, ValueError):
+            return 0.0
+        return cls._clamp01((val - 90.0) / 10.0)
+
+    @staticmethod
+    def _geom_mean(values: List[float]) -> float:
+        if not values:
+            return 0.0
+        prod = 1.0
+        for v in values:
+            if v <= 0.0:
+                return 0.0
+            prod *= float(v)
+        return prod ** (1.0 / float(len(values)))
+
     def __init__(self, logger: Optional[logging.Logger] = None):
         """Initialize Cecc-Build analyzer."""
         self.logger = logger or get_logger(self.__class__.__name__)
+        # Treat near-identical genomic intervals as the same locus in the final overlap filter.
+        # This prevents false negatives caused by 1-2bp boundary jitter in alignments.
+        self.locus_overlap_threshold = 0.95
 
         # Set up the optimized overlap function based on numba availability
         if NUMBA_AVAILABLE:
@@ -100,7 +149,15 @@ class CeccBuild:
 
     def detect_genomic_overlaps_sweepline(self, segments: pd.DataFrame) -> bool:
         """
-        Use sweep-line algorithm to detect overlapping genomic segments.
+        Detect overlapping genomic segments on the reference.
+
+        Notes
+        -----
+        We treat intervals as 0-based, half-open. Exact duplicate intervals are allowed
+        (they often arise when a locus is visited twice on the doubled query).
+        Near-duplicate intervals are also allowed when their reciprocal overlap
+        (overlap / min(len_a, len_b)) is >= ``self.locus_overlap_threshold``.
+        Other partial overlaps are considered conflicting and will be filtered.
 
         Args:
             segments: DataFrame with chr, start, end columns
@@ -111,33 +168,42 @@ class CeccBuild:
         if len(segments) <= 1:
             return False
 
-        # Group by chromosome to check overlaps within each chromosome
-        for chr_name, chr_group in segments.groupby(ColumnStandard.CHR):
+        group_cols = [ColumnStandard.CHR]
+        if ColumnStandard.STRAND in segments.columns:
+            group_cols.append(ColumnStandard.STRAND)
+
+        for _, chr_group in segments.groupby(group_cols, sort=False):
             if len(chr_group) <= 1:
                 continue
+            df_int = chr_group[[ColumnStandard.START0, ColumnStandard.END0]].copy()
+            df_int[ColumnStandard.START0] = pd.to_numeric(
+                df_int[ColumnStandard.START0], errors="coerce"
+            )
+            df_int[ColumnStandard.END0] = pd.to_numeric(df_int[ColumnStandard.END0], errors="coerce")
+            df_int = df_int.dropna().astype(int)
+            if len(df_int) <= 1:
+                continue
+            df_int = df_int.sort_values([ColumnStandard.START0, ColumnStandard.END0], kind="mergesort")
 
-            # Create events for sweep line algorithm
-            events = []
-            for idx, row in chr_group.iterrows():
+            cur_start = int(df_int.iloc[0][ColumnStandard.START0])
+            cur_end = int(df_int.iloc[0][ColumnStandard.END0])
+            for _, row in df_int.iloc[1:].iterrows():
                 start = int(row[ColumnStandard.START0])
                 end = int(row[ColumnStandard.END0])
-                events.append((start, 0, idx))  # 0 for start event
-                events.append((end, 1, idx))  # 1 for end event
-
-            # Sort by position, then by event type (starts before ends)
-            events.sort(key=lambda x: (x[0], x[1]))
-
-            # Sweep line to detect overlaps
-            active_intervals = set()
-
-            for pos, event_type, idx in events:
-                if event_type == 0:  # start event
-                    if active_intervals:
-                        # Found overlap - there's already an active interval
-                        return True
-                    active_intervals.add(idx)
-                else:  # end event
-                    active_intervals.discard(idx)
+                if start < cur_end:
+                    # Allow near-identical intervals (same locus with boundary jitter).
+                    overlap_len = max(0, min(cur_end, end) - start)
+                    len_a = max(0, cur_end - cur_start)
+                    len_b = max(0, end - start)
+                    min_len = min(len_a, len_b)
+                    rec_ov = (overlap_len / float(min_len)) if min_len > 0 else 0.0
+                    if rec_ov >= float(self.locus_overlap_threshold):
+                        # Merge into the current locus envelope.
+                        cur_start = min(cur_start, start)
+                        cur_end = max(cur_end, end)
+                        continue
+                    return True
+                cur_start, cur_end = start, end
 
         return False
 
@@ -162,9 +228,10 @@ class CeccBuild:
         # Check each query for genomic overlaps
         for query_id, query_group in df_labeled.groupby("query_id"):
             # Extract genomic coordinates for this query
-            segments = query_group[
-                [ColumnStandard.CHR, ColumnStandard.START0, ColumnStandard.END0]
-            ].copy()
+            cols = [ColumnStandard.CHR, ColumnStandard.START0, ColumnStandard.END0]
+            if ColumnStandard.STRAND in query_group.columns:
+                cols.append(ColumnStandard.STRAND)
+            segments = query_group[cols].copy()
 
             # Check for overlaps using sweep-line algorithm
             has_overlap = self.detect_genomic_overlaps_sweepline(segments)
@@ -227,8 +294,14 @@ class CeccBuild:
 
         # Standardize column names to internal standards
         df[ColumnStandard.CHR] = df["subject_id"]
-        df[ColumnStandard.START0] = df["s_start"]
-        df[ColumnStandard.END0] = df["s_end"]
+        # Alignment inputs (BLAST/minimap2_align) use 1-based, strand-oriented coordinates.
+        # Convert to 0-based, half-open coordinates for internal use.
+        s_start = pd.to_numeric(df["s_start"], errors="coerce")
+        s_end = pd.to_numeric(df["s_end"], errors="coerce")
+        s_min = np.minimum(s_start, s_end)
+        s_max = np.maximum(s_start, s_end)
+        df[ColumnStandard.START0] = (s_min - 1).astype(int)
+        df[ColumnStandard.END0] = s_max.astype(int)
         df[ColumnStandard.STRAND] = df["strand"]
         df[ColumnStandard.READS] = df["reads"]
         df[ColumnStandard.LENGTH] = df["length"]
@@ -360,9 +433,17 @@ class CeccBuild:
         return max_gap, avg_gap, len(gaps), max_gap <= 20
 
     def find_circular(
-        self, group_df: pd.DataFrame, edge_tol: int, pos_tol: int
+        self,
+        group_df: pd.DataFrame,
+        edge_tol: int,
+        pos_tol: int,
+        min_match_degree: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Find circular path in a group of segments."""
+        """Find circular path in a group of segments.
+
+        Primary mode uses position-based closure (duplicate segment indicating wrap-around).
+        Optional fallback mode accepts coverage-based paths when closure cannot be established.
+        """
         g = group_df.sort_values("segment_order").reset_index(drop=True)
         if len(g) < 2:
             return None
@@ -388,12 +469,15 @@ class CeccBuild:
                 # Check closure at current segment
                 if self.position_match(first, cur, pos_tol):
                     return {
-                        "path": path[:-1],
+                        # Keep the closing segment in the path. On doubled queries, the "duplicate"
+                        # locus can still correspond to a distinct ring interval that is required
+                        # to achieve full ring coverage after projection.
+                        "path": path,
                         "closing_at": idx,
-                        "cum_len": cum_len - float(cur["alignment_length"]),
-                        "mat_degree": round(
-                            ((cum_len - float(cur["alignment_length"])) / cons_len) * 100, 2
-                        ),
+                        "cum_len": cum_len,
+                        "mat_degree": round((cum_len / cons_len) * 100, 2),
+                        "closure_found": True,
+                        "closure_reason": "position_match",
                     }
 
                 # Check closure at next segment (if still continuous)
@@ -401,57 +485,312 @@ class CeccBuild:
                     nxt = g.iloc[idx + 1]
                     next_gap = float(nxt["q_start"]) - float(cur["q_end"])
                     if abs(next_gap) <= edge_tol and self.position_match(first, nxt, pos_tol):
+                        cum_len_with_nxt = cum_len + float(nxt["alignment_length"])
                         return {
-                            "path": path,
+                            "path": path + [idx + 1],
                             "closing_at": idx + 1,
-                            "cum_len": cum_len,
-                            "mat_degree": round((cum_len / cons_len) * 100, 2),
+                            "cum_len": cum_len_with_nxt,
+                            "mat_degree": round((cum_len_with_nxt / cons_len) * 100, 2),
+                            "closure_found": True,
+                            "closure_reason": "position_match",
                         }
 
-        return None
+        if min_match_degree is None or cons_len <= 0:
+            return None
 
-    def detect_circles(self, df_filt: pd.DataFrame, edge_tol: int, pos_tol: int) -> pd.DataFrame:
+        mat_degree = (cum_len / cons_len) * 100
+        if mat_degree < float(min_match_degree):
+            return None
+
+        return {
+            "path": path,
+            "closing_at": None,
+            "cum_len": cum_len,
+            "mat_degree": round(mat_degree, 2),
+            "closure_found": False,
+            "closure_reason": "coverage",
+        }
+
+    def detect_circles(
+        self,
+        df_filt: pd.DataFrame,
+        edge_tol: int,
+        pos_tol: int,
+        min_match_degree: float = 90.0,
+        max_rotations: int = 20,
+    ) -> pd.DataFrame:
         """Detect circular patterns in filtered data."""
         rows: List[Dict] = []
+        loci_cols = [
+            ColumnStandard.CHR,
+            ColumnStandard.START0,
+            ColumnStandard.END0,
+            ColumnStandard.STRAND,
+        ]
+
+        def loci_signature(unique_loci: pd.DataFrame) -> str:
+            if unique_loci.empty:
+                return ""
+            df_sig = unique_loci.copy()
+            df_sig = df_sig.sort_values(
+                [ColumnStandard.CHR, ColumnStandard.START0, ColumnStandard.END0, ColumnStandard.STRAND],
+                kind="mergesort",
+            )
+            parts: List[str] = []
+            for _, row in df_sig.iterrows():
+                parts.append(
+                    f"{row[ColumnStandard.CHR]}:{int(row[ColumnStandard.START0])}-"
+                    f"{int(row[ColumnStandard.END0])}:{row[ColumnStandard.STRAND]}"
+                )
+            return ";".join(parts)
+
+        def infer_query_coords_style(df: pd.DataFrame) -> str:
+            if df.empty:
+                return "blast"
+            sample = df[["q_start", "q_end", "alignment_length"]].dropna()
+            if sample.empty:
+                return "blast"
+            qs = pd.to_numeric(sample["q_start"], errors="coerce")
+            qe = pd.to_numeric(sample["q_end"], errors="coerce")
+            alen = pd.to_numeric(sample["alignment_length"], errors="coerce")
+            sample = pd.DataFrame({"qs": qs, "qe": qe, "alen": alen}).dropna()
+            if sample.empty:
+                return "blast"
+            diff0 = (sample["qe"] - sample["qs"]).abs()
+            diff1 = (sample["qe"] - sample["qs"] + 1).abs()
+            err0 = (diff0 - sample["alen"]).abs().median()
+            err1 = (diff1 - sample["alen"]).abs().median()
+            return "0based" if err0 + 1e-6 < err1 else "blast"
+
+        def project_query_interval_to_ring(
+            q_start: float, q_end: float, cons_len: int, style: str
+        ) -> List[Tuple[int, int]]:
+            L = int(cons_len)
+            if L <= 0:
+                return []
+            qs = int(q_start)
+            qe = int(q_end)
+            if style != "0based":
+                qs -= 1
+            if qe < qs:
+                qs, qe = qe, qs
+            if qe - qs >= L:
+                return [(0, L)]
+            u = qs % L
+            v = qe % L
+            if u < v:
+                return [(u, v)]
+            return [(u, L), (0, v)]
+
+        def union_len(segments: Iterable[Tuple[int, int]]) -> int:
+            segs = [(int(s), int(e)) for s, e in segments if e > s]
+            if not segs:
+                return 0
+            segs.sort(key=lambda x: x[0])
+            start, end = segs[0]
+            total = 0
+            for s, e in segs[1:]:
+                if s <= end:
+                    end = max(end, e)
+                else:
+                    total += end - start
+                    start, end = s, e
+            total += end - start
+            return int(total)
+
+        def ring_coverage_percent(path_df: pd.DataFrame, cons_len: int, style: str) -> float:
+            L = int(cons_len)
+            if path_df.empty or L <= 0:
+                return 0.0
+            segments: List[Tuple[int, int]] = []
+            for _, row in path_df.iterrows():
+                q_start = row.get("q_start")
+                q_end = row.get("q_end")
+                if pd.isna(q_start) or pd.isna(q_end):
+                    continue
+                segments.extend(project_query_interval_to_ring(q_start, q_end, L, style))
+            covered = union_len(segments)
+            return (covered / float(L)) * 100.0 if L > 0 else 0.0
 
         for qid, g in df_filt.groupby("query_id", sort=False):
-            res = self.find_circular(g, edge_tol, pos_tol)
-            if not res:
+            group_sorted = g.sort_values("q_start", kind="mergesort").reset_index(drop=True)
+            n_segments = len(group_sorted)
+            if n_segments < 2:
+                continue
+            cons_len = int(group_sorted.loc[0, ColumnStandard.LENGTH])
+            q_style = infer_query_coords_style(group_sorted)
+
+            # Candidate rotations: try all for small groups; otherwise focus on likely breakpoints
+            if n_segments <= max_rotations:
+                starts = list(range(n_segments))
+            else:
+                starts = [0, 1] if n_segments > 1 else [0]
+                gaps = []
+                for i in range(n_segments - 1):
+                    gap = abs(float(group_sorted.loc[i + 1, "q_start"]) - float(group_sorted.loc[i, "q_end"]))
+                    gaps.append((gap, i + 1))
+                gaps.sort(reverse=True, key=lambda x: x[0])
+                for _, start in gaps:
+                    if start not in starts:
+                        starts.append(start)
+                    if len(starts) >= max_rotations:
+                        break
+
+            best_rank = None
+            best_group = None
+            best_sig = ""
+            best_degree = None
+
+            second_rank = None
+            second_group = None
+            second_sig = ""
+            second_degree = None
+
+            for start in starts:
+                rotated = (
+                    group_sorted.copy()
+                    if start == 0
+                    else pd.concat(
+                        [group_sorted.iloc[start:], group_sorted.iloc[:start]], ignore_index=True
+                    )
+                )
+                rotated = rotated.copy()
+                rotated["segment_order"] = np.arange(1, len(rotated) + 1)
+
+                try:
+                    res = self.find_circular(
+                        rotated,
+                        edge_tol=edge_tol,
+                        pos_tol=pos_tol,
+                        min_match_degree=min_match_degree,
+                    )
+                except TypeError:
+                    # Backward-compatibility: allow patched/legacy implementations that
+                    # don't accept the optional min_match_degree parameter.
+                    res = self.find_circular(rotated, edge_tol=edge_tol, pos_tol=pos_tol)
+                if not res:
+                    continue
+
+                path_df = rotated.iloc[res["path"]].reset_index(drop=True)
+                segment_count = len(path_df)
+                if segment_count < 2:
+                    continue
+
+                unique_loci = path_df[loci_cols].drop_duplicates()
+                if unique_loci.shape[0] < 2:
+                    continue
+
+                cov_percent = ring_coverage_percent(path_df, cons_len, q_style)
+                if min_match_degree is not None and cov_percent < float(min_match_degree):
+                    continue
+
+                sig = loci_signature(unique_loci)
+                degree = float(cov_percent)
+                rank = (
+                    degree,
+                    1 if res.get("closure_found") else 0,
+                    -segment_count,
+                )
+
+                if best_rank is None or rank > best_rank:
+                    # Old best may become a valid second-best candidate if distinct.
+                    if best_rank is not None and best_group is not None and best_sig and best_sig != sig:
+                        if second_rank is None or best_rank > second_rank:
+                            second_rank = best_rank
+                            second_group = best_group
+                            second_sig = best_sig
+                            second_degree = best_degree
+
+                    best_rank = rank
+                    best_group = (rotated, res, path_df)
+                    best_sig = sig
+                    best_degree = degree
+                    continue
+
+                if sig and sig != best_sig:
+                    if second_rank is None or rank > second_rank:
+                        second_rank = rank
+                        second_group = (rotated, res, path_df)
+                        second_sig = sig
+                        second_degree = degree
+
+            if not best_group:
                 continue
 
-            path_df = g.iloc[res["path"]].reset_index(drop=True)
-            segment_count = len(path_df)
-            if segment_count < 2:
-                self.logger.debug(
-                    "Skipping query %s: circular path contains fewer than 2 segments",
-                    qid,
-                )
-                continue
+            rotated, res, path_df = best_group
             chroms = path_df[ColumnStandard.CHR].unique()
             eclass = "Cecc-InterChr" if len(chroms) > 1 else "Cecc-IntraChr"
             max_gap, avg_gap, _, _ = self.analyze_gaps(path_df)
 
+            mapq_series = (
+                pd.to_numeric(path_df.get("mapq"), errors="coerce").dropna()
+                if "mapq" in path_df.columns
+                else pd.Series(dtype=float)
+            )
+            identity_series = (
+                pd.to_numeric(path_df.get("identity"), errors="coerce").dropna()
+                if "identity" in path_df.columns
+                else pd.Series(dtype=float)
+            )
+            mapq_best = int(mapq_series.max()) if not mapq_series.empty else 0
+            mapq_min = int(mapq_series.min()) if not mapq_series.empty else 0
+            identity_best = float(identity_series.max()) if not identity_series.empty else 0.0
+            identity_min = float(identity_series.min()) if not identity_series.empty else 0.0
+
+            cov_best = (float(best_degree) / 100.0) if best_degree is not None else 0.0
+            cov_2nd = (float(second_degree) / 100.0) if second_degree is not None else 0.0
+            # If a distinct 2nd-best chain exists and is close, lower confidence.
+            chain_unique = (
+                1.0
+                if second_degree is None
+                else self._clamp01(max(0.0, cov_best - cov_2nd) / 0.05)
+            )
+
+            low_mapq = mapq_best < int(self.MAPQ_LOW_THRESHOLD)
+            low_identity = identity_best < float(self.IDENTITY_LOW_THRESHOLD)
+            conf = self._geom_mean(
+                [
+                    self._norm_mapq(mapq_best),
+                    self._norm_identity(identity_best),
+                    self._clamp01(cov_best),
+                    self._clamp01(chain_unique),
+                ]
+            )
+
             base = {
                 "query_id": qid,
-                "reads": g.iloc[0][ColumnStandard.READS],
+                "reads": rotated.iloc[0][ColumnStandard.READS],
                 "eccdna_type": "Cecc",
                 "CeccClass": eclass,
-                "length": g.iloc[0][ColumnStandard.LENGTH],
-                "copy_number": g.iloc[0][ColumnStandard.COPY_NUMBER],
-                "num_segments": segment_count,
+                "length": rotated.iloc[0][ColumnStandard.LENGTH],
+                "copy_number": rotated.iloc[0][ColumnStandard.COPY_NUMBER],
+                "num_segments": len(path_df),
                 "cumulative_length": res["cum_len"],
-                "match_degree": res["mat_degree"],
+                "match_degree": best_degree,
+                "match_degree_2nd": second_degree,
+                "best_chain_signature": best_sig,
+                "second_chain_signature": second_sig,
+                ColumnStandard.MAPQ_BEST: int(mapq_best),
+                ColumnStandard.MAPQ_MIN: int(mapq_min),
+                ColumnStandard.IDENTITY_BEST: round(float(identity_best), 3),
+                ColumnStandard.IDENTITY_MIN: round(float(identity_min), 3),
+                ColumnStandard.QUERY_COV_BEST: round(float(cov_best), 6),
+                ColumnStandard.QUERY_COV_2ND: round(float(cov_2nd), 6),
+                ColumnStandard.CONFIDENCE_SCORE: round(float(conf), 6),
+                ColumnStandard.LOW_MAPQ: bool(low_mapq),
+                ColumnStandard.LOW_IDENTITY: bool(low_identity),
+                "C_cov_best": round(float(cov_best), 6) if best_degree is not None else None,
+                "C_cov_2nd": round(float(cov_2nd), 6) if second_degree is not None else None,
                 "max_gap": max_gap,
                 "avg_gap": round(avg_gap, 2),
                 "chromosomes": ",".join(chroms.astype(str)),
             }
 
-            for i in range(len(path_df)):
-                seg = path_df.iloc[i]
+            for i, seg in path_df.iterrows():
                 row = dict(base)
                 row.update(
                     {
-                        "segment_in_circle": i + 1,
+                        "segment_in_circle": int(i) + 1,
                         ColumnStandard.CHR: seg[ColumnStandard.CHR],
                         ColumnStandard.START0: seg[ColumnStandard.START0],
                         ColumnStandard.END0: seg[ColumnStandard.END0],
@@ -514,6 +853,9 @@ class CeccBuild:
         min_segments: int = 2,
         edge_tolerance: int = 20,
         position_tolerance: int = 50,
+        min_match_degree: float = 90.0,
+        max_rotations: int = 20,
+        locus_overlap_threshold: float = 0.95,
     ) -> pd.DataFrame:
         """
         Run the complete Trapeze circular analysis pipeline.
@@ -546,7 +888,17 @@ class CeccBuild:
         self.logger.info(f"  - Min segments: {min_segments}")
         self.logger.info(f"  - Edge tolerance: {edge_tolerance} bp")
         self.logger.info(f"  - Position tolerance: {position_tolerance} bp")
+        self.logger.info(f"  - Min match degree (fallback): {min_match_degree}%")
+        self.logger.info(f"  - Max rotations per query: {max_rotations}")
         self.logger.info("  - Final overlap filtering: Enabled")
+        try:
+            lot = float(locus_overlap_threshold)
+        except (TypeError, ValueError):
+            lot = 0.95
+        self.locus_overlap_threshold = lot / 100.0 if lot > 1.0 else lot
+        self.logger.info(
+            "  - Final locus overlap threshold: %.3f", float(self.locus_overlap_threshold)
+        )
         self.logger.info(f"  - Numba acceleration: {'Enabled' if NUMBA_AVAILABLE else 'Disabled'}")
 
         # Read and validate input
@@ -580,7 +932,13 @@ class CeccBuild:
             return empty_result
 
         self.logger.info("Detecting circular patterns")
-        df_circles = self.detect_circles(df_filt, edge_tolerance, position_tolerance)
+        df_circles = self.detect_circles(
+            df_filt,
+            edge_tol=edge_tolerance,
+            pos_tol=position_tolerance,
+            min_match_degree=min_match_degree,
+            max_rotations=max_rotations,
+        )
 
         # Label roles
         if not df_circles.empty:
@@ -650,6 +1008,13 @@ def _parse_args():
     parser.add_argument(
         "--overlap-threshold", type=float, default=0.95, help="Overlap threshold (default: 0.95)"
     )
+    parser.add_argument(
+        "--locus-overlap-threshold",
+        type=float,
+        default=0.95,
+        help="Reciprocal overlap threshold to treat two genomic intervals as the same locus "
+        "in the final overlap filter (default: 0.95)",
+    )
     parser.add_argument("--min-segments", type=int, default=2, help="Min segments (default: 2)")
     parser.add_argument(
         "--edge-tolerance", type=int, default=20, help="Edge tolerance in bp (default: 20)"
@@ -687,6 +1052,7 @@ def main():
         min_segments=args.min_segments,
         edge_tolerance=args.edge_tolerance,
         position_tolerance=args.position_tolerance,
+        locus_overlap_threshold=args.locus_overlap_threshold,
     )
 
 
