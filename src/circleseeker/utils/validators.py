@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import shutil
 import importlib
-from typing import List
-
-
-def validate_installation(full_check: bool = False) -> List[str]:
+def validate_installation(full_check: bool = False) -> list[str]:
     """
     Validate CircleSeeker installation and dependencies.
 

@@ -200,13 +200,13 @@ class TestLoggingUtilities:
             assert file_format == DEFAULT_FORMAT
 
     @patch('logging.StreamHandler')
-    @patch('logging.FileHandler')
-    def test_setup_logging_handler_creation(self, mock_file_handler, mock_stream_handler):
+    @patch('circleseeker.utils.logging.RotatingFileHandler')
+    def test_setup_logging_handler_creation(self, mock_rotating_handler, mock_stream_handler):
         """Test that handlers are created correctly."""
         mock_console = MagicMock()
         mock_file = MagicMock()
         mock_stream_handler.return_value = mock_console
-        mock_file_handler.return_value = mock_file
+        mock_rotating_handler.return_value = mock_file
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             log_file = Path(tmp_dir) / "test.log"
@@ -220,7 +220,10 @@ class TestLoggingUtilities:
 
             # Verify handlers were created
             mock_stream_handler.assert_called_once()
-            mock_file_handler.assert_called_once_with(log_file)
+            # RotatingFileHandler is called with file path and rotation parameters
+            mock_rotating_handler.assert_called_once()
+            call_args = mock_rotating_handler.call_args
+            assert call_args[0][0] == log_file  # First positional arg is the file path
 
             # Verify setLevel was called on handlers
             mock_console.setLevel.assert_called_with(logging.INFO)
@@ -263,21 +266,10 @@ class TestLoggingUtilities:
             assert console_handler.level == level
 
 
-@pytest.fixture
-def clean_logging():
-    """Fixture to clean up logging configuration after each test."""
-    yield
-    # Clean up after test
-    app_logger = logging.getLogger("circleseeker")
-    for handler in list(app_logger.handlers):
-        app_logger.removeHandler(handler)
-    app_logger.setLevel(logging.NOTSET)
-
-
 class TestLoggingIntegration:
     """Integration tests for logging functionality."""
 
-    def test_complete_logging_workflow(self, clean_logging):
+    def test_complete_logging_workflow(self):
         """Test complete logging workflow from setup to usage."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             log_file = Path(tmp_dir) / "workflow.log"

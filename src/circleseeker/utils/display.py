@@ -7,7 +7,7 @@ import sys
 import locale
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Any
 import time
 
 # Import version carefully to avoid circular imports
@@ -108,7 +108,7 @@ class ConsoleFormatter:
 
     def __init__(self, width: int = 60, use_emoji: bool = False):
         self.width = width
-        self.start_time = None
+        self.start_time: Optional[float] = None
         self.use_emoji = use_emoji  # Allow disabling emoji even if supported
         self._emoji_supported = supports_emoji() if use_emoji else False
 
@@ -182,7 +182,7 @@ class ConsoleFormatter:
         # Fallback to original path
         return str(path_str)
 
-    def format_config(self, config: Dict[str, Any]) -> str:
+    def format_config(self, config: dict[str, Any]) -> str:
         """Format configuration information."""
         lines = []
 
@@ -239,7 +239,7 @@ class ConsoleFormatter:
 
     def final_output_message(self, output_dir: Path) -> str:
         """Generate final output location message."""
-        friendly_path = self._format_path(output_dir)
+        friendly_path = self._format_path(str(output_dir))
         return self._format_status_line("", f"Finalized outputs saved in: {friendly_path}")
 
 
@@ -279,7 +279,7 @@ class ProgressDisplay:
         return f"  {status_emoji} {step_name}"
 
 
-def format_stats(stats: Dict[str, int]) -> str:
+def format_stats(stats: dict[str, int]) -> str:
     """Format statistics output."""
     lines = []
     lines.append(f"\n{E('📊')} Final eccDNA counts:")

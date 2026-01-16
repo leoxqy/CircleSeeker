@@ -2,11 +2,12 @@
 Read Filter - FASTA Sequence Filtering Module
 
 This module filters FASTA sequences based on TandemToRing (formerly Carousel)
-classification results, removing sequences classified as CtcR variants.
+classification results, removing sequences classified as CtcReads variants
+(legacy label: CtcR-* in `tandem_to_ring.csv`).
 
 Key features:
 - Reads TandemToRing output CSV with readName and readClass columns
-- Filters out sequences with specific CtcR classifications
+- Filters out sequences with specific CtcR-* classifications (CtcReads variants)
 - Memory-efficient processing for large files
 - Generates samtools faidx index for output
 
@@ -23,7 +24,7 @@ import subprocess
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Set, Optional, List
+from typing import Optional
 from circleseeker.exceptions import PipelineError
 
 # Increase CSV field size limit to handle large sequence fields
@@ -64,7 +65,7 @@ class Sieve:
         self.logger = logger or get_logger(self.__class__.__name__)
 
         # Data structures
-        self.reads_to_filter: Set[str] = set()
+        self.reads_to_filter: set[str] = set()
 
         # Statistics
         self.stats = FilterStats()
@@ -75,7 +76,7 @@ class Sieve:
             self.logger.warning("samtools not found - faidx index will not be generated")
 
     def load_carousel_classification(
-        self, csv_file: Path, ctcr_classes: Optional[Set[str]] = None
+        self, csv_file: Path, ctcr_classes: Optional[set[str]] = None
     ) -> None:
         """
         Load read classification from TandemToRing output CSV.
@@ -92,7 +93,7 @@ class Sieve:
         self.logger.info(f"Filtering classes: {ctcr_classes}")
 
         # Track statistics
-        class_counts = {}
+        class_counts: dict[str, int] = {}
 
         try:
             with open(csv_file, "r", encoding="utf-8") as f:
@@ -108,6 +109,8 @@ class Sieve:
                 reader = csv.DictReader(f, delimiter=delimiter)
 
                 # Find the correct columns (case-insensitive)
+                if not reader.fieldnames:
+                    raise ValueError("Classification CSV is missing a header row")
                 fieldnames_lower = {fn.lower(): fn for fn in reader.fieldnames}
 
                 if "readname" not in fieldnames_lower or "readclass" not in fieldnames_lower:
@@ -148,7 +151,7 @@ class Sieve:
         self.logger.info(f"Total CtcR reads to filter: {self.stats.csv_ctcr_reads}")
 
     def filter_fasta_files(
-        self, input_fastas: List[Path], output_fasta: Path, generate_index: bool = True
+        self, input_fastas: list[Path], output_fasta: Path, generate_index: bool = True
     ) -> FilterStats:
         """
         Filter and combine multiple FASTA files.
@@ -177,8 +180,8 @@ class Sieve:
 
                 # Process each input file
                 with open(input_fasta, "r") as infile:
-                    current_header = None
-                    current_sequence = []
+                    current_header: Optional[str] = None
+                    current_sequence: list[str] = []
                     write_current = True
 
                     for line in infile:
@@ -268,9 +271,9 @@ class Sieve:
     def run_sieve(
         self,
         carousel_csv: Path,
-        input_fastas: List[Path],
+        input_fastas: list[Path],
         output_fasta: Path,
-        ctcr_classes: Optional[Set[str]] = None,
+        ctcr_classes: Optional[set[str]] = None,
     ) -> FilterStats:
         """
         Run complete sieve filtering pipeline.

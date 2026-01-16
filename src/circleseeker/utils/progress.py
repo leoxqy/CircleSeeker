@@ -17,7 +17,7 @@ def iter_progress(
     if not enabled:
         return iter(iterable)
     try:
-        from tqdm import tqdm  # type: ignore
+        from tqdm import tqdm
 
         # Format with bullet point and proper alignment
         # Use shorter bar to align with status line

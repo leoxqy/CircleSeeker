@@ -126,16 +126,20 @@ def test_um_classify_mecc_can_use_lower_theta_m(tmp_path):
 
 
 def test_um_classify_uecc_vetoes_significant_secondary_mapping(tmp_path):
-    """A strong single-locus coverage can still be vetoed by significant secondary evidence."""
+    """A strong single-locus coverage can still be vetoed by significant secondary evidence.
+
+    Note: After the adaptive threshold improvements, small secondary mappings (<5% of primary)
+    are allowed. This test uses a 10% secondary mapping which exceeds the relative threshold.
+    """
     blast_tsv = tmp_path / "step3_secondary_evidence.tsv"
 
     query_id = "readC|rep1|10000|1"
 
     rows = [
-        # Primary locus: ~99% ring coverage
-        [query_id, "chr1", 99.0, 9900, 0, 0, 1, 9900, 1000, 10899, 0.0, 200.0, "plus"],
-        # Secondary locus: 1% ring coverage on another chromosome (low-quality by Gap_Percentage)
-        [query_id, "chr5", 99.0, 100, 0, 0, 9901, 10000, 5000, 5099, 0.0, 50.0, "plus"],
+        # Primary locus: ~90% ring coverage
+        [query_id, "chr1", 99.0, 9000, 0, 0, 1, 9000, 1000, 9999, 0.0, 200.0, "plus"],
+        # Secondary locus: 10% ring coverage on another chromosome (exceeds relative threshold)
+        [query_id, "chr5", 99.0, 1000, 0, 0, 9001, 10000, 5000, 5999, 0.0, 50.0, "plus"],
     ]
 
     pd.DataFrame(rows).to_csv(blast_tsv, sep="\t", header=False, index=False)
@@ -143,6 +147,7 @@ def test_um_classify_uecc_vetoes_significant_secondary_mapping(tmp_path):
     classifier = UMeccClassifier(theta_u=0.95, theta_m=0.95, theta_u2_max=0.05)
     uecc_df, mecc_df, unclassified_df = classifier.run(blast_tsv)
 
+    # 10% secondary / 90% primary = 11.1% > 5% threshold => vetoed
     assert uecc_df.empty
     assert mecc_df.empty
     assert set(unclassified_df["query_id"].unique()) == {query_id}

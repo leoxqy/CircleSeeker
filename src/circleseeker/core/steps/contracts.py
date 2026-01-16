@@ -9,7 +9,7 @@ Contracts are intentionally lightweight and declarative:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple
+from typing import Any, Optional
 
 
 @dataclass(frozen=True)
@@ -22,7 +22,7 @@ class ArtifactSpec:
     kind: str = "file"  # file/dir/csv/tsv/tsv_no_header/fasta/bam/json/txt
     required: bool = False
     sep: str = ","
-    required_columns: Tuple[str, ...] = field(default_factory=tuple)
+    required_columns: tuple[str, ...] = field(default_factory=tuple)
     coordinate_system: Optional[str] = None
 
 
@@ -31,22 +31,36 @@ class StepContract:
     """Input/output contract for a pipeline step."""
 
     step_name: str
-    inputs: Tuple[ArtifactSpec, ...] = field(default_factory=tuple)
-    outputs: Tuple[ArtifactSpec, ...] = field(default_factory=tuple)
+    inputs: tuple[ArtifactSpec, ...] = field(default_factory=tuple)
+    outputs: tuple[ArtifactSpec, ...] = field(default_factory=tuple)
 
 
 COORD_0_BASED_HALF_OPEN = "0-based, half-open [start0, end0)"
 
 
-def _out(name: str, template: str, *, kind: str = "file", required: bool = False, **kwargs) -> ArtifactSpec:
+def _out(
+    name: str,
+    template: str,
+    *,
+    kind: str = "file",
+    required: bool = False,
+    **kwargs: Any,
+) -> ArtifactSpec:
     return ArtifactSpec(name=name, base="output", template=template, kind=kind, required=required, **kwargs)
 
 
-def _final(name: str, template: str, *, kind: str = "file", required: bool = False, **kwargs) -> ArtifactSpec:
+def _final(
+    name: str,
+    template: str,
+    *,
+    kind: str = "file",
+    required: bool = False,
+    **kwargs: Any,
+) -> ArtifactSpec:
     return ArtifactSpec(name=name, base="final", template=template, kind=kind, required=required, **kwargs)
 
 
-def _cfg(name: str, attr: str, *, required: bool = False, **kwargs) -> ArtifactSpec:
+def _cfg(name: str, attr: str, *, required: bool = False, **kwargs: Any) -> ArtifactSpec:
     return ArtifactSpec(name=name, base="config", template=attr, required=required, **kwargs)
 
 
@@ -101,7 +115,7 @@ _CORE_REQUIRED = (
 )
 
 
-STEP_CONTRACTS: Dict[str, StepContract] = {
+STEP_CONTRACTS: dict[str, StepContract] = {
     "check_dependencies": StepContract(step_name="check_dependencies"),
     "tidehunter": StepContract(
         step_name="tidehunter",

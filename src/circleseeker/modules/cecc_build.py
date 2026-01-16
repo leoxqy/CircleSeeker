@@ -12,7 +12,7 @@ import logging
 from circleseeker.utils.logging import get_logger
 from circleseeker.utils.column_standards import ColumnStandard
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Optional, Any, Iterable
 import numpy as np
 import pandas as pd
 
@@ -82,7 +82,7 @@ class CeccBuild:
         return cls._clamp01((val - 90.0) / 10.0)
 
     @staticmethod
-    def _geom_mean(values: List[float]) -> float:
+    def _geom_mean(values: list[float]) -> float:
         if not values:
             return 0.0
         prod = 1.0
@@ -90,7 +90,7 @@ class CeccBuild:
             if v <= 0.0:
                 return 0.0
             prod *= float(v)
-        return prod ** (1.0 / float(len(values)))
+        return float(prod ** (1.0 / float(len(values))))
 
     def __init__(self, logger: Optional[logging.Logger] = None):
         """Initialize Cecc-Build analyzer."""
@@ -159,11 +159,16 @@ class CeccBuild:
         (overlap / min(len_a, len_b)) is >= ``self.locus_overlap_threshold``.
         Other partial overlaps are considered conflicting and will be filtered.
 
+        The reciprocal overlap is computed correctly as:
+            overlap_start = max(cur_start, start)
+            overlap_end = min(cur_end, end)
+            overlap_len = max(0, overlap_end - overlap_start)
+
         Args:
             segments: DataFrame with chr, start, end columns
 
         Returns:
-            True if any overlaps detected, False otherwise
+            True if any partial overlaps detected (excluding near-identical), False otherwise
         """
         if len(segments) <= 1:
             return False
@@ -187,23 +192,39 @@ class CeccBuild:
 
             cur_start = int(df_int.iloc[0][ColumnStandard.START0])
             cur_end = int(df_int.iloc[0][ColumnStandard.END0])
+
             for _, row in df_int.iloc[1:].iterrows():
                 start = int(row[ColumnStandard.START0])
                 end = int(row[ColumnStandard.END0])
-                if start < cur_end:
-                    # Allow near-identical intervals (same locus with boundary jitter).
-                    overlap_len = max(0, min(cur_end, end) - start)
-                    len_a = max(0, cur_end - cur_start)
-                    len_b = max(0, end - start)
-                    min_len = min(len_a, len_b)
-                    rec_ov = (overlap_len / float(min_len)) if min_len > 0 else 0.0
-                    if rec_ov >= float(self.locus_overlap_threshold):
-                        # Merge into the current locus envelope.
-                        cur_start = min(cur_start, start)
-                        cur_end = max(cur_end, end)
-                        continue
-                    return True
-                cur_start, cur_end = start, end
+
+                # No overlap with current interval
+                if start >= cur_end:
+                    cur_start, cur_end = start, end
+                    continue
+
+                # Calculate correct overlap using max of starts and min of ends
+                overlap_start = max(cur_start, start)
+                overlap_end = min(cur_end, end)
+                overlap_len = max(0, overlap_end - overlap_start)
+
+                # Calculate interval lengths (avoid division by zero)
+                len_a = max(1, cur_end - cur_start)
+                len_b = max(1, end - start)
+
+                # Calculate reciprocal overlap for both intervals
+                rec_ov_a = overlap_len / float(len_a)
+                rec_ov_b = overlap_len / float(len_b)
+
+                # Check if near-identical (both reciprocal overlaps exceed threshold)
+                threshold = float(self.locus_overlap_threshold)
+                if rec_ov_a >= threshold and rec_ov_b >= threshold:
+                    # Merge into the current locus envelope
+                    cur_start = min(cur_start, start)
+                    cur_end = max(cur_end, end)
+                    continue
+
+                # Partial overlap detected - this is a conflict
+                return True
 
         return False
 
@@ -309,7 +330,7 @@ class CeccBuild:
 
         return df
 
-    def _read_input_dataframe(self, input_csv: Path) -> Tuple[pd.DataFrame, str]:
+    def _read_input_dataframe(self, input_csv: Path) -> tuple[pd.DataFrame, str]:
         """Load the input CSV while detecting an appropriate delimiter."""
         sample = ""
         try:
@@ -318,21 +339,21 @@ class CeccBuild:
         except OSError as exc:
             raise ValueError(f"Unable to read input file {input_csv}: {exc}") from exc
 
-        candidate_seps: List[Optional[str]] = []
+        candidate_seps: list[Optional[str]] = []
         if sample:
             try:
-                dialect = csv.Sniffer().sniff(sample, delimiters=self.CANDIDATE_DELIMITERS)
+                dialect = csv.Sniffer().sniff(sample, delimiters="".join(self.CANDIDATE_DELIMITERS))
                 candidate_seps.append(dialect.delimiter)
             except csv.Error:
                 pass
 
-        for sep in self.CANDIDATE_DELIMITERS:
-            if sep not in candidate_seps:
-                candidate_seps.append(sep)
+        for candidate_sep in self.CANDIDATE_DELIMITERS:
+            if candidate_sep not in candidate_seps:
+                candidate_seps.append(candidate_sep)
 
         candidate_seps.append(None)  # auto-detect fallback
 
-        errors: List[str] = []
+        errors: list[str] = []
         for sep in candidate_seps:
             try:
                 if sep is None:
@@ -417,7 +438,7 @@ class CeccBuild:
             and abs(float(a[ColumnStandard.END0]) - float(b[ColumnStandard.END0])) <= tol
         )
 
-    def analyze_gaps(self, path_df: pd.DataFrame) -> Tuple[float, float, int, bool]:
+    def analyze_gaps(self, path_df: pd.DataFrame) -> tuple[float, float, int, bool]:
         """Analyze gaps between segments in a path."""
         gaps = []
         for i in range(1, len(path_df)):
@@ -438,7 +459,7 @@ class CeccBuild:
         edge_tol: int,
         pos_tol: int,
         min_match_degree: Optional[float] = None,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[dict[str, Any]]:
         """Find circular path in a group of segments.
 
         Primary mode uses position-based closure (duplicate segment indicating wrap-around).
@@ -520,7 +541,7 @@ class CeccBuild:
         max_rotations: int = 20,
     ) -> pd.DataFrame:
         """Detect circular patterns in filtered data."""
-        rows: List[Dict] = []
+        rows: list[Dict] = []
         loci_cols = [
             ColumnStandard.CHR,
             ColumnStandard.START0,
@@ -536,7 +557,7 @@ class CeccBuild:
                 [ColumnStandard.CHR, ColumnStandard.START0, ColumnStandard.END0, ColumnStandard.STRAND],
                 kind="mergesort",
             )
-            parts: List[str] = []
+            parts: list[str] = []
             for _, row in df_sig.iterrows():
                 parts.append(
                     f"{row[ColumnStandard.CHR]}:{int(row[ColumnStandard.START0])}-"
@@ -564,7 +585,7 @@ class CeccBuild:
 
         def project_query_interval_to_ring(
             q_start: float, q_end: float, cons_len: int, style: str
-        ) -> List[Tuple[int, int]]:
+        ) -> list[tuple[int, int]]:
             L = int(cons_len)
             if L <= 0:
                 return []
@@ -582,7 +603,7 @@ class CeccBuild:
                 return [(u, v)]
             return [(u, L), (0, v)]
 
-        def union_len(segments: Iterable[Tuple[int, int]]) -> int:
+        def union_len(segments: Iterable[tuple[int, int]]) -> int:
             segs = [(int(s), int(e)) for s, e in segments if e > s]
             if not segs:
                 return 0
@@ -602,7 +623,7 @@ class CeccBuild:
             L = int(cons_len)
             if path_df.empty or L <= 0:
                 return 0.0
-            segments: List[Tuple[int, int]] = []
+            segments: list[tuple[int, int]] = []
             for _, row in path_df.iterrows():
                 q_start = row.get("q_start")
                 q_end = row.get("q_end")
@@ -636,15 +657,15 @@ class CeccBuild:
                     if len(starts) >= max_rotations:
                         break
 
-            best_rank = None
-            best_group = None
+            best_rank: tuple[float, int, int] | None = None
+            best_group: tuple[pd.DataFrame, dict[str, Any], pd.DataFrame] | None = None
             best_sig = ""
-            best_degree = None
+            best_degree: float | None = None
 
-            second_rank = None
-            second_group = None
+            second_rank: tuple[float, int, int] | None = None
+            second_group: tuple[pd.DataFrame, dict[str, Any], pd.DataFrame] | None = None
             second_sig = ""
-            second_degree = None
+            second_degree: float | None = None
 
             for start in starts:
                 rotated = (
@@ -818,7 +839,7 @@ class CeccBuild:
         # Stable sort
         df = df_circ.sort_values(["query_id", "segment_in_circle"], kind="mergesort").copy()
 
-        parts: List[pd.DataFrame] = []
+        parts: list[pd.DataFrame] = []
         for _, g in df.groupby("query_id", sort=False):
             n = len(g)
             roles = ["middle"] * n

@@ -35,6 +35,7 @@ def run_circleseeker_pipeline(
     output_dir: Path,
     threads: int = 4,
     minimap2_preset: str = "sr",
+    minimap2_timeout: int = 1800,
 ) -> bool:
     """
     Run CircleSeeker pipeline on simulated data.
@@ -58,6 +59,7 @@ def run_circleseeker_pipeline(
         # Step 1: Run minimap2 alignment
         print("\n[1/3] Running minimap2 alignment...")
         alignment_tsv = output_dir / "alignment.tsv"
+        alignment_paf = output_dir / "alignment.paf"
 
         # Build minimap2 command
         cmd = [
@@ -65,20 +67,22 @@ def run_circleseeker_pipeline(
             "-x", minimap2_preset,
             "-N", "200",
             "--secondary=yes",
-            "-c",  # Output CIGAR
-            "--cs",  # Output cs tag
+            "-c",  # Output CIGAR (ensures accurate match counts for identity)
+            "--cs",  # Output cs tag (base-level alignment)
             "-t", str(threads),
             str(reference_fasta),
             str(reads_fasta),
         ]
 
         # Run alignment and convert PAF to TSV format
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=600
-        )
+        with open(alignment_paf, "w") as paf_out:
+            result = subprocess.run(
+                cmd,
+                stdout=paf_out,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=minimap2_timeout,
+            )
 
         if result.returncode != 0:
             print(f"  Warning: minimap2 failed: {result.stderr}")
@@ -87,8 +91,7 @@ def run_circleseeker_pipeline(
             return False
 
         # Parse PAF output and convert to alignment TSV
-        paf_output = result.stdout
-        _convert_paf_to_alignment_tsv(paf_output, alignment_tsv)
+        _convert_paf_to_alignment_tsv(alignment_paf, alignment_tsv)
         print(f"  Alignment written to: {alignment_tsv}")
 
         # Step 2: Run UM classification
@@ -162,68 +165,68 @@ def run_circleseeker_pipeline(
 
 def _convert_paf_to_alignment_tsv(paf_output: str, output_path: Path):
     """Convert PAF format to alignment TSV (BLAST outfmt 6 style)."""
-    import pandas as pd
+    import csv
 
-    records = []
-    for line in paf_output.strip().split('\n'):
-        if not line:
-            continue
+    with open(paf_output) as paf_in, open(output_path, "w", newline="") as tsv_out:
+        writer = csv.writer(tsv_out, delimiter="\t", lineterminator="\n")
 
-        fields = line.split('\t')
-        if len(fields) < 12:
-            continue
+        for line in paf_in:
+            line = line.strip()
+            if not line:
+                continue
 
-        # PAF format:
-        # 0: query_id, 1: query_len, 2: q_start, 3: q_end,
-        # 4: strand, 5: target, 6: target_len, 7: t_start, 8: t_end,
-        # 9: matches, 10: block_len, 11: mapq
+            fields = line.split("\t")
+            if len(fields) < 12:
+                continue
 
-        query_id = fields[0]
-        query_len = int(fields[1])
-        q_start = int(fields[2]) + 1  # Convert to 1-based
-        q_end = int(fields[3])
-        strand = fields[4]
-        subject_id = fields[5]
-        t_start = int(fields[7]) + 1  # Convert to 1-based
-        t_end = int(fields[8])
-        matches = int(fields[9])
-        alignment_length = int(fields[10])
-        mapq = int(fields[11]) if len(fields) > 11 else 0
+            # PAF format:
+            # 0: query_id, 1: query_len, 2: q_start, 3: q_end,
+            # 4: strand, 5: target, 6: target_len, 7: t_start, 8: t_end,
+            # 9: matches, 10: block_len, 11: mapq
 
-        # Calculate identity
-        identity = (matches / alignment_length * 100) if alignment_length > 0 else 0
-        mismatches = alignment_length - matches
+            query_id = fields[0]
+            q_start = int(fields[2]) + 1  # Convert to 1-based
+            q_end = int(fields[3])
+            strand = fields[4]
+            subject_id = fields[5]
+            t_start = int(fields[7]) + 1  # Convert to 1-based
+            t_end = int(fields[8])
+            matches = int(fields[9])
+            alignment_length = int(fields[10])
+            mapq = int(fields[11])
 
-        # For BLAST format, negative strand has s_start > s_end
-        # PAF always has t_start < t_end regardless of strand
-        if strand == "+":
-            s_start = t_start
-            s_end = t_end
-            sstrand = "plus"
-        else:
-            # Swap for negative strand (BLAST convention)
-            s_start = t_end
-            s_end = t_start
-            sstrand = "minus"
+            identity = (matches / alignment_length * 100) if alignment_length > 0 else 0.0
+            mismatches = alignment_length - matches
 
-        records.append([
-            query_id, subject_id, identity, alignment_length,
-            mismatches, 0,  # gap_opens
-            q_start, q_end, s_start, s_end,
-            0, 0,  # evalue, bit_score
-            sstrand,
-            mapq,
-        ])
+            # BLAST convention: negative strand has s_start > s_end
+            # PAF always has t_start < t_end regardless of strand.
+            if strand == "+":
+                s_start = t_start
+                s_end = t_end
+                sstrand = "plus"
+            else:
+                s_start = t_end
+                s_end = t_start
+                sstrand = "minus"
 
-    # Write to TSV
-    columns = [
-        "query_id", "subject_id", "identity", "alignment_length",
-        "mismatches", "gap_opens", "q_start", "q_end",
-        "s_start", "s_end", "evalue", "bit_score", "sstrand", "mapq"
-    ]
-
-    df = pd.DataFrame(records, columns=columns)
-    df.to_csv(output_path, sep='\t', index=False, header=False)
+            writer.writerow(
+                [
+                    query_id,
+                    subject_id,
+                    identity,
+                    alignment_length,
+                    mismatches,
+                    0,  # gap_opens
+                    q_start,
+                    q_end,
+                    s_start,
+                    s_end,
+                    0,  # evalue
+                    0,  # bit_score
+                    sstrand,
+                    mapq,
+                ]
+            )
 
 
 def _create_empty_results(output_dir: Path):
@@ -276,6 +279,12 @@ def main():
         type=str,
         default="sr",
         help="minimap2 preset to use for simulation validation (default: sr)",
+    )
+    parser.add_argument(
+        "--minimap2-timeout",
+        type=int,
+        default=1800,
+        help="Timeout (seconds) for minimap2 alignment step (default: 1800)",
     )
     parser.add_argument(
         "--num-uecc",
@@ -339,6 +348,7 @@ def main():
             output_dir=args.results_dir,
             threads=args.threads,
             minimap2_preset=args.minimap2_preset,
+            minimap2_timeout=args.minimap2_timeout,
         )
 
         if not success:

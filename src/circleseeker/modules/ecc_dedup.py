@@ -26,7 +26,7 @@ from circleseeker.utils.logging import get_logger
 import re
 import shutil
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Optional
 import pandas as pd
 from circleseeker.utils.column_standards import ColumnStandard
 
@@ -73,13 +73,13 @@ CONF_MAPQ_LOW_THRESHOLD = 20
 CONF_IDENTITY_LOW_THRESHOLD = 95.0
 
 
-def _normalize_strand(value: Optional[str]) -> Optional[str]:
+def _normalize_strand(value: object) -> Optional[str]:
     """Normalise strand annotations to '+'/'-' where possible."""
     if value is None or (isinstance(value, float) and pd.isna(value)):
-        return pd.NA
+        return None
     text = str(value).strip()
     if not text:
-        return pd.NA
+        return None
     lowered = text.lower()
     if lowered in STRAND_POSITIVE:
         return "+"
@@ -149,7 +149,7 @@ def majority_vote(series: pd.Series) -> Optional[str]:
     clean_series = series.dropna().astype(str)
     if clean_series.empty:
         return None
-    return clean_series.value_counts().idxmax()
+    return str(clean_series.value_counts().idxmax())
 
 
 def count_reads_from_string(s: str) -> int:
@@ -404,7 +404,7 @@ def build_m_confirmed_table(m_df: pd.DataFrame) -> pd.DataFrame:
     df = df.merge(hit_counts, on="eccDNA_id", how="left")
 
     # Aggregate by eccDNA_id, maintaining order
-    agg: Dict[str, object] = {
+    agg: dict[str, object] = {
         "region": lambda x: "|".join(list(x)),  # Use | separator for MeccDNA
         "length": "first",
         "Hit_count": "first",  # Use the calculated hit count
@@ -586,7 +586,7 @@ def build_c_confirmed_table(c_df: pd.DataFrame) -> pd.DataFrame:
     return out[cols]
 
 
-def detect_related_files(base_dir: Path | str, prefix: str, ecc_type: str) -> List[Path]:
+def detect_related_files(base_dir: Path | str, prefix: str, ecc_type: str) -> list[Path]:
     """Detect related files for a given eccDNA type based on naming patterns.
 
     Args:
@@ -653,9 +653,9 @@ def detect_related_files(base_dir: Path | str, prefix: str, ecc_type: str) -> Li
 def organize_umc_files(
     output_dir: Path | str,
     prefix: str,
-    umc_files: Optional[Dict[str, List[Path]]] = None,
+    umc_files: Optional[dict[str, list[Path]]] = None,
     auto_detect: bool = True,
-) -> Dict[str, Path]:
+) -> dict[str, Path]:
     """Organize UMC output files into type-specific folders.
 
     Creates folders:
@@ -718,8 +718,8 @@ class CDHitClusters:
     """Parse and manage CD-HIT cluster information from .clstr or CSV exports."""
 
     def __init__(self) -> None:
-        self.members: Dict[str, List[str]] = {}  # cluster_id -> member_ids
-        self.rep_of: Dict[str, str] = {}  # cluster_id -> representative_id
+        self.members: dict[str, list[str]] = {}  # cluster_id -> member_ids
+        self.rep_of: dict[str, str] = {}  # cluster_id -> representative_id
 
     def parse(self, cluster_file: Path) -> None:
         """Parse cluster assignments from .clstr or CSV mapping."""
@@ -743,7 +743,7 @@ class CDHitClusters:
 
     def _parse_clstr(self, clstr_file: Path) -> None:
         current_cluster_id: Optional[str] = None
-        current_members: List[str] = []
+        current_members: list[str] = []
         current_rep: Optional[str] = None
 
         with clstr_file.open("r") as handle:
@@ -832,7 +832,7 @@ class CDHitClusters:
             if ids and cid not in self.rep_of:
                 self.rep_of[cid] = ids[0]
 
-    def get_id_to_cluster_map(self) -> Dict[str, str]:
+    def get_id_to_cluster_map(self) -> dict[str, str]:
         """Create mapping from member ID to cluster ID."""
         mapping = {}
         for cluster_id, member_list in self.members.items():
@@ -1376,7 +1376,7 @@ class eccDedup:
         result = full_df.merge(chosen, on="cluster_id", how="left")
         result = result[result[ColumnStandard.ECCDNA_ID] == result["chosen_id"]].copy()
 
-        agg_dict: Dict[str, pd.Series] = {}
+        agg_dict: dict[str, pd.Series] = {}
 
         # Handle reads and other metadata aggregation
         if ColumnStandard.READS in full_df.columns:
@@ -2054,7 +2054,7 @@ class eccDedup:
         self.logger.info(f"Wrote {fa_file}")
 
     def _generate_unified_confirmed_table(
-        self, results: Dict[str, pd.DataFrame], output_dir: Path, prefix: Optional[str]
+        self, results: dict[str, pd.DataFrame], output_dir: Path, prefix: Optional[str]
     ) -> pd.DataFrame:
         """Generate unified confirmed table from all eccDNA types.
 
@@ -2112,7 +2112,7 @@ class eccDedup:
             return pd.DataFrame()
 
     def _organize_output_files(
-        self, results: Dict[str, pd.DataFrame], output_dir: Path, prefix: Optional[str]
+        self, results: dict[str, pd.DataFrame], output_dir: Path, prefix: Optional[str]
     ) -> None:
         """Organize output files into type-specific folders.
 
@@ -2196,7 +2196,7 @@ class eccDedup:
         cecc_cluster: Optional[Path] = None,
         generate_confirmed_tables: bool = True,
         organize_output_files: bool = False,
-    ) -> Dict[str, pd.DataFrame]:
+    ) -> dict[str, pd.DataFrame]:
         """Run deduplication pipeline for all eccDNA types."""
         return self.process_all_types(
             uecc_csv=uecc_input,
@@ -2225,7 +2225,7 @@ class eccDedup:
         drop_seq: bool,
         generate_confirmed_tables: bool = True,
         organize_output_files: bool = True,
-    ) -> Dict[str, pd.DataFrame]:
+    ) -> dict[str, pd.DataFrame]:
         """Process all eccDNA types independently and generate outputs."""
 
         # Create output directory

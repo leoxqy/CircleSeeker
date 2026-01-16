@@ -6,20 +6,20 @@
   },
   "read_classification": {
     "total_reads": "int - Total number of reads in the dataset",
-    "ctcr_reads": "int - Number of CtcR reads",
-    "ctcr_percentage": "float - Percentage of CtcR reads out of total",
-    "other_reads": "int - Number of non-CtcR reads",
+    "ctcr_reads": "int - Number of CtcReads (Ctc = Concatemeric tandem copies)",
+    "ctcr_percentage": "float - Percentage of CtcReads out of total",
+    "other_reads": "int - Number of non-CtcReads",
     "other_percentage": "float - Percentage of other reads out of total"
   },
   "ctcr_subtypes": {
     "ctcr_perfect_count": "int - Number of CtcR-perfect reads",
-    "ctcr_perfect_percentage": "float - Percentage of CtcR-perfect out of CtcR reads",
+    "ctcr_perfect_percentage": "float - Percentage of CtcR-perfect out of CtcReads",
     "ctcr_perfect_total_percentage": "float - Percentage of CtcR-perfect out of total reads",
     "ctcr_hybrid_count": "int - Number of CtcR-hybrid reads",
-    "ctcr_hybrid_percentage": "float - Percentage of CtcR-hybrid out of CtcR reads",
+    "ctcr_hybrid_percentage": "float - Percentage of CtcR-hybrid out of CtcReads",
     "ctcr_hybrid_total_percentage": "float - Percentage of CtcR-hybrid out of total reads",
     "ctcr_inversion_count": "int - Number of CtcR-inversion reads",
-    "ctcr_inversion_percentage": "float - Percentage of CtcR-inversion out of CtcR reads",
+    "ctcr_inversion_percentage": "float - Percentage of CtcR-inversion out of CtcReads",
     "ctcr_inversion_total_percentage": "float - Percentage of CtcR-inversion out of total reads"
   },
   "all_eccdna_stats": {

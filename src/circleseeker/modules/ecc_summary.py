@@ -4,6 +4,9 @@
 """
 ecc_summary.py - eccDNA Analysis Summary Report Generator
 Generates HTML and text reports from eccDNA analysis results
+
+Terminology note: the report includes CtcReads statistics (Ctc = Concatemeric tandem copies),
+tracked in the pipeline as CtcR-* read classes for backward compatibility.
 """
 
 import json
@@ -11,7 +14,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Optional, Tuple, Union
+from typing import Optional, Union
 import argparse
 import logging
 from circleseeker.utils.logging import get_logger
@@ -35,17 +38,17 @@ class EccSummary:
         self.logger = logger or get_logger(self.__class__.__name__)
 
         # Data containers
-        self.read_stats = {}
-        self.ctcr_stats = {}
-        self.eccdna_stats = {}
-        self.overlap_stats = {}
+        self.read_stats: dict[str, object] = {}
+        self.ctcr_stats: dict[str, object] = {}
+        self.eccdna_stats: dict[str, object] = {}
+        self.overlap_stats: dict[str, object] = {}
         self.version = f"v{__version__}"
 
         # Internal bookkeeping for compatibility methods
         self._original_fasta: Optional[Path] = None
         self._processed_csv: Optional[Path] = None
 
-    def collect_read_statistics(self, fasta_path: Path, processed_csv: Path) -> Dict:
+    def collect_read_statistics(self, fasta_path: Path, processed_csv: Path) -> dict:
         """Collect read classification statistics.
 
         Args:
@@ -141,7 +144,7 @@ class EccSummary:
     # ------------------------------------------------------------------
     # Compatibility wrappers for legacy pipeline interface
     # ------------------------------------------------------------------
-    def process_fasta(self, fasta_path: Union[Path, str]) -> Dict:
+    def process_fasta(self, fasta_path: Union[Path, str]) -> dict:
         """Legacy wrapper to record FASTA statistics."""
         path = Path(fasta_path)
         self._original_fasta = path
@@ -181,7 +184,7 @@ class EccSummary:
 
         return self.read_stats
 
-    def process_processed_csv(self, processed_csv: Union[Path, str]) -> Dict:
+    def process_processed_csv(self, processed_csv: Union[Path, str]) -> dict:
         """Legacy wrapper to collect read classification statistics."""
         path = Path(processed_csv)
         self._processed_csv = path
@@ -194,15 +197,15 @@ class EccSummary:
         )
         return self.ctcr_stats
 
-    def process_merged_csv(self, merged_csv: Union[Path, str]) -> Dict:
+    def process_merged_csv(self, merged_csv: Union[Path, str]) -> dict:
         """Legacy wrapper to collect eccDNA statistics."""
         return self.collect_eccdna_statistics(Path(merged_csv))
 
-    def process_overlap_stats(self, overlap_json: Union[Path, str]) -> Dict:
+    def process_overlap_stats(self, overlap_json: Union[Path, str]) -> dict:
         """Legacy wrapper to collect overlap statistics."""
         return self.collect_overlap_statistics(Path(overlap_json))
 
-    def collect_eccdna_statistics(self, merged_csv: Path) -> Dict:
+    def collect_eccdna_statistics(self, merged_csv: Path) -> dict:
         """Collect eccDNA statistics from merged output.
 
         Args:
@@ -305,9 +308,9 @@ class EccSummary:
 
         return self.eccdna_stats
 
-    def _get_empty_eccdna_stats(self) -> Dict:
+    def _get_empty_eccdna_stats(self) -> dict:
         """Return empty eccDNA statistics structure."""
-        stats = {}
+        stats: dict[str, object] = {}
         for prefix in ["all", "uecc", "mecc", "cecc"]:
             stats[f"{prefix}_count"] = 0
             for suffix in [
@@ -321,7 +324,7 @@ class EccSummary:
                 stats[f"{prefix}_{suffix}"] = "0"
         return stats
 
-    def collect_overlap_statistics(self, overlap_json: Path) -> Dict:
+    def collect_overlap_statistics(self, overlap_json: Path) -> dict:
         """Collect overlap statistics from JSON file.
 
         Args:
@@ -444,20 +447,21 @@ class EccSummary:
         lines.append("-" * 22)
         lines.append(f"Total Reads: {self.read_stats['total_reads']:,}")
         lines.append(
-            f"CtcR Reads: {self.read_stats['ctcr_reads']:,} ({self.read_stats['ctcr_percentage']}%)"
+            f"CtcReads: {self.read_stats['ctcr_reads']:,} ({self.read_stats['ctcr_percentage']}%)"
         )
+        lines.append("  Note: Ctc = Concatemeric tandem copies")
         perfect = self.ctcr_stats
         lines.append(
             f"  - CtcR-perfect: {perfect['ctcr_perfect_count']:,} "
-            f"({perfect['ctcr_perfect_pct_ctcr']}% of CtcR)"
+            f"({perfect['ctcr_perfect_pct_ctcr']}% of CtcReads)"
         )
         lines.append(
             f"  - CtcR-hybrid: {perfect['ctcr_hybrid_count']:,} "
-            f"({perfect['ctcr_hybrid_pct_ctcr']}% of CtcR)"
+            f"({perfect['ctcr_hybrid_pct_ctcr']}% of CtcReads)"
         )
         lines.append(
             f"  - CtcR-inversion: {perfect['ctcr_inversion_count']:,} "
-            f"({perfect['ctcr_inversion_pct_ctcr']}% of CtcR)"
+            f"({perfect['ctcr_inversion_pct_ctcr']}% of CtcReads)"
         )
         lines.append(
             f"Other Reads: {self.read_stats['other_reads']:,} "
@@ -792,9 +796,10 @@ class EccSummary:
                 <div class="stat-percentage">100% of dataset</div>
             </div>
             <div class="stat-card">
-                <h3>CtcR Reads</h3>
+                <h3>CtcReads</h3>
                 <div class="stat-value color-danger">{ctcr_reads}</div>
                 <div class="stat-percentage">{ctcr_percentage}% of total</div>
+                <div class="stat-percentage">Ctc = Concatemeric tandem copies</div>
             </div>
             <div class="stat-card">
                 <h3>Other Reads</h3>
@@ -803,13 +808,13 @@ class EccSummary:
             </div>
         </div>
 
-        <h2>🔍 2. CtcR Subtype Distribution</h2>
+        <h2>🔍 2. CtcReads Subtype Distribution</h2>
         <table>
             <thead>
                 <tr>
-                    <th>CtcR Subtype</th>
+                    <th>CtcReads Subtype</th>
                     <th>Count</th>
-                    <th>Percentage of CtcR</th>
+                    <th>Percentage of CtcReads</th>
                     <th>Percentage of Total Reads</th>
                 </tr>
             </thead>
@@ -928,7 +933,7 @@ class EccSummary:
 
     def process_all(
         self, fasta_path: Path, processed_csv: Path, merged_csv: Path, overlap_json: Path
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         """Process all data and generate reports.
 
         Args:

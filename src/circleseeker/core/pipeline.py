@@ -10,7 +10,7 @@ import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Union
+from typing import Any, Iterable, Optional, Union
 from dataclasses import asdict
 
 from circleseeker.config import Config
@@ -28,8 +28,10 @@ from circleseeker.core.steps.definitions import PIPELINE_STEPS
 # Step execution lives in `circleseeker.core.steps.*` and is imported lazily by
 # wrapper methods on `Pipeline` to keep imports light.
 
-# Backward-compat patch target (tests/downstream monkeypatching).
-CeccBuild = None  # type: ignore[assignment]
+# DEPRECATED: Backward-compat patch target for tests/downstream monkeypatching.
+# This will be removed in v0.12.0. Please update your code to use the new module
+# import path: from circleseeker.modules.cecc_build import CeccBuild
+CeccBuild: Any = None
 
 
 class Pipeline:
@@ -37,6 +39,7 @@ class Pipeline:
 
     # Canonical step ordering and user-facing metadata.
     STEPS = PIPELINE_STEPS
+    _inference_tool: Optional[str] = None
 
     def _set_result(self, key: str, value: Any) -> None:
         """Set a result key (new canonical names only)."""
@@ -50,7 +53,7 @@ class Pipeline:
         except Exception:
             resolved = candidate
 
-        base_candidates: List[tuple[str, Optional[Path]]] = [
+        base_candidates: list[tuple[str, Optional[Path]]] = [
             ("output", getattr(self.config, "output_dir", None)),
             ("final", getattr(self, "final_output_dir", None)),
         ]
@@ -78,8 +81,8 @@ class Pipeline:
     ) -> Optional[Path]:
         """Resolve stored or fallback paths to an existing Path if possible."""
 
-        candidates: List[Path] = []
-        seen: Set[Path] = set()
+        candidates: list[Path] = []
+        seen: set[Path] = set()
 
         def add_candidate(candidate: Union[str, Path]) -> None:
             path_candidate = Path(candidate)
@@ -150,7 +153,10 @@ class Pipeline:
 
     def _ensure_reference_mmi(self) -> Path:
         """Ensure minimap2 reference index (.mmi) exists and return its path."""
-        reference = Path(self.config.reference)
+        reference = self.config.reference
+        if reference is None:
+            raise PipelineError("Reference genome is required")
+        reference = Path(reference)
 
         def _canonical_mmi_path(ref: Path) -> Path:
             """Return the canonical minimap2 index path produced by `minimap2 -d` conventions."""
@@ -213,7 +219,7 @@ class Pipeline:
 
     def _create_combined_fasta(self, output_file: Path) -> None:
         """Combine all FASTA outputs into a single file."""
-        fasta_files = []
+        fasta_files: list[Path] = []
 
         # Collect all FASTA files
         patterns = [
@@ -427,12 +433,40 @@ class Pipeline:
         # Keep checkpoint in final directory for persistence across runs
         self.state_file = self.final_output_dir / f"{config.prefix}.checkpoint"
         self.state = self._load_state()
-        self._inference_tool: Optional[str] = None
+        self._inference_tool = None
 
     def _compute_config_hash(self) -> str:
-        """Compute hash of current configuration for validation."""
-        config_str = json.dumps(asdict(self.config), sort_keys=True, default=str)
-        return hashlib.sha256(config_str.encode()).hexdigest()[:16]
+        """Compute hash of current configuration for validation.
+
+        Normalizes paths to absolute form and uses 20 characters for reduced collision risk.
+        """
+        config_copy = asdict(self.config)
+
+        def normalize_value(v: Any) -> Any:
+            """Normalize a single value, resolving Path objects to absolute paths."""
+            if isinstance(v, Path):
+                try:
+                    return str(v.resolve())
+                except (OSError, ValueError):
+                    return str(v)
+            if isinstance(v, str) and v and (v.startswith("/") or v.startswith(".")):
+                try:
+                    return str(Path(v).resolve())
+                except (OSError, ValueError):
+                    return v
+            return v
+
+        def normalize_dict(d: Any) -> Any:
+            """Recursively normalize dict values."""
+            if isinstance(d, dict):
+                return {k: normalize_dict(v) for k, v in d.items()}
+            if isinstance(d, list):
+                return [normalize_dict(i) for i in d]
+            return normalize_value(d)
+
+        normalized = normalize_dict(config_copy)
+        config_str = json.dumps(normalized, sort_keys=True, default=str)
+        return hashlib.sha256(config_str.encode()).hexdigest()[:20]
 
     def _load_state(self) -> PipelineState:
         """Load pipeline state from checkpoint with validation."""
@@ -501,8 +535,14 @@ class Pipeline:
 
                 return state
 
-            except Exception as e:
-                self.logger.error(f"Could not load checkpoint: {e}")
+            except json.JSONDecodeError as e:
+                self.logger.error(f"Checkpoint file corrupted (invalid JSON): {e}")
+                self.logger.info("Starting with fresh state")
+            except (KeyError, TypeError, ValueError) as e:
+                self.logger.error(f"Checkpoint file has incompatible format: {e}")
+                self.logger.info("Starting with fresh state")
+            except OSError as e:
+                self.logger.error(f"Could not read checkpoint file: {e}")
                 self.logger.info("Starting with fresh state")
 
         return self._create_fresh_state()
@@ -565,9 +605,13 @@ class Pipeline:
 
     def _finalize_outputs(self) -> None:
         """Finalize outputs: only checkpoint and temp cleanup; packaging handled by ecc_packager."""
-        # Copy log files if they exist
-        for log_file in self.temp_dir.glob("*.log"):
-            shutil.copy2(log_file, self.final_output_dir / log_file.name)
+        # Copy log files to logs/ subdirectory if they exist
+        log_files = list(self.temp_dir.glob("*.log"))
+        if log_files:
+            logs_dir = self.final_output_dir / "logs"
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            for log_file in log_files:
+                shutil.copy2(log_file, logs_dir / log_file.name)
 
         # Clean up checkpoint/config artifacts unless keep_tmp is set
         if not self.config.keep_tmp:
@@ -609,6 +653,12 @@ class Pipeline:
         click.echo("CircleSeeker Pipeline Steps:")
         click.echo("=" * 70)
 
+        step_groups = {
+            1: "CtcReads-Caller",
+            11: "SplitReads-Caller",
+            14: "Integration",
+        }
+
         name_width = max(
             (len((s.display_name or s.name)) for s in self.STEPS),
             default=0,
@@ -617,6 +667,9 @@ class Pipeline:
         idx_width = len(str(len(self.STEPS)))
 
         for i, step in enumerate(self.STEPS, 1):
+            group = step_groups.get(i)
+            if group:
+                click.echo(f"{group}:")
             step_label = step.display_name or step.name
             if step.name in self.state.completed_steps:
                 status = "✓"
@@ -702,7 +755,7 @@ class Pipeline:
 
     def run(
         self, start_from: Optional[int] = None, stop_at: Optional[int] = None, force: bool = False
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run the pipeline with automatic cleanup and temp directory management."""
         if force:
             self.state = self._create_fresh_state()
@@ -804,7 +857,7 @@ class Pipeline:
             self.logger.info(f"Unexpected failure. Temporary files retained in: {self.temp_dir}")
             raise PipelineError(f"Unexpected pipeline failure: {e}") from e
 
-    def _execute_step(self, step: PipelineStep) -> Optional[List[str]]:
+    def _execute_step(self, step: PipelineStep) -> Optional[list[str]]:
         """Execute a pipeline step and return output files."""
         method_name = f"_step_{step.name}"
         if hasattr(self, method_name):
@@ -905,7 +958,16 @@ class Pipeline:
         ecc_inference(self)
 
     def _step_cyrcular_calling(self) -> None:
-        """Backward compatibility alias for legacy step name."""
+        """DEPRECATED: Backward compatibility alias for legacy step name.
+
+        This method will be removed in v0.12.0. The step has been renamed to
+        'ecc_inference' to reflect support for multiple inference engines
+        (Cresil preferred, Cyrcular as fallback).
+
+        If you have code or checkpoints referencing 'cyrcular_calling', they
+        will continue to work until v0.12.0, but you should update to use
+        'ecc_inference' instead.
+        """
         self.logger.debug("Legacy step alias invoked: cyrcular_calling -> ecc_inference")
         self._step_ecc_inference()
 

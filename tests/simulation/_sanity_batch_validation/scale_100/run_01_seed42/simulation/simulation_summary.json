@@ -1,0 +1,55 @@
+{
+  "config": {
+    "num_chromosomes": 5,
+    "chr_length": 1000000,
+    "num_uecc": 70,
+    "num_mecc": 15,
+    "num_cecc": 15,
+    "uecc_length_range": [
+      200,
+      5000
+    ],
+    "mecc_unit_range": [
+      100,
+      500
+    ],
+    "mecc_copy_range": [
+      2.0,
+      10.0
+    ],
+    "mecc_repeat_mutation_rate": 0.005,
+    "cecc_segments_range": [
+      2,
+      4
+    ],
+    "cecc_segment_length_range": [
+      100,
+      1000
+    ],
+    "cecc_inter_chr_ratio": 0.3,
+    "error_rate": 0.001,
+    "seed": 42,
+    "output_dir": "tests/simulation/_sanity_batch_validation/scale_100/run_01_seed42/simulation",
+    "auto_scale_genome": true,
+    "target_repeat_coverage": 0.015,
+    "max_repeat_coverage": 0.3
+  },
+  "statistics": {
+    "total_records": 100,
+    "by_type": {
+      "Uecc": 70,
+      "Mecc": 15,
+      "Cecc": 15
+    },
+    "total_bases": 211041,
+    "avg_length": 2110.41
+  },
+  "files": {
+    "reference": "reference.fa",
+    "reads": "simulated_reads.fa",
+    "ground_truth": "ground_truth.csv",
+    "ground_truth_uecc": "ground_truth_uecc.csv",
+    "ground_truth_mecc": "ground_truth_mecc.csv",
+    "ground_truth_cecc": "ground_truth_cecc.csv"
+  }
+}

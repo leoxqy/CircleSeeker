@@ -122,12 +122,10 @@ class TandemToRingAdapter(CLIModuleAdapter):
             )
 
             # Run module
-            df_result = module.run()
+            _, df_classification = module.process()
 
             # Create result
-            result = ModuleResult(
-                success=True if df_result is not None else False, module_name=self.name
-            )
+            result = ModuleResult(success=True, module_name=self.name)
 
             # Add output files
             output_file = Path(kwargs.get("output_file", "tandem_to_ring.csv"))
@@ -139,10 +137,10 @@ class TandemToRingAdapter(CLIModuleAdapter):
                 result.add_output("fasta", circular_fasta)
 
             # Add metrics
-            if df_result is not None:
-                result.add_metric("total_reads", len(df_result))
-                if "readClass" in df_result.columns:
-                    class_counts = df_result["readClass"].value_counts().to_dict()
+            if not df_classification.empty:
+                result.add_metric("total_reads", len(df_classification))
+                if "readClass" in df_classification.columns:
+                    class_counts = df_classification["readClass"].value_counts().to_dict()
                     result.add_metric("class_distribution", class_counts)
 
             return result
@@ -169,17 +167,19 @@ class UMClassifyAdapter(CLIModuleAdapter):
 
             # Read alignment results
             alignment_file = Path(kwargs["alignment_file"])
-            df = classifier.read_alignment_results(alignment_file)
 
             # Classify
-            uecc_df, mecc_df, unclassified_df = classifier.classify(df)
+            uecc_df, mecc_df, unclassified_df = classifier.run(alignment_file)
 
             # Save outputs
-            output_prefix = kwargs.get("output_prefix", "um_classify")
+            output_prefix = Path(kwargs.get("output_prefix", "um_classify"))
+            if output_prefix.suffix:
+                output_prefix = output_prefix.with_suffix("")
+            output_prefix.parent.mkdir(parents=True, exist_ok=True)
 
-            uecc_file = Path(f"{output_prefix}.uecc.csv")
-            mecc_file = Path(f"{output_prefix}.mecc.csv")
-            unclass_file = Path(f"{output_prefix}.unclassified.csv")
+            uecc_file = output_prefix.with_suffix(".uecc.csv")
+            mecc_file = output_prefix.with_suffix(".mecc.csv")
+            unclass_file = output_prefix.with_suffix(".unclassified.csv")
 
             uecc_df.to_csv(uecc_file, index=False)
             mecc_df.to_csv(mecc_file, index=False)
@@ -202,4 +202,3 @@ class UMClassifyAdapter(CLIModuleAdapter):
         except ImportError:
             # Fallback to CLI mode
             return super().execute(**kwargs)
-

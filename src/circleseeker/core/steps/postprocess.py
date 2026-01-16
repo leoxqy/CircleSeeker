@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from circleseeker.core.pipeline_types import ResultKeys
 
+if TYPE_CHECKING:
+    from circleseeker.core.pipeline import Pipeline
 
-def ecc_unify(pipeline) -> None:
+
+def ecc_unify(pipeline: Pipeline) -> None:
     """Step 13: Merge eccDNA tables into unified output."""
     from circleseeker.modules.ecc_unify import merge_eccdna_tables
 
@@ -81,7 +84,7 @@ def ecc_unify(pipeline) -> None:
         pipeline.state.results[ResultKeys.OVERLAP_STATS] = pipeline._serialize_path_for_state(overlap_stats)
 
 
-def ecc_summary(pipeline) -> None:
+def ecc_summary(pipeline: Pipeline) -> None:
     """Step 14: Generate summary report."""
     from circleseeker.modules.ecc_summary import EccSummary
 
@@ -132,7 +135,11 @@ def ecc_summary(pipeline) -> None:
         logger=pipeline.logger.getChild("ecc_summary"),
     )
 
-    summary.process_fasta(pipeline.config.input_file)
+    input_file = pipeline.config.input_file
+    if input_file is None:
+        pipeline.logger.info("No input FASTA configured for summary, skipping")
+        return
+    summary.process_fasta(input_file)
     summary.process_processed_csv(processed_csv)
     summary.process_merged_csv(main_csv)
     if stats_json.exists():
@@ -144,7 +151,7 @@ def ecc_summary(pipeline) -> None:
     pipeline.state.results[ResultKeys.SUMMARY_DIR] = str(output_dir)
 
 
-def ecc_packager(pipeline) -> None:
+def ecc_packager(pipeline: Pipeline) -> None:
     """Step 15: Package output files using ecc_packager module."""
     from circleseeker.modules import ecc_packager as ecc_packager_module
 
@@ -193,10 +200,10 @@ def ecc_packager(pipeline) -> None:
     merged_csv = merged_csv_path if merged_csv_path and merged_csv_path.exists() else None
 
     summary_dir = pipeline.config.output_dir / "summary_output"
-    html_report = summary_dir / f"{pipeline.config.prefix}_report.html"
-    html_report = html_report if html_report.exists() else None
-    text_summary = summary_dir / f"{pipeline.config.prefix}_summary.txt"
-    text_summary = text_summary if text_summary.exists() else None
+    html_report_path = summary_dir / f"{pipeline.config.prefix}_report.html"
+    html_report: Optional[Path] = html_report_path if html_report_path.exists() else None
+    text_summary_path = summary_dir / f"{pipeline.config.prefix}_summary.txt"
+    text_summary: Optional[Path] = text_summary_path if text_summary_path.exists() else None
 
     packager_inputs_available = any(
         candidate is not None
@@ -291,23 +298,13 @@ def ecc_packager(pipeline) -> None:
 
     pipeline.state.results[ResultKeys.FINAL_RESULTS] = str(final_output_root)
 
-    xecc_patterns = [f"{pipeline.config.prefix}_XeccDNA*", f"{pipeline.config.prefix}_Xecc*"]
-    copied_xecc: set[Path] = set()
-    for pattern in xecc_patterns:
-        for xecc_file in pipeline.config.output_dir.glob(pattern):
-            if xecc_file in copied_xecc:
-                continue
-            try:
-                destination = final_output_root / xecc_file.name
-                if xecc_file.is_file():
-                    shutil.copy2(xecc_file, destination)
-                    copied_xecc.add(xecc_file)
-                    pipeline.logger.info(f"Copied Xecc artifact to final output: {destination}")
-            except Exception as exc:
-                pipeline.logger.warning(f"Failed to copy Xecc artifact {xecc_file}: {exc}")
+    # NOTE: XeccDNA files are no longer copied to final output.
+    # XeccDNA source reads are now included in the inference input (minimap2 step),
+    # so they will be detected as Inferred eccDNA if valid. The XeccDNA.fasta
+    # intermediate file is retained in temp directory for debugging purposes only.
 
 
-def merge_eccdna_deprecated(pipeline) -> list[str] | None:
+def merge_eccdna_deprecated(pipeline: Pipeline) -> list[str] | None:
     """Deprecated merge step retained for backwards compatibility."""
     pipeline.logger.info("Merge eccDNA step skipped - replaced by ecc_unify")
 
@@ -331,4 +328,3 @@ def merge_eccdna_deprecated(pipeline) -> list[str] | None:
         return available_cores
 
     return None
-

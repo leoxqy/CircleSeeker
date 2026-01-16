@@ -1,6 +1,6 @@
-# CircleSeeker CLI 使用手册（v0.9.15）
+# CircleSeeker CLI 使用手册（v0.10.3）
 
-本手册针对 CircleSeeker 0.9.15 的命令行界面，涵盖常用参数、调试选项、运行时行为与输出结构。默认安装后可通过 `circleseeker` 或 `CircleSeeker` 两个入口调用。
+本手册针对 CircleSeeker 0.10.3 的命令行界面，涵盖常用参数、调试选项、运行时行为与输出结构。默认安装后可通过 `circleseeker` 或 `CircleSeeker` 两个入口调用。
 
 ---
 
@@ -43,7 +43,7 @@ circleseeker -i reads.fasta -r reference.fa -o results/
 - `--resume` 从上次检查点恢复
 - `--force` 忽略检查点，重新执行所有步骤
 - `--generate-config` 输出默认配置 YAML 并退出
-- `--show-steps` 查看 16 个步骤及状态
+- `--show-steps` 查看 16 个步骤（按 CtcReads-Caller / SplitReads-Caller / Integration 归类）及状态
 - `--dry-run` 仅展示计划执行的操作，不实际运行
 - `--log-output PATH` 额外写入日志文件
 
@@ -79,7 +79,18 @@ circleseeker --debug show-checkpoint -o results/ -p sample
 
 ---
 
-## 6. 16 个步骤一览
+## 6. 两条 Caller（证据来源视角）
+
+为便于理解与展示，本项目将 eccDNA 的分析拆分为两条证据链路：
+
+- **CtcReads**：含 **Ctc**（**C**oncatemeric **t**andem **c**opies）信号的 reads（在 `tandem_to_ring.csv` 中以 CtcR-* 分类体现）。
+- **CtcReads-Caller**（步骤 1-10）：基于 CtcReads 证据产出 **Confirmed** U/M/C eccDNA。
+- **SplitReads-Caller**（步骤 11-13）：基于 split-reads/junction 证据推断 eccDNA（Cresil 优先，Cyrcular 备用），产出 **Inferred** eccDNA。
+- **Integration**（步骤 14-16）：对 Confirmed/Inferred 做去冗余合并、统计与打包交付。
+
+## 7. 16 个步骤一览
+
+> 快速定位：步骤 1-10 属于 **CtcReads-Caller**；步骤 11-13 属于 **SplitReads-Caller**；步骤 14-16 属于 **Integration**。
 
 | 序号 | 名称 | 作用 |
 |-----|------|------|
@@ -104,7 +115,7 @@ circleseeker --debug show-checkpoint -o results/ -p sample
 
 ---
 
-## 7. 输出结构概览
+## 8. 输出结构概览
 
 完成后 `<output>/` 目录中典型内容如下：
 
@@ -124,7 +135,7 @@ circleseeker --debug show-checkpoint -o results/ -p sample
 
 ---
 
-## 8. 使用示例
+## 9. 使用示例
 
 ```bash
 # 默认运行
@@ -143,7 +154,7 @@ circleseeker --debug --generate-config > default_config.yaml
 
 ---
 
-## 9. 常见问题
+## 10. 常见问题
 
 - **命令报错 "需要 --debug 才能使用某选项"**：请加上 `--debug` 再运行。
 - **依赖检查失败**：程序会提示缺少哪些工具。请通过 conda 安装缺失的依赖：`conda install -c bioconda -c conda-forge <tool_name>`。

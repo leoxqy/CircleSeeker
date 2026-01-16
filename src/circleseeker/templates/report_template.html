@@ -22,8 +22,9 @@
             <div class="summary-box important">
                 <p>This report presents a comprehensive analysis of extrachromosomal circular DNA (eccDNA)
                 identified in sample <strong>{sample_name}</strong>. The analysis processed <strong>{total_reads:,}</strong> total reads,
-                identifying <strong>{total_ctcr:,}</strong> circular-template-containing reads (CtcR) representing
+                identifying <strong>{total_ctcr:,}</strong> CtcReads representing
                 <strong>{ctcr_percentage:.2f}%</strong> of all sequenced reads.</p>
+                <p style="margin-top: 8px; font-size: 12px; color: #6c757d;">Ctc = Concatemeric tandem copies.</p>
             </div>
         </section>
 
@@ -37,7 +38,7 @@
                     <div class="value number">{total_reads:,}</div>
                 </div>
                 <div class="stat-item">
-                    <div class="label">CtcR Reads</div>
+                    <div class="label">CtcReads</div>
                     <div class="value number">{total_ctcr:,}</div>
                     <div class="percentage">({ctcr_percentage:.2f}% of total)</div>
                 </div>
@@ -49,17 +50,17 @@
             </div>
         </section>
 
-        <!-- CtcR Subtype Distribution -->
+        <!-- CtcReads Subtype Distribution -->
         <section class="analysis-section">
-            <h2>2. CtcR Subtype Distribution</h2>
+            <h2>2. CtcReads Subtype Distribution</h2>
 
             <table>
-                <caption>Table 1: Distribution of circular-template-containing read subtypes</caption>
+                <caption>Table 1: Distribution of CtcReads subtypes</caption>
                 <thead>
                     <tr>
-                        <th>CtcR Subtype</th>
+                        <th>CtcReads Subtype</th>
                         <th>Count</th>
-                        <th>Percentage of CtcR</th>
+                        <th>Percentage of CtcReads</th>
                         <th>Percentage of Total Reads</th>
                         <th>Description</th>
                     </tr>

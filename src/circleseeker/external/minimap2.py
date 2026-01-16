@@ -12,15 +12,16 @@ Fixed version: avoids pipe data loss by using temporary files
 
 from __future__ import annotations
 
-import subprocess
+import shlex
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 import logging
 
 from circleseeker.external.base import ExternalTool
-from circleseeker.exceptions import PipelineError
+from circleseeker.exceptions import ExternalToolError, PipelineError
 
 
 @dataclass
@@ -134,7 +135,12 @@ class Minimap2(ExternalTool):
         except subprocess.CalledProcessError as e:
             self.logger.error(f"minimap2 index building failed with exit code {e.returncode}")
             self.logger.error(f"Error message: {e.stderr}")
-            raise PipelineError(f"Failed to build index: {e}")
+            raise ExternalToolError(
+                "Failed to build minimap2 index",
+                command=e.cmd,
+                returncode=e.returncode,
+                stderr=e.stderr,
+            )
 
     def align(
         self,
@@ -253,9 +259,9 @@ class Minimap2(ExternalTool):
         else:
             minimap2_cmd.extend(["--secondary", "no"])
 
-        # Add additional arguments if provided
+        # Add additional arguments if provided (use shlex for proper handling of quoted args)
         if self.config.additional_args:
-            minimap2_cmd.extend(self.config.additional_args.split())
+            minimap2_cmd.extend(shlex.split(self.config.additional_args))
 
         minimap2_cmd.extend([str(reference), str(reads), "-o", str(temp_sam)])
 
@@ -286,7 +292,12 @@ class Minimap2(ExternalTool):
         except subprocess.CalledProcessError as e:
             self.logger.error(f"minimap2 failed with exit code {e.returncode}")
             self.logger.error(f"Error: {e.stderr}")
-            raise PipelineError(f"minimap2 alignment failed: {e}")
+            raise ExternalToolError(
+                "minimap2 alignment failed",
+                command=e.cmd,
+                returncode=e.returncode,
+                stderr=e.stderr,
+            )
 
         # Step 2: Sort SAM to BAM
         sort_threads = max(1, self.config.threads // 2)
@@ -326,7 +337,12 @@ class Minimap2(ExternalTool):
         except subprocess.CalledProcessError as e:
             self.logger.error(f"samtools sort failed with exit code {e.returncode}")
             self.logger.error(f"Error: {e.stderr}")
-            raise PipelineError(f"BAM sorting failed: {e}")
+            raise ExternalToolError(
+                "BAM sorting failed",
+                command=e.cmd,
+                returncode=e.returncode,
+                stderr=e.stderr,
+            )
 
         finally:
             # Clean up temporary SAM file

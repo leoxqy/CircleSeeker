@@ -5,7 +5,79 @@ All notable changes to CircleSeeker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.15] - Unreleased
+## [0.10.3] - 2026-01-16
+
+### Added
+- **XeccDNA source reads inclusion**: XeccDNA source reads are now included in inference input
+  - Extracts original read names from XeccDNA FASTA (ring ID format: `{readName}|{repN}|{consLen}|{copyNum}|circular`)
+  - Appends corresponding source reads to filtered FASTA before inference
+  - Gives XeccDNA reads another chance to be detected as Inferred eccDNA
+- **ResultKeys constant**: Added `XECC_SOURCE_READS_ADDED` to track XeccDNA reads appended to inference input
+
+### Fixed
+- **iecc_curator column names**: Fixed column name inconsistency
+  - `eccdna_type` → `eccDNA_type` (matches downstream ecc_unify expectations)
+  - `state` → `State` (matches confirmed eccDNA column naming)
+- **Assert to explicit exception**: Replaced `assert reference_mmi is not None` with proper `PipelineError` raise
+- **keep_tmp CLI parameter**: Fixed type annotation (`Optional[bool]` → `bool`) and config priority handling
+- **Unused type imports**: Cleaned up unused `Dict`, `List`, `Set`, `Tuple` imports across all modules
+- **check_docs_sync.py**: Removed references to deleted documentation files (Simulation_Validation)
+
+### Changed
+- **XeccDNA output handling**: XeccDNA.fasta is no longer copied to final output
+  - Source reads are now in inference pipeline, detected as Inferred eccDNA if valid
+  - XeccDNA.fasta retained in temp directory for debugging only
+- **Log files location**: External tool logs now saved to `logs/` subdirectory
+  - Previously logs like `minimap2_index.log` were saved to output root
+  - Now organized under `{output}/logs/` for cleaner output structure
+
+### Removed
+- **Inference fallback to original input**: Removed incorrect fallback logic in minimap2 and Cresil steps
+  - Inference now correctly requires filtered reads from earlier pipeline steps
+  - Skips inference if filtered FASTA is missing (instead of using unfiltered input)
+- **External tool timeout**: Removed default timeout for external bioinformatics tools
+  - Cresil, Varlociraptor, and other tools now run without timeout limits
+  - Large datasets may require extended runtime; timeouts caused premature termination
+
+## [0.10.2] - 2026-01-15
+
+### Added
+- **CI coverage reporting**: Added pytest-cov with 80% threshold and Codecov integration
+- **Type checking in CI**: Added mypy typecheck job for Python 3.12
+
+### Fixed
+- **Type annotations**: Unified type annotations across 64 Python files
+  - Replaced `List[T]` with `list[T]`, `Dict[K,V]` with `dict[K,V]`, etc.
+  - Consistent with Python 3.9+ and PEP 585
+- **Documentation version numbers**: Updated version references from 0.10.0 to 0.10.2
+- **README broken links**: Fixed Simulation_Validation → Validation_Methodology link
+- **pyproject.toml license format**: Fixed deprecated license string to `{ text = "GPL-3.0-only" }`
+
+### Changed
+- **GitHub repository links**: Updated all links to new owner `leoxqy/CircleSeeker`
+
+## [0.10.1] - 2026-01-14
+
+### Added
+- **Adaptive secondary mapping thresholds**: Improved Uecc classification with three-layer adaptive logic
+  - Relative threshold (`u_secondary_max_ratio`): Allow small secondary mappings relative to primary coverage
+  - High coverage tolerance (`u_high_coverage_threshold`): Relax thresholds when primary coverage ≥ 98%
+  - MAPQ weighting (`u_high_mapq_threshold`): Increase tolerance when MAPQ ≥ 50 indicates unique mapping
+- **Simulation auto-scaling**: Automatically scale genome size to maintain consistent repeat density
+  - `auto_scale_genome`: Enable/disable automatic genome scaling (default: True)
+  - `target_repeat_coverage`: Target repeat coverage ratio (default: 1.5%)
+  - `max_repeat_coverage`: Maximum repeat coverage when auto-scaling disabled (default: 30%)
+
+### Fixed
+- **Large-scale recall regression**: Significantly improved recall on 10,000+ scale datasets
+  - Same conditions (5 Mb genome, ~100% repeat coverage): 87.46% → 91.96% (+4.5%)
+  - With auto-scaling (1.5% repeat coverage): Achieves 100% recall
+- **False negative reduction**: Reduced FN count by 36% in extreme repeat density scenarios
+
+### Changed
+- **Secondary mapping veto logic**: `_u_has_significant_secondary_mapping` now considers primary coverage strength and MAPQ when evaluating secondary evidence
+
+## [0.10.0] - 2026-01-13
 
 ### Added
 - **MAPQ-aware Uecc gating**: Preserve minimap2 PAF `mapq` into alignment TSV and optionally veto Uecc calls below `tools.um_classify.mapq_u_min` (default 0 disables)
@@ -38,10 +110,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed `--aligner` and `--blast-word-mode` CLI options
   - Removed `makeblastdb` pipeline step
 - **Pipeline step renaming**: `run_blast` → `run_alignment` for clarity
-- **Step numbering**: Pipeline now starts from Step 0 (check_dependencies)
-  - Step 0: check_dependencies (new)
-  - Step 1: tidehunter
-  - Step 2-15: remaining steps
+- **Step numbering**: Pipeline now has 16 steps (1-16)
+  - Step 1: check_dependencies (new)
+  - Step 2: tidehunter
+  - Step 3-16: remaining steps
 - **Output filenames**: `*_blast_results.tsv` → `*_alignment_results.tsv`
 - **Generic naming**: Renamed BLAST-specific identifiers to generic alignment names
   - `BLAST_COLUMNS` → `ALIGNMENT_COLUMNS`
@@ -49,8 +121,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `classify_blast_results()` → `classify_alignment_results()`
 
 ### Added
-- **Step 0: check_dependencies**: Dependency checking is now a formal pipeline step
-  - Runs before tidehunter as the first step
+- **Step 1: check_dependencies**: Dependency checking is now a formal pipeline step
+  - Runs as the first step before tidehunter
   - Validates all required tools before pipeline execution
 
 ### Fixed

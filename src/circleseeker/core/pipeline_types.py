@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 
 class ResultKeys:
@@ -81,17 +81,29 @@ class ResultKeys:
     ALL_FILTERED_FASTA = "all_filtered_fasta"
     # Inferred eccDNA directory
     INFERRED_DIR = "inferred_dir"
+    # XeccDNA source reads tracking
+    XECC_SOURCE_READS_ADDED = "xecc_source_reads_added"
 
 
 @dataclass
 class PipelineStep:
-    """Represents a pipeline step."""
+    """Represents a pipeline step.
+
+    Attributes:
+        name: Unique identifier for this step
+        description: Human-readable description of what this step does
+        display_name: Optional display name for UI purposes
+        required: Whether this step must complete successfully
+        skip_condition: Optional condition string for skipping this step
+        depends_on: List of step names that must complete before this step
+    """
 
     name: str
     description: str
     display_name: Optional[str] = None
     required: bool = True
     skip_condition: Optional[str] = None
+    depends_on: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -104,47 +116,92 @@ class StepMetadata:
     duration: Optional[float] = None
     status: str = "running"  # running, completed, failed
     error_message: Optional[str] = None
-    input_files: List[str] = field(default_factory=list)
-    output_files: List[str] = field(default_factory=list)
-    file_checksums: Dict[str, str] = field(default_factory=dict)
+    input_files: list[str] = field(default_factory=list)
+    output_files: list[str] = field(default_factory=list)
+    file_checksums: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
 class PipelineState:
     """Enhanced pipeline execution state with recovery support."""
 
-    completed_steps: List[str]
+    completed_steps: list[str]
     current_step: Optional[str] = None
     failed_step: Optional[str] = None
-    results: Dict[str, Any] = field(default_factory=dict)
-    step_metadata: Dict[str, StepMetadata] = field(default_factory=dict)
+    results: dict[str, Any] = field(default_factory=dict)
+    step_metadata: dict[str, StepMetadata] = field(default_factory=dict)
     pipeline_start_time: Optional[float] = None
     last_checkpoint_time: Optional[float] = None
     config_hash: Optional[str] = None
     version: str = "2.0"
 
-    def add_step_metadata(self, step_name: str, **kwargs) -> None:
-        """Add or update step metadata."""
+    def add_step_metadata(
+        self,
+        step_name: str,
+        input_files: list[str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Add or update step metadata.
+
+        Args:
+            step_name: Name of the pipeline step
+            input_files: List of input file paths for this step
+            **kwargs: Additional metadata fields to set
+        """
         if step_name not in self.step_metadata:
             self.step_metadata[step_name] = StepMetadata(
                 step_name=step_name, start_time=time.time()
             )
 
-        # Update metadata
         metadata = self.step_metadata[step_name]
+
+        # Set input files if provided
+        if input_files:
+            metadata.input_files = input_files
+
+        # Update other metadata
         for key, value in kwargs.items():
             if hasattr(metadata, key):
                 setattr(metadata, key, value)
 
-    def complete_step(self, step_name: str, output_files: List[str] | None = None) -> None:
-        """Mark step as completed and calculate duration."""
+    def complete_step(
+        self,
+        step_name: str,
+        output_files: list[str] | None = None,
+        compute_checksums: bool = False,
+    ) -> None:
+        """Mark step as completed and calculate duration.
+
+        Args:
+            step_name: Name of the completed step
+            output_files: List of output file paths produced by this step
+            compute_checksums: Whether to compute MD5 checksums for output files
+        """
         if step_name in self.step_metadata:
             metadata = self.step_metadata[step_name]
             metadata.end_time = time.time()
             metadata.duration = metadata.end_time - metadata.start_time
             metadata.status = "completed"
+
             if output_files:
                 metadata.output_files = output_files
+
+                # Optionally compute checksums for traceability
+                if compute_checksums:
+                    import hashlib
+                    from pathlib import Path
+
+                    for file_path in output_files:
+                        try:
+                            path = Path(file_path)
+                            if path.exists() and path.is_file():
+                                md5 = hashlib.md5()
+                                with open(path, "rb") as f:
+                                    for chunk in iter(lambda: f.read(8192), b""):
+                                        md5.update(chunk)
+                                metadata.file_checksums[str(path)] = md5.hexdigest()
+                        except (OSError, IOError):
+                            pass
 
         if step_name not in self.completed_steps:
             self.completed_steps.append(step_name)
@@ -166,9 +223,9 @@ class PipelineState:
             return None
         return time.time() - self.pipeline_start_time
 
-    def get_step_summary(self) -> Dict[str, Any]:
+    def get_step_summary(self) -> dict[str, Any]:
         """Get summary of step execution times and status."""
-        summary: Dict[str, Any] = {}
+        summary: dict[str, Any] = {}
         for step_name, metadata in self.step_metadata.items():
             summary[step_name] = {
                 "status": metadata.status,
@@ -181,4 +238,3 @@ class PipelineState:
                 "error": metadata.error_message,
             }
         return summary
-

@@ -1,4 +1,4 @@
-# CircleSeeker Pipeline Modules (v0.9.15)
+# CircleSeeker Pipeline Modules (v0.10.3)
 
 This document summarizes the 16-step CircleSeeker pipeline for English-speaking users.
 
@@ -14,6 +14,13 @@ CircleSeeker organizes the workflow into four stages:
 | **Processing** | 7-10 | Consolidate, de-duplicate, and filter U/M/C outputs |
 | **Inference** | 11-13 | Run Cresil (or Cyrcular) and curate inferred eccDNA |
 | **Integration** | 14-16 | Merge results, generate reports, and package deliverables |
+
+From an evidence perspective, the same 16 steps can be understood as two callers plus a shared integration stage:
+
+- **CtcReads**: reads carrying **Ctc** (**C**oncatemeric **t**andem **c**opies) signals (tracked as CtcR-* classes in `tandem_to_ring.csv`).
+- **CtcReads-Caller** (Steps 1–10): produces **Confirmed** U/M/C eccDNA from CtcReads evidence.
+- **SplitReads-Caller** (Steps 11–13): infers eccDNA from split-read/junction evidence (Cresil preferred, Cyrcular fallback) and produces **Inferred** eccDNA.
+- **Integration** (Steps 14–16): de-redundancy, merging, reporting, and packaging for delivery.
 
 Intermediates reside in `<output>/.tmp_work/`, and the final artifacts are copied into the packaged directory layout.
 
@@ -44,7 +51,7 @@ Intermediates reside in `<output>/.tmp_work/`, and the final artifacts are copie
 
 ## 3. Stage Details
 
-### 3.1 Detection (Steps 1-6)
+### 3.1 Detection (CtcReads-Caller, Steps 1-6)
 
 1. **check_dependencies** - Validate required external tools and at least one inference engine (Cresil or Cyrcular).
 2. **tidehunter** - Identify tandem repeats characteristic of rolling-circle amplification.
@@ -53,20 +60,20 @@ Intermediates reside in `<output>/.tmp_work/`, and the final artifacts are copie
 5. **um_classify** - Categorize alignments into UeccDNA or MeccDNA using a parameterized ring-coverage + locus-clustering model; optionally gate Uecc calls by `tools.um_classify.mapq_u_min`; emits a standardized `um_classify.all.csv` for downstream Cecc/ambiguity analysis (see `docs/UMC_Classification_Model.md`).
 6. **cecc_build** - Build multi-segment chains from `um_classify.all.csv` (or fall back to `um_classify.unclassified.csv`) and emit `cecc_build.csv`; ambiguous cases are intercepted into `ambiguous_uc.csv` / `ambiguous_mc.csv` and do not flow into downstream steps.
 
-### 3.2 Processing (Steps 7-10)
+### 3.2 Processing (CtcReads-Caller, Steps 7-10)
 
 7. **umc_process** - Normalize U/M/C results, produce FASTA/CSV inventories.
 8. **cd_hit** - Remove redundant sequences at 99% identity.
 9. **ecc_dedup** - Harmonize coordinates and collapse duplicates.
 10. **read_filter** - Filter confirmed eccDNA reads into an exportable FASTA.
 
-### 3.3 Inference (Steps 11-13)
+### 3.3 Inference (SplitReads-Caller, Steps 11-13)
 
 11. **minimap2** - Ensure the reference `.mmi` index exists (create it if needed).
 12. **ecc_inference** - Prefer Cresil; fall back to Cyrcular. Missing `.fai` triggers a `samtools faidx` attempt.
 13. **curate_inferred_ecc** - Clean and standardize inferred outputs (`iecc_curator`).
 
-### 3.4 Integration (Steps 14-16)
+### 3.4 Integration (Integration, Steps 14-16)
 
 14. **ecc_unify** - Merge confirmed and inferred results, detecting redundant chimeric eccDNA. v0.9.4 introduces segment-wise overlap detection:
     - Uses 99% reciprocal overlap threshold with +/-10bp coordinate tolerance

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "circleseeker"
-version = "0.9.15"
+version = "0.10.6"
 description = "Comprehensive eccDNA detection from PacBio HiFi sequencing data"
 readme = "README.md"
 authors = [
@@ -14,7 +14,7 @@ authors = [
 maintainers = [
     {name = "Yaoxin Zhang", email = "yxzhang@ncgr.ac.cn"}
 ]
-license = { file = "LICENSE" }
+license = { text = "GPL-3.0-only" }
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -47,12 +47,15 @@ dev = [
     "black>=22.0.0",
     "flake8>=5.0.0",
     "mypy>=0.990",
+    "types-PyYAML",
     "pre-commit>=3.0.0",
+    "tomli; python_version < '3.11'",
 ]
 docs = [
     "sphinx>=5.0.0",
     "sphinx-rtd-theme>=1.0.0",
     "sphinx-click>=4.0.0",
+    "myst-parser>=0.18.0",
 ]
 
 [project.scripts]
@@ -108,8 +111,25 @@ line_length = 100
 python_version = "3.9"
 warn_return_any = true
 warn_unused_configs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_unreachable = true
+warn_unused_ignores = true
+warn_redundant_casts = true
 disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+disallow_any_generics = false
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+  "circleseeker.cli.*",
+  "circleseeker.config",
+  "circleseeker.core.*",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
 
 [tool.coverage.run]
 source = ["src/circleseeker"]

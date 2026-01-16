@@ -7,7 +7,7 @@ import logging
 import shutil
 import re
 from pathlib import Path
-from typing import Sequence, Optional, Tuple, Dict, Any
+from typing import Sequence, Optional, Any
 from packaging import version
 from circleseeker.exceptions import ExternalToolError
 from circleseeker.utils.logging import get_logger
@@ -20,6 +20,10 @@ class ExternalTool:
     required_version: Optional[str] = None
     version_command: Optional[str] = "--version"
     version_regex: Optional[str] = r"(\d+\.\d+(?:\.\d+)*)"
+
+    # Default timeout for external tool execution (None = no timeout)
+    # Bioinformatics tools can run for hours/days on large datasets
+    DEFAULT_TIMEOUT: Optional[int] = None
 
     def __init__(self, logger: Optional[logging.Logger] = None, threads: int = 1):
         self.threads = threads
@@ -55,7 +59,7 @@ class ExternalTool:
             self.logger.debug(f"{self.tool_name} version: {current_version}")
 
         # Check additional requirements if defined
-        additional_tools = getattr(self, "_get_required_tools", lambda: [])()
+        additional_tools: Sequence[str] = getattr(self, "_get_required_tools", lambda: [])()
         for tool in additional_tools:
             if not self.check_tool_availability(tool):
                 raise ExternalToolError(
@@ -124,7 +128,7 @@ class ExternalTool:
             self.logger.debug(f"Version comparison failed: {e}")
             return True  # Assume OK on error
 
-    def get_tool_info(self) -> Dict[str, Any]:
+    def get_tool_info(self) -> dict[str, Any]:
         """Get comprehensive tool information."""
         return {
             "name": self.tool_name,
@@ -141,14 +145,27 @@ class ExternalTool:
         check: bool = True,
         capture_output: bool = True,
         timeout: Optional[int] = None,
-    ) -> Tuple[str, str]:
-        """Execute command with enhanced error handling."""
+    ) -> tuple[str, str]:
+        """Execute command with enhanced error handling.
+
+        Args:
+            cmd: Command and arguments to execute
+            cwd: Working directory for the command
+            check: Whether to raise on non-zero exit code
+            capture_output: Whether to capture stdout/stderr
+            timeout: Timeout in seconds (defaults to DEFAULT_TIMEOUT if None)
+
+        Returns:
+            Tuple of (stdout, stderr) if capture_output is True, else ("", "")
+        """
+        # Use default timeout if not specified
+        effective_timeout = timeout if timeout is not None else self.DEFAULT_TIMEOUT
         cmd_str = " ".join(str(c) for c in cmd)
         self.logger.info(f"Running: {cmd_str}")
 
         try:
             result = subprocess.run(
-                cmd, cwd=cwd, capture_output=capture_output, text=True, check=check, timeout=timeout
+                cmd, cwd=cwd, capture_output=capture_output, text=True, check=check, timeout=effective_timeout
             )
 
             if result.stderr and not result.returncode:
@@ -159,12 +176,12 @@ class ExternalTool:
             return "", ""
 
         except subprocess.TimeoutExpired:
-            self.logger.error(f"Command timed out after {timeout}s: {cmd_str}")
+            self.logger.error(f"Command timed out after {effective_timeout}s: {cmd_str}")
             raise ExternalToolError(
                 f"{self.tool_name} timed out",
                 command=cmd,
                 returncode=-1,
-                stderr=f"Process timed out after {timeout} seconds",
+                stderr=f"Process timed out after {effective_timeout} seconds",
             )
         except subprocess.CalledProcessError as e:
             self.logger.error(f"Command failed: {cmd_str}")
@@ -179,3 +196,22 @@ class ExternalTool:
             raise ExternalToolError(
                 f"Failed to execute {self.tool_name}", command=cmd, returncode=-1, stderr=str(e)
             )
+
+    def handle_subprocess_error(
+        self, e: subprocess.CalledProcessError, operation: str
+    ) -> None:
+        """Standardized error handling for subprocess failures.
+
+        Args:
+            e: The CalledProcessError exception
+            operation: Description of the operation that failed
+
+        Raises:
+            ExternalToolError: Always raises with standardized format
+        """
+        raise ExternalToolError(
+            f"{self.tool_name} {operation} failed",
+            command=e.cmd,
+            returncode=e.returncode,
+            stderr=e.stderr,
+        )

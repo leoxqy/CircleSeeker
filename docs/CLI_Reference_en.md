@@ -1,6 +1,6 @@
-# CircleSeeker CLI Reference (v0.9.15)
+# CircleSeeker CLI Reference (v0.10.3)
 
-This document describes the CircleSeeker 0.9.15 command-line interface for English-speaking users.
+This document describes the CircleSeeker 0.10.3 command-line interface for English-speaking users.
 
 ---
 
@@ -43,7 +43,7 @@ These flags are available only when `--debug` is present:
 - `--resume` Resume from the last checkpoint
 - `--force` Ignore checkpoints and rerun the full pipeline
 - `--generate-config` Print default configuration YAML and exit
-- `--show-steps` List all 16 steps without executing them
+- `--show-steps` List all 16 steps (grouped by CtcReads-Caller / SplitReads-Caller / Integration) without executing them
 - `--dry-run` Show planned operations without running
 - `--log-output PATH` Write logs to an additional file
 
@@ -77,7 +77,18 @@ circleseeker --debug show-checkpoint -o results/ -p sample
 
 ---
 
-## 6. Step Overview
+## 6. Evidence-Driven Callers
+
+For clarity, CircleSeeker describes the workflow as two evidence-driven callers:
+
+- **CtcReads**: reads carrying **Ctc** (**C**oncatemeric **t**andem **c**opies) signals (tracked as CtcR-* classes in `tandem_to_ring.csv`).
+- **CtcReads-Caller** (Steps 1–10): produces **Confirmed** U/M/C eccDNA from CtcReads evidence.
+- **SplitReads-Caller** (Steps 11–13): infers eccDNA from split-read/junction evidence (Cresil preferred, Cyrcular fallback) and produces **Inferred** eccDNA.
+- **Integration** (Steps 14–16): de-redundancy, merging, reporting, and packaging for delivery.
+
+## 7. Step Overview
+
+> Quick mapping: Steps 1–10 are **CtcReads-Caller**; Steps 11–13 are **SplitReads-Caller**; Steps 14–16 are **Integration**.
 
 | # | Name | Purpose |
 |---|------|---------|
@@ -100,7 +111,7 @@ circleseeker --debug show-checkpoint -o results/ -p sample
 
 ---
 
-## 7. Output Layout
+## 8. Output Layout
 
 ```
 <output>/
@@ -118,7 +129,7 @@ Subdirectories follow the naming described in the README "Output Files" section.
 
 ---
 
-## 8. Example Commands
+## 9. Example Commands
 
 ```bash
 # Basic run
@@ -137,7 +148,7 @@ circleseeker --debug --generate-config > default_config.yaml
 
 ---
 
-## 9. FAQ
+## 10. FAQ
 
 - **"Requires --debug" errors** Add `--debug` to unlock advanced options.
 - **Dependency check fails** The error message indicates which tools are missing. Install via conda: `conda install -c bioconda -c conda-forge <tool_name>`.

@@ -60,6 +60,30 @@ class SimulationConfig:
     # Output directory
     output_dir: str = "simulation_data"
 
+    # Genome scaling parameters (to maintain consistent repeat density)
+    auto_scale_genome: bool = True  # Auto-scale genome size based on eccDNA count
+    target_repeat_coverage: float = 0.015  # Target repeat coverage (1.5%)
+    max_repeat_coverage: float = 0.30  # Max repeat coverage when auto_scale is off (30%)
+
+    def __post_init__(self):
+        """Auto-scale genome size to maintain target repeat density."""
+        if self.auto_scale_genome and self.num_mecc > 0:
+            # Calculate expected repeat bases
+            max_copy = int(self.mecc_copy_range[1])
+            copies_per_family = max(2, max_copy + 2)
+            min_unit, max_unit = self.mecc_unit_range
+            avg_unit = (min_unit + max_unit) / 2
+
+            # Total repeat bases = num_families * copies_per_family * avg_unit_length
+            total_repeat_bp = self.num_mecc * copies_per_family * avg_unit
+
+            # Required genome size = repeat_bp / target_coverage
+            needed_genome_size = total_repeat_bp / self.target_repeat_coverage
+
+            # Calculate chr_length (ensure minimum of 1 Mb)
+            new_chr_length = int(needed_genome_size / self.num_chromosomes)
+            self.chr_length = max(1_000_000, new_chr_length)
+
 
 # =============================================================================
 # Data Classes
@@ -168,6 +192,18 @@ class ReferenceGenomeGenerator:
         max_copy = int(self.config.mecc_copy_range[1])
         # Ensure enough distinct loci per family to support assembling Mecc reads
         copies_per_family = max(2, max_copy + 2)
+
+        # When auto_scale is off, limit families to not exceed max_repeat_coverage
+        if not self.config.auto_scale_genome:
+            total_genome_bp = sum(len(seq_list) for seq_list in genome_lists.values())
+            max_repeat_bp = total_genome_bp * self.config.max_repeat_coverage
+            avg_unit = (min_unit + max_unit) / 2
+            max_allowed_families = int(max_repeat_bp / (copies_per_family * avg_unit))
+            if num_families > max_allowed_families:
+                print(f"  [Warning] Limiting repeat families from {num_families} to "
+                      f"{max_allowed_families} to maintain {self.config.max_repeat_coverage:.0%} "
+                      f"max coverage")
+                num_families = max_allowed_families
 
         occupied: Dict[str, List[Tuple[int, int]]] = {chrom: [] for chrom in genome_lists}
         repeat_families: List[RepeatFamily] = []

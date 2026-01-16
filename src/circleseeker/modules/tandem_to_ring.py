@@ -3,6 +3,11 @@ Tandem-to-Ring - Enhanced Circular DNA Analysis Pipeline (CircleSeeker)
 
 This module processes tandem repeat sequences to identify and classify circular DNA.
 Rewritten to exactly match the original step2_carousel.py algorithm.
+
+Terminology (user-facing):
+- Ctc = Concatemeric tandem copies
+- CtcReads = reads carrying Ctc signals (tracked as CtcR-* classes in `tandem_to_ring.csv`)
+- This module is a core component of the CtcReads-Caller workflow.
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ import pandas as pd
 import numpy as np
 import networkx as nx
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import Optional
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
@@ -103,7 +108,7 @@ class TandemToRing:
 
         return df
 
-    def separate_simple_complex(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    def separate_simple_complex(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Separate reads into simple and complex categories"""
         self.logger.info("Separating simple and complex reads...")
 
@@ -417,7 +422,7 @@ class TandemToRing:
 
         return df_main
 
-    def circularize_sequences(self, df_main: pd.DataFrame) -> List[SeqRecord]:
+    def circularize_sequences(self, df_main: pd.DataFrame) -> list[SeqRecord]:
         """Generate circularized sequences"""
         circular_sequences = []
 
@@ -435,7 +440,7 @@ class TandemToRing:
 
         return circular_sequences
 
-    def write_fasta(self, sequences: List[SeqRecord], output_file: Path) -> None:
+    def write_fasta(self, sequences: list[SeqRecord], output_file: Path) -> None:
         """Write sequences to FASTA file"""
         SeqIO.write(sequences, output_file, "fasta")
 
@@ -469,7 +474,7 @@ class TandemToRing:
 
         return legacy_output
 
-    def process(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    def process(self) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Main processing pipeline"""
         self.logger.info("=" * 60)
         self.logger.info("TandemToRing")

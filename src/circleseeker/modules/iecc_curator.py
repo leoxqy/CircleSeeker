@@ -11,18 +11,19 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
-from typing import Tuple, Optional
+from types import ModuleType
+from typing import Optional
 
 import pandas as pd
 from circleseeker.utils.logging import get_logger
 
+pysam_module: ModuleType | None
 try:
-    import pysam
-
-    PYSAM_AVAILABLE = True
+    import pysam as pysam_module
 except ImportError:
-    PYSAM_AVAILABLE = False
-    pysam = None
+    pysam_module = None
+
+pysam: ModuleType | None = pysam_module
 
 
 def select_best_duplicate(group: pd.DataFrame) -> pd.DataFrame:
@@ -57,7 +58,7 @@ def select_best_duplicate(group: pd.DataFrame) -> pd.DataFrame:
     return group.nlargest(1, "score")
 
 
-def curate_ecc_tables(input_tsv: Path | str) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def curate_ecc_tables(input_tsv: Path | str) -> tuple[pd.DataFrame, pd.DataFrame]:
     df = pd.read_csv(input_tsv, sep="\t")
     df = df[df["circle_length"] >= 100]
 
@@ -101,8 +102,8 @@ def curate_ecc_tables(input_tsv: Path | str) -> Tuple[pd.DataFrame, pd.DataFrame
                     "end0": final_end,
                     "strand": strand,
                     "length": row["circle_length"],
-                    "eccdna_type": "Uecc",
-                    "state": "Inferred",
+                    "eccDNA_type": "UeccDNA",
+                    "State": "Inferred",
                     "num_split_reads": row.get("num_split_reads", 0),
                     "prob_present": row.get("prob_present", row.get("prob_joint_event", 0)),
                     "prob_artifact": row.get("prob_artifact", 0),
@@ -139,8 +140,8 @@ def curate_ecc_tables(input_tsv: Path | str) -> Tuple[pd.DataFrame, pd.DataFrame
                         "end0": final_end,
                         "strand": strand,
                         "length": row["circle_length"],
-                        "eccdna_type": "Cecc",
-                        "state": "Inferred",
+                        "eccDNA_type": "CeccDNA",
+                        "State": "Inferred",
                         "seg_index": seg_idx,
                         "seg_total": total_segments,
                         "junction_role": junction_role,
@@ -163,7 +164,7 @@ def generate_fasta_sequences(
     chimeric_df: pd.DataFrame,
     reference_fasta: Path | str,
     output_prefix: Path | str,
-) -> Tuple[Optional[Path], Optional[Path]]:
+) -> tuple[Optional[Path], Optional[Path]]:
     """
     Generate FASTA files for inferred eccDNA sequences.
 
@@ -178,7 +179,7 @@ def generate_fasta_sequences(
     """
     logger = get_logger(__name__)
 
-    if not PYSAM_AVAILABLE:
+    if pysam is None:
         logger.warning("pysam not available. Skipping FASTA generation.")
         return None, None
 

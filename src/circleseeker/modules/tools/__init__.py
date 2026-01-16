@@ -16,7 +16,6 @@ from circleseeker.modules.iecc_curator import (
 )
 from circleseeker.modules.external_tools import (
     TideHunterModule,
-    BlastModule,
     CDHitModule,
     Minimap2Module,
 )
@@ -37,7 +36,6 @@ __all__ = [
     "process_eccDNA",
     # External tool modules
     "TideHunterModule",
-    "BlastModule",
     "CDHitModule",
     "Minimap2Module",
     # CLI adapters

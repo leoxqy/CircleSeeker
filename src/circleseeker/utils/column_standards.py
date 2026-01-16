@@ -13,7 +13,7 @@ Naming Philosophy:
 
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Optional
 import pandas as pd
 import warnings
 
@@ -42,6 +42,7 @@ class ColumnStandard:
     # === Quantitative Measures ===
     COPY_NUMBER = "copy_number"  # Copy number estimate
     MATCH_DEGREE = "match_degree"  # Match percentage (0-100)
+    GAP_PERCENTAGE = "gap_percentage"  # Gap percentage (0-100), complement of match_degree
     REPEAT_NUMBER = "repeat_number"  # Number of repeats
 
     # === Confidence / Evidence (0-1 unless otherwise noted) ===
@@ -69,6 +70,36 @@ class ColumnStandard:
     MERGED_FROM_IDS = "merged_from_ids"  # IDs that were merged
     HIT_COUNT = "hit_count"  # Number of alignment hits
     HIT_INDEX = "hit_index"  # Hit index for multi-hit entries
+
+
+class OutputColumns:
+    """Column names for user-facing output files (backward compatible format).
+
+    These names are used in merged_output.csv and other user-facing outputs
+    to maintain backward compatibility with existing downstream tools.
+    """
+
+    # Core columns (same as internal)
+    ECCDNA_ID = "eccDNA_id"
+    ORIGINAL_ID = "original_id"
+
+    # PascalCase columns for user output compatibility
+    REGIONS = "Regions"  # Multiple regions joined by semicolon
+    STRAND = "Strand"
+    LENGTH = "Length"
+    ECCDNA_TYPE = "eccDNA_type"  # Keep camelCase for backward compat
+    STATE = "State"
+    SEG_TOTAL = "Seg_total"
+    HIT_COUNT = "Hit_count"
+
+    # Evidence columns (same as internal)
+    CONFIDENCE_SCORE = ColumnStandard.CONFIDENCE_SCORE
+    QUERY_COV_BEST = ColumnStandard.QUERY_COV_BEST
+    QUERY_COV_2ND = ColumnStandard.QUERY_COV_2ND
+    MAPQ_BEST = ColumnStandard.MAPQ_BEST
+    IDENTITY_BEST = ColumnStandard.IDENTITY_BEST
+    LOW_MAPQ = ColumnStandard.LOW_MAPQ
+    LOW_IDENTITY = ColumnStandard.LOW_IDENTITY
 
 
 # Legacy mapping dictionaries for backward compatibility
@@ -254,7 +285,7 @@ class ColumnStandardizer:
 
         return df
 
-    def validate_schema(self, df: pd.DataFrame, required_columns: List[str]) -> bool:
+    def validate_schema(self, df: pd.DataFrame, required_columns: list[str]) -> bool:
         """
         Validate that DataFrame has required standard columns.
 
@@ -272,7 +303,7 @@ class ColumnStandardizer:
         return True
 
     @staticmethod
-    def _get_all_standard_columns() -> List[str]:
+    def _get_all_standard_columns() -> list[str]:
         """Get list of all defined standard column names."""
         return [
             getattr(ColumnStandard, attr)
@@ -328,13 +359,27 @@ SCHEMAS = {
     ],
     "confirmed_table": [
         ColumnStandard.ECCDNA_ID,
-        "Regions",
-        "Length",
+        "regions",  # Multiple regions joined by semicolon
+        ColumnStandard.LENGTH,
         ColumnStandard.ECCDNA_TYPE,
         ColumnStandard.STATE,
         ColumnStandard.SEG_TOTAL,
         ColumnStandard.HIT_COUNT,
     ],
+}
+
+
+# Output column names for user-facing files (may differ from internal standard)
+# These are the column names used in merged_output.csv and other user-facing outputs
+OUTPUT_COLUMNS = {
+    "eccDNA_id": ColumnStandard.ECCDNA_ID,
+    "Regions": "regions",  # PascalCase for user output compatibility
+    "Strand": ColumnStandard.STRAND,
+    "Length": ColumnStandard.LENGTH,
+    "eccDNA_type": ColumnStandard.ECCDNA_TYPE,
+    "State": ColumnStandard.STATE,
+    "Seg_total": ColumnStandard.SEG_TOTAL,
+    "Hit_count": ColumnStandard.HIT_COUNT,
 }
 
 

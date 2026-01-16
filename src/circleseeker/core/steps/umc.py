@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Set
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 from circleseeker.core.pipeline_types import ResultKeys
 from circleseeker.exceptions import PipelineError
 
+if TYPE_CHECKING:
+    from circleseeker.core.pipeline import Pipeline
 
-def um_classify(pipeline) -> None:
+
+def um_classify(pipeline: Pipeline) -> None:
     """Step 4: Classify eccDNA types using um_classify module."""
     import pandas as pd
 
@@ -34,11 +37,13 @@ def um_classify(pipeline) -> None:
             "Invalid um_classify config; expected mapping, "
             f"got {type(um_cfg).__name__}"
         )
+    # Get min_full_length_coverage with fallback to theta_full
+    min_full_len_cov = um_cfg.get("min_full_length_coverage")
+    if min_full_len_cov is None:
+        min_full_len_cov = um_cfg.get("theta_full", 0.95)
     classifier = UMeccClassifier(
-        gap_threshold=um_cfg.get("gap_threshold", 10.0),
-        min_full_length_coverage=um_cfg.get(
-            "min_full_length_coverage", um_cfg.get("theta_full", 0.95)
-        ),
+        gap_threshold=float(um_cfg.get("gap_threshold", 10.0)),
+        min_full_length_coverage=float(min_full_len_cov),
         max_identity_gap_for_mecc=um_cfg.get("max_identity_gap_for_mecc", 5.0),
         theta_full=um_cfg.get("theta_full"),
         theta_u=um_cfg.get("theta_u"),
@@ -48,6 +53,9 @@ def um_classify(pipeline) -> None:
         u_secondary_min_frac=um_cfg.get("u_secondary_min_frac", 0.01),
         u_secondary_min_bp=um_cfg.get("u_secondary_min_bp", 50),
         u_contig_gap_bp=um_cfg.get("u_contig_gap_bp", 1000),
+        u_secondary_max_ratio=um_cfg.get("u_secondary_max_ratio", 0.05),
+        u_high_coverage_threshold=um_cfg.get("u_high_coverage_threshold", 0.98),
+        u_high_mapq_threshold=um_cfg.get("u_high_mapq_threshold", 50),
         theta_locus=um_cfg.get("theta_locus", 0.95),
         pos_tol_bp=um_cfg.get("pos_tol_bp", 50),
         logger=pipeline.logger.getChild("um_classify"),
@@ -118,7 +126,7 @@ def um_classify(pipeline) -> None:
         pipeline.state.results[ResultKeys.UNCLASSIFIED_CSV] = str(unclass_output)
 
 
-def cecc_build(pipeline) -> None:
+def cecc_build(pipeline: Pipeline) -> None:
     """Step 5: Process Cecc candidates using cecc_build module."""
     import pandas as pd
     import circleseeker.core.pipeline as pipeline_module
@@ -126,7 +134,7 @@ def cecc_build(pipeline) -> None:
     unclass_input = pipeline.config.output_dir / "um_classify.unclassified.csv"
     input_csv = unclass_input
 
-    def _has_data_rows(path) -> bool:
+    def _has_data_rows(path: Path) -> bool:
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as handle:
                 header = handle.readline()
@@ -152,11 +160,13 @@ def cecc_build(pipeline) -> None:
 
     output_file = pipeline.config.output_dir / "cecc_build.csv"
 
+    from circleseeker.modules.cecc_build import CeccBuild as DefaultCeccBuild
+
     builder_cls = getattr(pipeline_module, "CeccBuild", None)
     if builder_cls is None:
-        from circleseeker.modules.cecc_build import CeccBuild as builder_cls
+        builder_cls = DefaultCeccBuild
 
-    builder = builder_cls(logger=pipeline.logger.getChild("cecc_build"))
+    builder = cast(type[Any], builder_cls)(logger=pipeline.logger.getChild("cecc_build"))
 
     pipeline.logger.info("Running cecc_build module")
     try:
@@ -167,7 +177,7 @@ def cecc_build(pipeline) -> None:
                 f"got {type(cecc_cfg).__name__}"
             )
 
-        tau_gap = cecc_cfg.get("tau_gap", cecc_cfg.get("edge_tolerance", 20))
+        tau_gap = cecc_cfg.get("tau_gap") or cecc_cfg.get("edge_tolerance") or 20
         min_match_degree = cecc_cfg.get("min_match_degree", 95.0)
         theta_chain = cecc_cfg.get("theta_chain")
         if theta_chain is not None:
@@ -233,7 +243,7 @@ def cecc_build(pipeline) -> None:
         pipeline._set_result(ResultKeys.CECC_BUILD_COUNT, 0)
 
 
-def umc_process(pipeline) -> None:
+def umc_process(pipeline: Pipeline) -> None:
     """Step 6: Generate FASTA files using umc_process module."""
     from circleseeker.modules.umc_process import UMCProcess
 
@@ -285,7 +295,7 @@ def umc_process(pipeline) -> None:
         )
 
 
-def cd_hit(pipeline) -> None:
+def cd_hit(pipeline: Pipeline) -> None:
     """Step 7: Remove redundant sequences using CD-HIT-EST wrapper."""
     from circleseeker.external.cd_hit import CDHitEst
 
@@ -325,54 +335,47 @@ def cd_hit(pipeline) -> None:
             pipeline.state.results[f"{ecc_type}_clusters"] = str(cluster_file)
 
 
-def ecc_dedup(pipeline) -> None:
-    """Step 8: Coordinate and deduplicate results using ecc_dedup module."""
-    from circleseeker.modules.ecc_dedup import eccDedup, organize_umc_files
+def _get_path_from_results(pipeline: Pipeline, key: str) -> Optional[Path]:
+    """Retrieve a Path from pipeline results if the key exists.
 
-    harmonizer = eccDedup(pipeline.logger.getChild("ecc_dedup"))
+    Args:
+        pipeline: The pipeline instance
+        key: The ResultKeys key to look up
 
-    uecc_input = (
-        Path(pipeline.state.results[ResultKeys.UECC_PROCESSED])
-        if ResultKeys.UECC_PROCESSED in pipeline.state.results
-        else None
-    )
-    uecc_cluster = (
-        Path(pipeline.state.results[ResultKeys.UECC_CLUSTERS])
-        if ResultKeys.UECC_CLUSTERS in pipeline.state.results
-        else None
-    )
-    mecc_input = (
-        Path(pipeline.state.results[ResultKeys.MECC_PROCESSED])
-        if ResultKeys.MECC_PROCESSED in pipeline.state.results
-        else None
-    )
-    mecc_cluster = (
-        Path(pipeline.state.results[ResultKeys.MECC_CLUSTERS])
-        if ResultKeys.MECC_CLUSTERS in pipeline.state.results
-        else None
-    )
-    cecc_input = (
-        Path(pipeline.state.results[ResultKeys.CECC_PROCESSED])
-        if ResultKeys.CECC_PROCESSED in pipeline.state.results
-        else None
-    )
-    cecc_cluster = (
-        Path(pipeline.state.results[ResultKeys.CECC_CLUSTERS])
-        if ResultKeys.CECC_CLUSTERS in pipeline.state.results
-        else None
-    )
+    Returns:
+        Path if key exists and file exists, None otherwise
+    """
+    if key in pipeline.state.results:
+        path = Path(pipeline.state.results[key])
+        return path if path.exists() else None
+    return None
 
-    results = harmonizer.run_deduplication(
-        output_dir=pipeline.config.output_dir,
-        prefix=pipeline.config.prefix,
-        uecc_input=uecc_input if uecc_input and uecc_input.exists() else None,
-        uecc_cluster=uecc_cluster if uecc_cluster and uecc_cluster.exists() else None,
-        mecc_input=mecc_input if mecc_input and mecc_input.exists() else None,
-        mecc_cluster=mecc_cluster if mecc_cluster and mecc_cluster.exists() else None,
-        cecc_input=cecc_input if cecc_input and cecc_input.exists() else None,
-        cecc_cluster=cecc_cluster if cecc_cluster and cecc_cluster.exists() else None,
-    )
 
+def _collect_ecc_dedup_inputs(pipeline: Pipeline) -> dict[str, Optional[Path]]:
+    """Collect input files for the ecc_dedup step.
+
+    Args:
+        pipeline: The pipeline instance
+
+    Returns:
+        Dictionary with input and cluster paths for each eccDNA type
+    """
+    return {
+        "uecc_input": _get_path_from_results(pipeline, ResultKeys.UECC_PROCESSED),
+        "uecc_cluster": _get_path_from_results(pipeline, ResultKeys.UECC_CLUSTERS),
+        "mecc_input": _get_path_from_results(pipeline, ResultKeys.MECC_PROCESSED),
+        "mecc_cluster": _get_path_from_results(pipeline, ResultKeys.MECC_CLUSTERS),
+        "cecc_input": _get_path_from_results(pipeline, ResultKeys.CECC_PROCESSED),
+        "cecc_cluster": _get_path_from_results(pipeline, ResultKeys.CECC_CLUSTERS),
+    }
+
+
+def _rename_dedup_outputs(pipeline: Pipeline) -> None:
+    """Rename eccDedup output files to standard names.
+
+    Args:
+        pipeline: The pipeline instance
+    """
     rename_mappings = [
         (f"{pipeline.config.prefix}_Mecc.fa", f"{pipeline.config.prefix}_MeccDNA_C.fasta"),
         (f"{pipeline.config.prefix}_Cecc.fa", f"{pipeline.config.prefix}_CeccDNA_C.fasta"),
@@ -385,6 +388,32 @@ def ecc_dedup(pipeline) -> None:
         if old_path.exists() and not new_path.exists():
             old_path.rename(new_path)
             pipeline.logger.debug(f"Renamed {old_name} to {new_name}")
+
+
+def ecc_dedup(pipeline: Pipeline) -> None:
+    """Step 8: Coordinate and deduplicate results using ecc_dedup module."""
+    from circleseeker.modules.ecc_dedup import eccDedup, organize_umc_files
+
+    harmonizer = eccDedup(pipeline.logger.getChild("ecc_dedup"))
+    output_dir = Path(pipeline.config.output_dir)
+
+    # Collect input files
+    inputs = _collect_ecc_dedup_inputs(pipeline)
+
+    # Run deduplication
+    results = harmonizer.run_deduplication(
+        output_dir=pipeline.config.output_dir,
+        prefix=pipeline.config.prefix,
+        uecc_input=inputs["uecc_input"],
+        uecc_cluster=inputs["uecc_cluster"],
+        mecc_input=inputs["mecc_input"],
+        mecc_cluster=inputs["mecc_cluster"],
+        cecc_input=inputs["cecc_input"],
+        cecc_cluster=inputs["cecc_cluster"],
+    )
+
+    # Rename output files to standard naming convention
+    _rename_dedup_outputs(pipeline)
 
     umc_dirs: dict[str, Path] = {}
     if results:
@@ -443,7 +472,7 @@ def ecc_dedup(pipeline) -> None:
             umc_dirs = {}
 
     def _locate_output(filename: str, ecc_code: str | None = None) -> Optional[Path]:
-        candidate = pipeline.config.output_dir / filename
+        candidate = output_dir / filename
         if candidate.exists():
             return candidate
         if ecc_code:
@@ -453,7 +482,7 @@ def ecc_dedup(pipeline) -> None:
                 fallback = target_dir / filename
                 if fallback.exists():
                     return fallback
-        for fallback in pipeline.config.output_dir.rglob(filename):
+        for fallback in output_dir.rglob(filename):
             if fallback.exists():
                 return fallback
         return None
@@ -501,8 +530,8 @@ def ecc_dedup(pipeline) -> None:
         ],
     }
 
-    for ecc_type, file_list in additional_files.items():
-        for filename, key in file_list:
+    for ecc_type, file_specs in additional_files.items():
+        for filename, key in file_specs:
             file_path = _locate_output(filename, folder_key_map.get(ecc_type))
             if file_path:
                 pipeline.state.results[key] = str(file_path)

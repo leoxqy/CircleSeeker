@@ -15,7 +15,7 @@ from __future__ import annotations
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional
 import pandas as pd
 
 from circleseeker.exceptions import PipelineError
@@ -105,7 +105,7 @@ class CyrcularCallingPipeline:
         self.config = config
         self.logger = logger or get_logger(self.__class__.__name__)
         self.checker = DependencyChecker(self.logger)
-        self.file_paths: Dict[str, Path] = {}
+        self.file_paths: dict[str, Path] = {}
         self._initialize_file_paths()
         # External tool wrappers
         self._samtools = Samtools(logger=self.logger.getChild("samtools"))
@@ -138,7 +138,7 @@ class CyrcularCallingPipeline:
             "empty_regulatory": output / "empty_regulatory.gff3.gz",
         }
 
-    def run(self) -> List[CircularDNAResult]:
+    def run(self) -> list[CircularDNAResult]:
         self.logger.info("=" * 60)
         self.logger.info(f"Cyrcular-Calling Pipeline - {self.config.sample_name}")
         self.logger.info("=" * 60)
@@ -281,8 +281,8 @@ class CyrcularCallingPipeline:
             segment_tables_dir=self.file_paths["details_dir"],
         )
 
-    def _parse_results(self) -> List[CircularDNAResult]:
-        results: List[CircularDNAResult] = []
+    def _parse_results(self) -> list[CircularDNAResult]:
+        results: list[CircularDNAResult] = []
         overview = self.file_paths["overview_table"]
         if not overview.exists():
             self.logger.warning(f"Overview file not found: {overview}")
@@ -331,7 +331,7 @@ class CyrcularCallingPipeline:
             except Exception as e:
                 self.logger.warning(f"Failed to remove {alignprops}: {e}")
 
-    def _remove_files(self, file_keys: List[str]) -> None:
+    def _remove_files(self, file_keys: list[str]) -> None:
         """Remove files specified by their keys in file_paths."""
         for key in file_keys:
             p = self.file_paths.get(key)
@@ -364,7 +364,7 @@ class CyrcularCallingPipeline:
                 except Exception as e:
                     self.logger.warning(f"Failed to remove {p}: {e}")
 
-    def _print_summary(self, results: List[CircularDNAResult]) -> None:
+    def _print_summary(self, results: list[CircularDNAResult]) -> None:
         self.logger.info("=" * 60)
         self.logger.info("ANALYSIS COMPLETE")
         self.logger.info("=" * 60)

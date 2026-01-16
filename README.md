@@ -4,7 +4,7 @@
 
 # CircleSeeker
 
-[![Version](https://img.shields.io/badge/version-0.9.15-blue.svg)](https://github.com/leoxqy/CircleSeeker)
+[![Version](https://img.shields.io/badge/version-0.10.6-blue.svg)](https://github.com/leoxqy/CircleSeeker)
 [![CI](https://github.com/leoxqy/CircleSeeker/actions/workflows/ci.yml/badge.svg)](https://github.com/leoxqy/CircleSeeker/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-≥3.9-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
@@ -105,28 +105,91 @@ circleseeker \
 
 ## Pipeline Overview
 
-CircleSeeker implements a 16-step analysis pipeline:
+CircleSeeker implements a 16-step analysis pipeline organized around two evidence-driven callers:
 
-### Detection Phase (Steps 1-6)
+- **CtcReads**: reads containing **Ctc** (**C**oncatemeric **t**andem **c**opies) signals.
+- **CtcReads-Caller** (Steps 1–10): produces **Confirmed** U/M/C eccDNA from CtcReads evidence.
+- **SplitReads-Caller** (Steps 11–13): produces **Inferred** eccDNA from split-read/junction evidence (Cresil preferred, Cyrcular fallback).
+
+### Architecture
+
+```
+                              Input HiFi FASTA
+                                     │
+                                     ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                    CtcReads-Caller (Steps 1-10)                    │
+│                                                                    │
+│  ┌──────────┐    ┌───────────────┐    ┌─────────────┐             │
+│  │TideHunter│───▶│tandem_to_ring │───▶│  minimap2   │             │
+│  │  (Ctc    │    │ (CtcR-perfect │    │  alignment  │             │
+│  │ detect)  │    │  /inversion/  │    │             │             │
+│  └──────────┘    │   hybrid)     │    └──────┬──────┘             │
+│                  └───────────────┘           │                    │
+│                                              ▼                    │
+│                                    ┌─────────────────┐            │
+│                                    │   um_classify   │            │
+│                                    │ (Uecc/Mecc/Cecc)│            │
+│                                    └────────┬────────┘            │
+│                                             │                     │
+│                                             ▼                     │
+│                              ┌──────────────────────────┐         │
+│                              │  CD-HIT → dedup → filter │         │
+│                              └────────────┬─────────────┘         │
+│                                           │                       │
+│                                           ▼                       │
+│                                 Confirmed_eccDNA (U/M/C)          │
+└───────────────────────────────────────────┬────────────────────────┘
+                                            │
+                          ┌─────────────────┴─────────────────┐
+                          │ Filtered reads (exclude CtcReads) │
+                          └─────────────────┬─────────────────┘
+                                            │
+                                            ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                   SplitReads-Caller (Steps 11-13)                  │
+│                                                                    │
+│        ┌────────────────────────────────────────────┐              │
+│        │  Cresil (preferred) / Cyrcular (fallback) │              │
+│        │       Split-read junction detection        │              │
+│        └─────────────────────┬──────────────────────┘              │
+│                              │                                     │
+│                              ▼                                     │
+│                      Inferred_eccDNA                               │
+└──────────────────────────────┬─────────────────────────────────────┘
+                               │
+                               ▼
+┌────────────────────────────────────────────────────────────────────┐
+│                    Integration (Steps 14-16)                       │
+│                                                                    │
+│    ┌─────────┐      ┌─────────────┐      ┌──────────────┐         │
+│    │ ecc_unify│────▶│ ecc_summary │────▶│ ecc_packager │         │
+│    │ (merge) │      │  (report)   │      │  (output)    │         │
+│    └─────────┘      └─────────────┘      └──────────────┘         │
+│                                                                    │
+│                    Final Output: merged_output.csv                 │
+│                                  + HTML report                     │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### CtcReads-Caller (Steps 1-10)
 1. **check_dependencies** - Validate required tools and dependencies
 2. **tidehunter** - Detect tandem repeats in HiFi reads
 3. **tandem_to_ring** - Convert tandem repeats to circular candidates
 4. **run_alignment** - Map candidates to reference genome (minimap2)
 5. **um_classify** - Classify eccDNA as Unique (U) or Multiple (M) origin
 6. **cecc_build** - Identify Complex (C) eccDNA
-
-### Processing Phase (Steps 7-10)
 7. **umc_process** - Process and cluster U/M/C types
 8. **cd_hit** - Remove redundancy (99% identity threshold)
 9. **ecc_dedup** - Deduplicate and standardize coordinates
 10. **read_filter** - Filter confirmed eccDNA reads
 
-### Inference Phase (Steps 11-13)
+### SplitReads-Caller (Steps 11-13)
 11. **minimap2** - Prepare reference index (generates BAM only when Cyrcular is used)
 12. **ecc_inference** - Detect eccDNA (Cresil preferred, Cyrcular fallback)
 13. **curate_inferred_ecc** - Curate inferred eccDNA
 
-### Integration Phase (Steps 14-16)
+### Integration (Steps 14-16)
 14. **ecc_unify** - Merge confirmed and inferred results
 15. **ecc_summary** - Generate statistics and summaries
 16. **ecc_packager** - Package final outputs
@@ -171,7 +234,7 @@ The merged output file (`sample_name_merged_output.csv`) contains:
 | Strand | DNA strand (+/-) |
 | Length | eccDNA size in base pairs |
 | eccDNA_type | Classification (UeccDNA/MeccDNA/CeccDNA) |
-| State | Detection method (Confirmed/Inferred) |
+| State | Detection method (Confirmed/Inferred; from CtcReads-Caller/SplitReads-Caller) |
 | Seg_total | Number of segments (for complex eccDNA) |
 | Hit_count | Number of genomic hits |
 | confidence_score | Confidence score in [0,1] (higher = stronger evidence) |
@@ -203,15 +266,40 @@ tools:
     e: 0.1
     f: 2
 
-  minimap2_align:  # For candidate alignment (Step 3)
+  minimap2_align:  # For candidate alignment (Step 4)
     preset: "sr"
     max_target_seqs: 200
     additional_args: ""
+    # Identity filtering with length-based compensation (HiFi optimized)
+    min_identity: 99.0           # Base identity threshold (%)
+    identity_decay_per_10kb: 0.5 # Identity decay per 10kb of sequence length (%)
+    min_identity_floor: 97.0     # Minimum identity floor (%)
+    # Length-based preset splitting
+    split_by_length: true        # Use different presets for short/long sequences
+    split_length: 5000           # Length threshold (bp)
+    preset_short: "sr"           # Preset for sequences < split_length
+    preset_long: "asm5"          # Preset for sequences >= split_length
 
-  minimap2:  # For read mapping (Step 10)
+  minimap2:  # For read mapping (Step 11)
     preset: "map-hifi"
     additional_args: ""
 ```
+
+### Identity Filtering with Length Compensation
+
+For HiFi data, CircleSeeker uses a length-compensated identity threshold to handle the fact that longer sequences accumulate more sequencing errors:
+
+| Sequence Length | Identity Threshold |
+|-----------------|-------------------|
+| 1 kb            | 99.0%             |
+| 5 kb            | 98.75%            |
+| 10 kb           | 98.5%             |
+| 20 kb           | 98.0%             |
+| 40 kb+          | 97.0% (floor)     |
+
+**Formula**: `threshold = max(min_identity - (length_kb / 10) × decay_per_10kb, floor)`
+
+This prevents misclassification of long Uecc/Cecc sequences as Mecc while maintaining high precision for short sequences.
 
 For a complete list of configuration options, see the [configuration reference](docs/CLI_Reference.md).
 
@@ -310,7 +398,7 @@ For detailed documentation, see the `docs/` directory:
 
 - [Pipeline Modules](docs/Pipeline_Modules.md) - Detailed algorithm descriptions
 - [CLI Reference](docs/CLI_Reference.md) - Complete command-line options
-- [Simulation Validation](docs/Simulation_Validation_en.md) - Synthetic U/M/C validation and recall benchmark
+- [Validation Methodology](docs/Validation_Methodology_en.md) - Synthetic U/M/C validation and recall benchmark
 
 ## Citation
 

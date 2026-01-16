@@ -1,0 +1,103 @@
+{
+  "timestamp": "2026-01-14T11:28:13.118015",
+  "config": {
+    "scales": [
+      100
+    ],
+    "runs_per_scale": 1,
+    "base_seed": 42
+  },
+  "aggregate": {
+    "overall": {
+      "runs": 1,
+      "tp": 100,
+      "fp": 0,
+      "fn": 0,
+      "gt": 100,
+      "pred": 100,
+      "recall": 1.0,
+      "precision": 1.0,
+      "f1": 1.0,
+      "accuracy": 1.0,
+      "avg_fp": 0.0,
+      "avg_fn": 0.0
+    },
+    "by_scale": {
+      "100": {
+        "runs": 1,
+        "tp": 100,
+        "fp": 0,
+        "fn": 0,
+        "gt": 100,
+        "pred": 100,
+        "recall": 1.0,
+        "precision": 1.0,
+        "f1": 1.0,
+        "accuracy": 1.0,
+        "avg_fp": 0.0,
+        "avg_fn": 0.0
+      }
+    }
+  },
+  "total_time_seconds": 2.002854824066162,
+  "results": [
+    {
+      "scale": 100,
+      "run_id": 1,
+      "seed": 42,
+      "num_uecc": 70,
+      "num_mecc": 15,
+      "num_cecc": 15,
+      "total": 100,
+      "success": true,
+      "error": null,
+      "metrics": {
+        "uecc": {
+          "ground_truth": 70,
+          "predictions": 70,
+          "tp": 70,
+          "fp": 0,
+          "fn": 0,
+          "recall": 1.0,
+          "precision": 1.0,
+          "f1": 1.0,
+          "accuracy": 1.0
+        },
+        "mecc": {
+          "ground_truth": 15,
+          "predictions": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "recall": 1.0,
+          "precision": 1.0,
+          "f1": 1.0,
+          "accuracy": 1.0
+        },
+        "cecc": {
+          "ground_truth": 15,
+          "predictions": 15,
+          "tp": 15,
+          "fp": 0,
+          "fn": 0,
+          "recall": 1.0,
+          "precision": 1.0,
+          "f1": 1.0,
+          "accuracy": 1.0
+        },
+        "overall": {
+          "total_gt": 100,
+          "total_pred": 100,
+          "total_tp": 100,
+          "total_fp": 0,
+          "total_fn": 0,
+          "recall": 1.0,
+          "precision": 1.0,
+          "f1": 1.0,
+          "accuracy": 1.0
+        }
+      },
+      "test_time_seconds": 2.0028421878814697
+    }
+  ]
+}

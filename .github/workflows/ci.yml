@@ -12,6 +12,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  typecheck:
+    name: Type check (mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run mypy
+        run: |
+          python -m mypy src/circleseeker --show-error-codes
+
   tests:
     name: Tests (py${{ matrix.python-version }} • ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -43,12 +65,43 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e .
-          python -m pip install pytest pytest-cov
+          python -m pip install -e ".[dev]"
 
       - name: Run tests
         run: |
           python -m pytest -m "not external and not slow" -q
+
+      - name: Run tests with coverage
+        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
+        run: |
+          python -m pytest -m "not external and not slow" \
+            --cov=src/circleseeker \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=80
+
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+          verbose: true
+
+  docs-sync:
+    name: Documentation sync check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check bilingual docs sync
+        run: python scripts/check_docs_sync.py
 
   package:
     name: Build package (sdist/wheel)

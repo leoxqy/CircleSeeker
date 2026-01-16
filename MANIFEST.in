@@ -15,12 +15,19 @@ recursive-include src/circleseeker/data *.fa *.fasta *.txt
 # Include test files
 recursive-include tests *.py *.yaml *.json *.csv *.tsv *.fa *.fai *.fasta *.txt
 
+# Exclude generated simulation outputs (can be extremely large)
+prune tests/simulation/batch_validation_results*
+prune tests/simulation/_sanity_batch_validation
+
 # Include configuration files
 include pytest.ini
 include .gitignore
 
 # Include conda recipe
 recursive-include conda-recipe *.yaml *.sh *.txt
+
+# Include helper scripts
+recursive-include scripts *.py
 
 # Exclude unnecessary files
 global-exclude *.pyc

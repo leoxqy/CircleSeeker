@@ -9,7 +9,7 @@ CD-HIT-EST integrated wrapper:
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, Any
 import csv
 import sys
 import re
@@ -55,7 +55,7 @@ class CDHitEst(ExternalTool):
         G: int = 1,
         d: int = 0,
         M: int = 0,
-        extra: Optional[List[str]] = None,
+        extra: Optional[list[str]] = None,
     ):
         """
         Initialize CD-HIT-EST with clustering parameters.
@@ -76,28 +76,54 @@ class CDHitEst(ExternalTool):
         """
         if config is not None:
             super().__init__(threads=config.threads, logger=logger)
-            self.c = float(config.similarity_threshold)
-            self.n = int(config.word_length)
-            self.s = float(config.length_diff_cutoff)
-            self.aS = float(config.alignment_coverage_short)
-            self.aL = float(config.alignment_coverage_long)
-            self.G = int(config.include_gaps)
-            self.d = int(config.desc_len)
-            self.M = int(config.memory_limit)
-            self.extra = []
+            c_val = float(config.similarity_threshold)
+            n_val = int(config.word_length)
+            s_val = float(config.length_diff_cutoff)
+            aS_val = float(config.alignment_coverage_short)
+            aL_val = float(config.alignment_coverage_long)
+            G_val = int(config.include_gaps)
+            d_val = int(config.desc_len)
+            M_val = int(config.memory_limit)
+            extra_val: list[str] = []
         else:
             super().__init__(threads=threads, logger=logger)
-            self.c = float(c)
-            self.n = int(n)
-            self.s = float(s)
-            self.aS = float(aS)
-            self.aL = float(aL)
-            self.G = int(G)
-            self.d = int(d)
-            self.M = int(M)
-            self.extra = extra or []
+            c_val = float(c)
+            n_val = int(n)
+            s_val = float(s)
+            aS_val = float(aS)
+            aL_val = float(aL)
+            G_val = int(G)
+            d_val = int(d)
+            M_val = int(M)
+            extra_val = extra or []
 
-    def _build_command(self, input_fasta: Path, output_prefix: Path) -> List[str]:
+        # Validate parameters
+        if not 0.0 <= c_val <= 1.0:
+            raise ValueError(f"similarity_threshold (c) must be in [0.0, 1.0], got {c_val}")
+        if n_val not in (5, 6, 7, 8, 9, 10, 11):
+            raise ValueError(f"word_length (n) must be one of [5,6,7,8,9,10,11], got {n_val}")
+        if not 0.0 <= s_val <= 1.0:
+            raise ValueError(f"length_diff_cutoff (s) must be in [0.0, 1.0], got {s_val}")
+        if not 0.0 <= aS_val <= 1.0:
+            raise ValueError(f"alignment_coverage_short (aS) must be in [0.0, 1.0], got {aS_val}")
+        if not 0.0 <= aL_val <= 1.0:
+            raise ValueError(f"alignment_coverage_long (aL) must be in [0.0, 1.0], got {aL_val}")
+        if G_val not in (0, 1):
+            raise ValueError(f"include_gaps (G) must be 0 or 1, got {G_val}")
+        if M_val < 0:
+            raise ValueError(f"memory_limit (M) must be >= 0, got {M_val}")
+
+        self.c = c_val
+        self.n = n_val
+        self.s = s_val
+        self.aS = aS_val
+        self.aL = aL_val
+        self.G = G_val
+        self.d = d_val
+        self.M = M_val
+        self.extra = extra_val
+
+    def _build_command(self, input_fasta: Path, output_prefix: Path) -> list[str]:
         """Build cd-hit-est command line."""
         cmd = [
             self.tool_name,
@@ -187,8 +213,30 @@ class CDHitEst(ExternalTool):
             self.logger.error(f"CD-HIT-EST failed: {e}")
             raise
 
+    # Simplified regex pattern for member ID extraction
+    _MEMBER_PATTERN = re.compile(r">([^.]+)\.\.\.")
+
     @staticmethod
-    def _parse_clstr(clstr_file: Path) -> Tuple[Dict[str, List[str]], Dict[str, str]]:
+    def _parse_member_id(line: str) -> Optional[str]:
+        """Parse sequence ID from a CD-HIT cluster member line.
+
+        Args:
+            line: A member line like "0   12634nt, >seqid... *"
+
+        Returns:
+            The sequence ID, or None if not found
+        """
+        match = CDHitEst._MEMBER_PATTERN.search(line)
+        if match:
+            return match.group(1).strip()
+        # Fallback: try simpler pattern
+        fallback = re.search(r">\s*([^\s,>]+)", line)
+        if fallback:
+            return fallback.group(1).strip()
+        return None
+
+    @staticmethod
+    def _parse_clstr(clstr_file: Path) -> tuple[dict[str, list[str]], dict[str, str]]:
         """
         Parse CD-HIT .clstr file
         Returns:
@@ -199,11 +247,11 @@ class CDHitEst(ExternalTool):
         if not p.exists():
             raise FileNotFoundError(f"Cluster file not found: {clstr_file}")
 
-        members: Dict[str, List[str]] = {}
-        representatives: Dict[str, str] = {}
+        members: dict[str, list[str]] = {}
+        representatives: dict[str, str] = {}
 
         current_cluster: Optional[str] = None
-        current_members: List[str] = []
+        current_members: list[str] = []
         current_rep: Optional[str] = None
 
         with p.open("r") as f:
@@ -230,15 +278,12 @@ class CDHitEst(ExternalTool):
                     current_rep = None
                     continue
 
-                # Cluster member line: "... >seqid... *"
-                # Common format: "0   12634nt, >U23805... *"
-                m = re.search(r">\s*([^\.>\s][^\.]*?)\.\.\.", line) or re.search(
-                    r">\s*([^\s,]+)", line
-                )
-                if m:
-                    sid = m.group(1)
+                # Cluster member line: "0   12634nt, >seqid... *"
+                # Parse sequence ID from member line
+                sid = CDHitEst._parse_member_id(line)
+                if sid:
                     current_members.append(sid)
-                    if line.endswith("*"):
+                    if line.rstrip().endswith("*"):
                         current_rep = sid
 
         # Finish last cluster
@@ -251,8 +296,8 @@ class CDHitEst(ExternalTool):
 
     @staticmethod
     def _write_id2cluster_csv(
-        members: Dict[str, List[str]],
-        representatives: Dict[str, str],
+        members: dict[str, list[str]],
+        representatives: dict[str, str],
         output_csv: Path,
     ) -> Path:
         """
@@ -300,7 +345,7 @@ class CDHitEst(ExternalTool):
         self.logger.info(f"ID→Cluster CSV written: {csv_path}")
         return csv_path
 
-    def get_cluster_stats(self, cluster_file: Path) -> Dict[str, Any]:
+    def get_cluster_stats(self, cluster_file: Path) -> dict[str, Any]:
         """
         Parse cluster file and return statistics.
 
@@ -320,7 +365,7 @@ class CDHitEst(ExternalTool):
             total_clusters = len(members)
             total_sequences = sum(len(v) for v in members.values())
 
-            stats: Dict[str, Any] = {
+            stats: dict[str, Any] = {
                 "total_clusters": total_clusters,
                 "total_sequences": total_sequences,
                 "singleton_clusters": sum(1 for v in members.values() if len(v) == 1),
@@ -354,12 +399,12 @@ class CDHitRunner(CDHitEst):
         G: int = 1,
         d: int = 0,
         M: int = 0,
-        extra: Optional[List[str]] = None,
+        extra: Optional[list[str]] = None,
     ):
         """Initialize with legacy parameter names."""
         super().__init__(threads=threads, c=c, n=n, s=s, aS=aS, aL=aL, G=G, d=d, M=M, extra=extra)
 
-    def run(self, input_fasta: Path, output_prefix: Path):
+    def run(self, input_fasta: Path, output_prefix: Path) -> Path:  # type: ignore[override]
         """Run CD-HIT-EST with legacy interface."""
         return self.cluster_sequences(input_fasta, output_prefix)
 

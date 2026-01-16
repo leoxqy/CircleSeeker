@@ -12,7 +12,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 from circleseeker.utils.logging import get_logger
 
@@ -23,9 +23,9 @@ class ModuleResult:
 
     success: bool
     module_name: str
-    output_files: Dict[str, Path] = field(default_factory=dict)
-    metrics: Dict[str, Any] = field(default_factory=dict)
-    warnings: List[str] = field(default_factory=list)
+    output_files: dict[str, Path] = field(default_factory=dict)
+    metrics: dict[str, Any] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
     error_message: Optional[str] = None
     execution_time: float = 0.0
 
@@ -173,7 +173,7 @@ class ModuleBase(ABC):
 
         return result
 
-    def cleanup(self, temp_files: Optional[List[Path]] = None) -> None:
+    def cleanup(self, temp_files: Optional[list[Path]] = None) -> None:
         """
         Clean up temporary files.
 

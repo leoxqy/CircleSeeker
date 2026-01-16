@@ -271,7 +271,8 @@ class Minimap2Module(ExternalToolModule):
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
             # Allow minimap2 to receive SIGPIPE if samtools exits early
-            minimap2_proc.stdout.close()
+            if minimap2_proc.stdout is not None:
+                minimap2_proc.stdout.close()
 
             _, samtools_stderr = samtools_proc.communicate()
             minimap2_proc.wait()

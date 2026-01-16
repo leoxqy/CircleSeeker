@@ -12,13 +12,13 @@ from __future__ import annotations
 import re
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple, Set, Optional
+from typing import Any, Optional
 
 import pandas as pd
 from circleseeker.utils.logging import get_logger
 
 
-def parse_region(r: str) -> Tuple[str, int, int]:
+def parse_region(r: str) -> tuple[str, int, int]:
     """Parse region string into chromosome, start, end.
 
     Handles both single regions (chr1:100-200) and first segment of chimeric regions.
@@ -33,7 +33,7 @@ def parse_region(r: str) -> Tuple[str, int, int]:
     return m.group(1), int(m.group(2)), int(m.group(3))
 
 
-def parse_chimeric_regions(regions_str: str) -> List[Tuple[str, int, int]]:
+def parse_chimeric_regions(regions_str: str) -> list[tuple[str, int, int]]:
     """Parse chimeric region string into list of (chr, start, end) tuples.
 
     Example: "chr1:100-200;chr2:300-400" -> [("chr1", 100, 200), ("chr2", 300, 400)]
@@ -95,14 +95,14 @@ def reciprocal_overlap_ok(
 
 def build_chr_index(
     df: pd.DataFrame, type_filter: Optional[str] = None
-) -> Dict[str, List[Tuple[int, int, int]]]:
+) -> dict[str, list[tuple[int, int, int]]]:
     """Build chromosome-indexed structure for efficient overlap queries.
 
     Args:
         df: DataFrame with 'Regions' column
         type_filter: Optional eccDNA_type to filter for (e.g., 'UeccDNA')
     """
-    idx: Dict[str, List[Tuple[int, int, int]]] = {}
+    idx: dict[str, list[tuple[int, int, int]]] = {}
 
     # Filter by type if specified
     if type_filter and "eccDNA_type" in df.columns:
@@ -128,7 +128,7 @@ def build_chr_index(
 
 def find_redundant_simple(
     inferred_df: pd.DataFrame, confirmed_df: pd.DataFrame, thr: float = 0.99, tol: int = 10
-) -> Set[str]:
+) -> set[str]:
     """Find inferred simple eccDNA that overlap with confirmed UeccDNA.
 
     Args:
@@ -197,7 +197,7 @@ def find_redundant_chimeric(
     thr: float = 0.99,
     tol: int = 10,
     method: str = "overlap",
-) -> Set[str]:
+) -> set[str]:
     """Find inferred chimeric eccDNA that match confirmed CeccDNA.
 
     Supports two matching strategies:
@@ -224,7 +224,7 @@ def find_redundant_chimeric(
 
 def find_redundant_chimeric_exact(
     inferred_df: pd.DataFrame, confirmed_df: pd.DataFrame
-) -> Set[str]:
+) -> set[str]:
     """Find redundant chimeric eccDNA using exact string matching (legacy).
 
     This is the original implementation preserved for backward compatibility.
@@ -268,7 +268,7 @@ def find_redundant_chimeric_exact(
 
 def find_redundant_chimeric_overlap(
     inferred_df: pd.DataFrame, confirmed_df: pd.DataFrame, thr: float = 0.99, tol: int = 10
-) -> Set[str]:
+) -> set[str]:
     """Find redundant chimeric eccDNA using segment-wise reciprocal overlap.
 
     This method compares each segment individually using the same strategy
@@ -316,7 +316,7 @@ def find_redundant_chimeric_overlap(
 
 
 def _segments_match(
-    segs_a: List[Tuple[str, int, int]], segs_b: List[Tuple[str, int, int]], thr: float, tol: int
+    segs_a: list[tuple[str, int, int]], segs_b: list[tuple[str, int, int]], thr: float, tol: int
 ) -> bool:
     """Check if two lists of segments match using segment-wise reciprocal overlap."""
     if len(segs_a) != len(segs_b):
@@ -335,7 +335,7 @@ def _segments_match(
     return True
 
 
-def prepare_inferred_simple(df: pd.DataFrame, redundant_ids: Set[str]) -> pd.DataFrame:
+def prepare_inferred_simple(df: pd.DataFrame, redundant_ids: set[str]) -> pd.DataFrame:
     """Prepare inferred simple table for merging.
 
     Converts from inferred format to standard format and removes redundant entries.
@@ -368,7 +368,7 @@ def prepare_inferred_simple(df: pd.DataFrame, redundant_ids: Set[str]) -> pd.Dat
     return result
 
 
-def prepare_inferred_chimeric(df: pd.DataFrame, redundant_ids: Set[str]) -> pd.DataFrame:
+def prepare_inferred_chimeric(df: pd.DataFrame, redundant_ids: set[str]) -> pd.DataFrame:
     """Prepare inferred chimeric table for merging.
 
     Converts from segment-based format to unified format and removes redundant entries.
@@ -502,8 +502,8 @@ def generate_overlap_stats_json(
     confirmed_df: pd.DataFrame,
     inferred_simple: pd.DataFrame | None,
     inferred_chimeric: pd.DataFrame | None,
-    simple_redundant: Set[str],
-    chimeric_redundant: Set[str],
+    simple_redundant: set[str],
+    chimeric_redundant: set[str],
     output_file: Path | str | None = None,
 ) -> dict:
     """Generate overlap statistics in JSON format for downstream processing.
@@ -521,7 +521,7 @@ def generate_overlap_stats_json(
     """
     import json
 
-    stats = {
+    stats: dict[str, Any] = {
         "confirmed": {
             "UeccDNA": len(confirmed_df[confirmed_df["eccDNA_type"] == "UeccDNA"]),
             "MeccDNA": len(confirmed_df[confirmed_df["eccDNA_type"] == "MeccDNA"]),
@@ -638,8 +638,8 @@ def generate_overlap_report(
     confirmed_df: pd.DataFrame,
     inferred_simple: pd.DataFrame | None,
     inferred_chimeric: pd.DataFrame | None,
-    simple_redundant: Set[str],
-    chimeric_redundant: Set[str],
+    simple_redundant: set[str],
+    chimeric_redundant: set[str],
     output_file: Path | str | None = None,
 ) -> str:
     """Generate detailed overlap statistics report.
@@ -769,10 +769,10 @@ def generate_overlap_statistics(
     confirmed_df: pd.DataFrame,
     inferred_simple: pd.DataFrame | None,
     inferred_chimeric: pd.DataFrame | None,
-    simple_redundant: Set[str],
-    chimeric_redundant: Set[str],
+    simple_redundant: set[str],
+    chimeric_redundant: set[str],
     output_file: Path | str | None = None,
-) -> Dict:
+) -> dict:
     """Generate structured overlap statistics for reporting.
 
     Args:
@@ -786,7 +786,7 @@ def generate_overlap_statistics(
     Returns:
         Dictionary containing overlap statistics
     """
-    stats = {
+    stats: dict[str, Any] = {
         "confirmed": {
             "UeccDNA": len(confirmed_df[confirmed_df["eccDNA_type"] == "UeccDNA"]),
             "MeccDNA": len(confirmed_df[confirmed_df["eccDNA_type"] == "MeccDNA"]),
@@ -873,7 +873,7 @@ def generate_overlap_statistics(
 
 
 def merge_eccdna_tables(
-    confirmed_file: Path | str,
+    confirmed_file: Path | str | pd.DataFrame,
     inferred_simple: Path | str | pd.DataFrame | None = None,
     inferred_chimeric: Path | str | pd.DataFrame | None = None,
     overlap_threshold: float = 0.99,
@@ -881,7 +881,7 @@ def merge_eccdna_tables(
     renumber: bool = True,
     overlap_report_file: Path | str | None = None,
     overlap_stats_json: Path | str | None = None,
-) -> Tuple[pd.DataFrame, str, dict]:
+) -> tuple[pd.DataFrame, str, dict]:
     """Merge confirmed and inferred eccDNA tables with redundancy removal.
 
     Args:

@@ -14,7 +14,7 @@ from __future__ import annotations
 from circleseeker.utils.logging import get_logger
 from circleseeker.utils.column_standards import ColumnStandard
 from pathlib import Path
-from typing import Any, Tuple, Set, Optional, Dict, List, Iterable
+from typing import Any, Optional, Iterable
 import pandas as pd
 import logging
 
@@ -50,7 +50,7 @@ class UMeccClassifier:
         self,
         gap_threshold: float = 10.0,
         min_full_length_coverage: float = 95.0,
-        max_identity_gap_for_mecc: float = 5.0,
+        max_identity_gap_for_mecc: Optional[float] = 5.0,
         theta_full: Optional[float] = None,
         theta_u: Optional[float] = None,
         theta_m: Optional[float] = None,
@@ -59,6 +59,9 @@ class UMeccClassifier:
         u_secondary_min_frac: float = 0.01,
         u_secondary_min_bp: int = 50,
         u_contig_gap_bp: int = 1000,
+        u_secondary_max_ratio: float = 0.05,
+        u_high_coverage_threshold: float = 0.98,
+        u_high_mapq_threshold: int = 50,
         theta_locus: float = 0.95,
         pos_tol_bp: int = 50,
         logger: Optional[logging.Logger] = None,
@@ -115,9 +118,13 @@ class UMeccClassifier:
         self.u_secondary_min_frac = self._as_fraction(u_secondary_min_frac)
         self.u_secondary_min_bp = int(u_secondary_min_bp)
         self.u_contig_gap_bp = int(u_contig_gap_bp)
+        # Adaptive thresholds for improved large-scale performance
+        self.u_secondary_max_ratio = self._as_fraction(u_secondary_max_ratio)
+        self.u_high_coverage_threshold = self._as_fraction(u_high_coverage_threshold)
+        self.u_high_mapq_threshold = int(u_high_mapq_threshold)
         self.theta_locus = self._as_fraction(theta_locus)
         self.pos_tol_bp = int(pos_tol_bp)
-        self.stats = {}
+        self.stats: dict[str, int] = {}
 
         # Setup logger
         self.logger = logger or get_logger(self.__class__.__name__)
@@ -131,8 +138,16 @@ class UMeccClassifier:
         best_end0: int,
         cons_len: int,
         q_style: str,
+        u_cov: float = 0.0,
+        best_locus_mapq: Optional[int] = None,
     ) -> bool:
-        """Return True if non-contiguous / multi-chr mappings are strong enough to veto Uecc."""
+        """Return True if non-contiguous / multi-chr mappings are strong enough to veto Uecc.
+
+        The veto logic uses adaptive thresholds:
+        1. Relative threshold: secondary_cov / u_cov must not exceed u_secondary_max_ratio
+        2. MAPQ weighting: high MAPQ increases tolerance (more confidence in primary mapping)
+        3. High coverage tolerance: u_cov >= threshold gets relaxed thresholds
+        """
         if all_alignments.empty or cons_len <= 0:
             return False
 
@@ -163,12 +178,39 @@ class UMeccClassifier:
 
         secondary_cov = self._coverage_fraction_for_alignments(secondary_df, cons_len, q_style)
         secondary_bp = secondary_cov * float(cons_len)
-        return (secondary_cov >= float(self.u_secondary_min_frac)) or (
-            secondary_bp >= float(self.u_secondary_min_bp)
-        )
+
+        # Compute adaptive thresholds
+        effective_min_frac = float(self.u_secondary_min_frac)
+        effective_min_bp = float(self.u_secondary_min_bp)
+
+        # Improvement 1: High coverage tolerance
+        # When primary coverage is very high, we trust it more and require stronger secondary
+        # evidence to veto
+        if u_cov >= float(self.u_high_coverage_threshold):
+            effective_min_frac *= 2.0  # Increase from 1% to 2%
+            effective_min_bp *= 2.0    # Increase from 50bp to 100bp
+
+        # Improvement 2: MAPQ weighting
+        # High MAPQ indicates unique mapping - increase tolerance for secondary
+        if best_locus_mapq is not None and best_locus_mapq >= int(self.u_high_mapq_threshold):
+            effective_min_frac *= 1.5
+            effective_min_bp *= 1.5
+
+        # Check absolute thresholds first
+        if secondary_cov >= effective_min_frac or secondary_bp >= effective_min_bp:
+            # Improvement 3: Relative threshold check
+            # Even if absolute threshold is exceeded, allow if relative ratio is small
+            if u_cov > 0:
+                secondary_ratio = secondary_cov / u_cov
+                if secondary_ratio < float(self.u_secondary_max_ratio):
+                    # Secondary is small relative to primary - don't veto
+                    return False
+            return True
+
+        return False
 
     @staticmethod
-    def _as_fraction(value: float) -> float:
+    def _as_fraction(value: float | None) -> float:
         """Accept either a fraction (0-1) or a percent (0-100) and return a fraction."""
         if value is None:
             return 0.0
@@ -222,7 +264,7 @@ class UMeccClassifier:
             if v <= 0.0:
                 return 0.0
             prod *= v
-        return prod ** (1.0 / float(len(vals)))
+        return float(prod ** (1.0 / float(len(vals))))
 
     def _ensure_alignment_columns(self, df: pd.DataFrame, source: str) -> pd.DataFrame:
         """Ensure alignment DataFrame has the expected columns."""
@@ -329,10 +371,10 @@ class UMeccClassifier:
         df["Rlength"] = df[ColumnStandard.END0] - df[ColumnStandard.START0]
         df["gap_Length"] = df[ColumnStandard.LENGTH] - df["Rlength"]
 
-        # Safe division for Gap_Percentage
-        df["Gap_Percentage"] = 0.0
+        # Safe division for gap_percentage
+        df[ColumnStandard.GAP_PERCENTAGE] = 0.0
         valid_mask = df[ColumnStandard.LENGTH] > 0
-        df.loc[valid_mask, "Gap_Percentage"] = (
+        df.loc[valid_mask, ColumnStandard.GAP_PERCENTAGE] = (
             (df.loc[valid_mask, "gap_Length"].abs() / df.loc[valid_mask, ColumnStandard.LENGTH])
             * 100
         ).round(2)
@@ -372,7 +414,7 @@ class UMeccClassifier:
     @staticmethod
     def _query_interval_0based_half_open(
         q_start: float, q_end: float, style: str
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         """Convert q_start/q_end to 0-based, half-open interval."""
         qs = int(q_start)
         qe = int(q_end)
@@ -385,24 +427,59 @@ class UMeccClassifier:
     @classmethod
     def _project_query_interval_to_ring(
         cls, q_start: float, q_end: float, cons_len: int, style: str
-    ) -> List[Tuple[int, int]]:
-        """Project a query interval on doubled sequence onto ring coordinates [0, L)."""
+    ) -> list[tuple[int, int]]:
+        """Project a query interval on doubled sequence onto ring coordinates [0, L).
+
+        For a circular DNA of length L, queries are often mapped to a doubled
+        reference (length 2L) to handle wrap-around. This function projects
+        query intervals back onto the ring [0, L).
+
+        Args:
+            q_start: Query start position
+            q_end: Query end position
+            cons_len: Consensus length (ring circumference)
+            style: Coordinate style ("0based" or "blast" for 1-based)
+
+        Returns:
+            List of (start, end) tuples representing ring intervals.
+            May return multiple intervals if the projection wraps around.
+        """
         L = int(cons_len)
         if L <= 0:
             return []
 
         qs, qe = cls._query_interval_0based_half_open(q_start, q_end, style)
-        if qe - qs >= L:
+        query_len = qe - qs
+
+        # Validate query length
+        if query_len <= 0:
+            return []
+
+        # If query covers full ring or more, return complete coverage
+        if query_len >= L:
             return [(0, L)]
 
+        # Project to ring coordinates using modulo
         u = qs % L
         v = qe % L
+
+        # Handle edge case: if both project to same point and query is non-empty,
+        # it means exactly one full wrap (shouldn't happen given query_len < L check above,
+        # but handle defensively)
+        if u == v:
+            # This can happen if query_len == L exactly (handled above) or numerical edge case
+            return [(0, L)] if query_len > 0 else []
+
+        # Non-wrapping case: u < v means interval doesn't cross the origin
         if u < v:
             return [(u, v)]
+
+        # Wrapping case: interval crosses the ring origin (position 0)
+        # Split into two segments: [u, L) and [0, v)
         return [(u, L), (0, v)]
 
     @staticmethod
-    def _union_len(segments: Iterable[Tuple[int, int]]) -> int:
+    def _union_len(segments: Iterable[tuple[int, int]]) -> int:
         """Compute union length of half-open segments."""
         segs = [(int(s), int(e)) for s, e in segments if e > s]
         if not segs:
@@ -427,7 +504,7 @@ class UMeccClassifier:
         L = int(cons_len)
         if df.empty or L <= 0:
             return 0.0
-        segments: List[Tuple[int, int]] = []
+        segments: list[tuple[int, int]] = []
         q_start_series = df.get("q_start")
         q_end_series = df.get("q_end")
         if q_start_series is None or q_end_series is None:
@@ -442,13 +519,13 @@ class UMeccClassifier:
         covered = cls._union_len(segments)
         return float(covered) / float(L) if L > 0 else 0.0
 
-    def _cluster_loci(self, group: pd.DataFrame) -> Dict[int, List[int]]:
+    def _cluster_loci(self, group: pd.DataFrame) -> dict[int, list[int]]:
         """Cluster alignments into loci for a single query."""
         if group.empty:
             return {}
 
         indices = list(group.index)
-        parent: Dict[int, int] = {idx: idx for idx in indices}
+        parent: dict[int, int] = {idx: idx for idx in indices}
 
         def find(x: int) -> int:
             while parent[x] != x:
@@ -490,12 +567,12 @@ class UMeccClassifier:
                     if (ov / float(min_len)) >= theta:
                         union(sub_idx[i], sub_idx[j])
 
-        clusters: Dict[int, List[int]] = {}
+        clusters: dict[int, list[int]] = {}
         for idx in indices:
             root = find(idx)
             clusters.setdefault(root, []).append(idx)
 
-        relabeled: Dict[int, List[int]] = {}
+        relabeled: dict[int, list[int]] = {}
         for locus_id, root in enumerate(sorted(clusters.keys(), key=lambda x: str(x))):
             relabeled[locus_id] = clusters[root]
         return relabeled
@@ -530,7 +607,7 @@ class UMeccClassifier:
 
     def classify_alignment_results(
         self, alignment_df: pd.DataFrame, output_prefix: Path
-    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """
         Classify eccDNA from pre-loaded alignment DataFrame
 
@@ -634,7 +711,7 @@ class UMeccClassifier:
             pd.DataFrame().to_csv(unclass_out, index=False)
             self.logger.info(f"Saved empty Unclassified results to {unclass_out}")
 
-    def classify_uecc_mecc(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, Set[str]]:
+    def classify_uecc_mecc(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, set[str]]:
         """
         Classify Uecc and Mecc using a ring-coverage model on high-quality alignments.
 
@@ -658,7 +735,7 @@ class UMeccClassifier:
         # Note: we still consult all alignments (including low-quality partial hits) when deciding
         # whether a U candidate has significant non-contiguous / multi-chr evidence.
         all_groups = df.groupby("query_id", sort=False).groups
-        high_quality = df[df["Gap_Percentage"] <= self.gap_threshold].copy()
+        high_quality = df[df[ColumnStandard.GAP_PERCENTAGE] <= self.gap_threshold].copy()
         self.logger.info(f"High-quality alignments: {len(high_quality):,} / {len(df):,}")
 
         if high_quality.empty:
@@ -667,9 +744,9 @@ class UMeccClassifier:
 
         q_style = self._infer_query_coords_style(high_quality)
 
-        uecc_rows: List[dict[str, Any]] = []
-        mecc_rows: List[dict[str, Any]] = []
-        classified_queries: Set[str] = set()
+        uecc_rows: list[dict[str, Any]] = []
+        mecc_rows: list[dict[str, Any]] = []
+        classified_queries: set[str] = set()
 
         for query_id, group in high_quality.groupby("query_id", sort=False):
             cons_len = int(group[ColumnStandard.LENGTH].iloc[0])
@@ -680,7 +757,7 @@ class UMeccClassifier:
             if not loci:
                 continue
 
-            locus_cov: Dict[int, float] = {}
+            locus_cov: dict[int, float] = {}
             for locus_id, idxs in loci.items():
                 locus_df = group.loc[idxs]
                 locus_cov[locus_id] = self._coverage_fraction_for_alignments(
@@ -783,12 +860,14 @@ class UMeccClassifier:
                 # Uecc requires one strong locus explanation and no substantial 2nd locus.
                 lid = best_lid if best_lid is not None else cov_sorted[0][0]
                 locus_df = group.loc[loci[lid]]
+                # Always compute best locus MAPQ for adaptive thresholds
+                try:
+                    best_locus_mapq = int(locus_df["mapq"].max())
+                except Exception:
+                    best_locus_mapq = None
+                # Check MAPQ minimum if configured
                 if self.mapq_u_min > 0:
-                    try:
-                        best_locus_mapq = int(locus_df["mapq"].max())
-                    except Exception:
-                        best_locus_mapq = 0
-                    if best_locus_mapq < int(self.mapq_u_min):
+                    if best_locus_mapq is None or best_locus_mapq < int(self.mapq_u_min):
                         self.stats["uecc_vetoed_low_mapq"] = self.stats.get(
                             "uecc_vetoed_low_mapq", 0
                         ) + 1
@@ -809,6 +888,8 @@ class UMeccClassifier:
                     best_end0=best_end0,
                     cons_len=cons_len,
                     q_style=q_style,
+                    u_cov=u_cov,
+                    best_locus_mapq=best_locus_mapq,
                 ):
                     continue
                 try:
@@ -879,14 +960,14 @@ class UMeccClassifier:
                     kept_alignments.append(component_df)
                 else:
                     # Select best from each overlap component
-                    best_idx = component_df["Gap_Percentage"].idxmin()
+                    best_idx = component_df[ColumnStandard.GAP_PERCENTAGE].idxmin()
                     kept_alignments.append(chr_group.loc[[best_idx]])
 
         if kept_alignments:
             return pd.concat(kept_alignments, ignore_index=False)
         return pd.DataFrame()
 
-    def _find_overlaps_sweepline(self, group: pd.DataFrame) -> list[Set[int]]:
+    def _find_overlaps_sweepline(self, group: pd.DataFrame) -> list[set[int]]:
         """
         Find overlap components using sweep-line algorithm.
 
@@ -925,7 +1006,7 @@ class UMeccClassifier:
         # Sort by position, then by event type (starts before ends)
         events.sort(key=lambda x: (x[0], x[1]))
 
-        active_intervals: Set[int] = set()
+        active_intervals: set[int] = set()
         for _, event_type, idx in events:
             if event_type == 0:  # start event
                 for active_idx in active_intervals:
@@ -934,7 +1015,7 @@ class UMeccClassifier:
             else:  # end event
                 active_intervals.discard(idx)
 
-        components: dict[int, Set[int]] = {}
+        components: dict[int, set[int]] = {}
         for idx in group.index:
             root = find(idx)
             components.setdefault(root, set()).add(idx)
@@ -959,7 +1040,7 @@ class UMeccClassifier:
 
         # Calculate coverage for each alignment
         coverages = (valid_group["Rlength"] / valid_group[ColumnStandard.LENGTH]) * 100
-        full_length_count = (coverages >= self.min_full_length_coverage).sum()
+        full_length_count = int((coverages >= self.min_full_length_coverage).sum())
 
         return full_length_count >= 2
 
@@ -976,11 +1057,11 @@ class UMeccClassifier:
             return False
 
         identities = identities.sort_values(ascending=False)
-        gap = identities.iloc[0] - identities.iloc[1]
-        return gap <= self.max_identity_gap_for_mecc
+        gap = float(identities.iloc[0] - identities.iloc[1])
+        return gap <= float(self.max_identity_gap_for_mecc)
 
     def extract_unclassified(
-        self, df_original: pd.DataFrame, classified_queries: Set[str]
+        self, df_original: pd.DataFrame, classified_queries: set[str]
     ) -> pd.DataFrame:
         """
         Extract all alignments from unclassified queries
@@ -1010,7 +1091,7 @@ class UMeccClassifier:
             unclassified_df["unclass_reason"] = "Not_classified"
 
             # Add quality indicator
-            unclassified_df["quality_category"] = unclassified_df["Gap_Percentage"].apply(
+            unclassified_df["quality_category"] = unclassified_df[ColumnStandard.GAP_PERCENTAGE].apply(
                 lambda x: "High_quality" if x <= self.gap_threshold else "Low_quality"
             )
 
@@ -1026,7 +1107,7 @@ class UMeccClassifier:
 
     def format_outputs(
         self, uecc_df: pd.DataFrame, mecc_df: pd.DataFrame
-    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """
         Format output DataFrames with appropriate columns
 
@@ -1040,20 +1121,20 @@ class UMeccClassifier:
         # Format Uecc (clean output)
         if not uecc_df.empty:
             uecc_formatted = uecc_df.copy()
-            uecc_formatted["match_degree"] = 100 - uecc_formatted["Gap_Percentage"]
+            uecc_formatted[ColumnStandard.MATCH_DEGREE] = 100 - uecc_formatted[ColumnStandard.GAP_PERCENTAGE]
         else:
             uecc_formatted = uecc_df
 
         # Format Mecc (clean output)
         if not mecc_df.empty:
             mecc_formatted = mecc_df.copy()
-            mecc_formatted["match_degree"] = 100 - mecc_formatted["Gap_Percentage"]
+            mecc_formatted[ColumnStandard.MATCH_DEGREE] = 100 - mecc_formatted[ColumnStandard.GAP_PERCENTAGE]
         else:
             mecc_formatted = mecc_df
 
         return uecc_formatted, mecc_formatted
 
-    def run(self, alignment_file: Path) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    def run(self, alignment_file: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """
         Run complete U/Mecc classification
 

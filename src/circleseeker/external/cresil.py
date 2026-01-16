@@ -173,6 +173,9 @@ class Cresil(ExternalTool):
         output_dir.mkdir(parents=True, exist_ok=True)
         output_dir = output_dir.resolve()
 
+        # Track symlinks created for cleanup
+        symlinks_to_cleanup: list[Path] = []
+
         # Cresil substep 1: trim
         self.logger.info("  → Cresil substep 1/2: trim")
         trim_file = self.trim(
@@ -214,6 +217,7 @@ class Cresil(ExternalTool):
                 if not link_candidate.exists():
                     try:
                         link_candidate.symlink_to(reference_fasta)
+                        symlinks_to_cleanup.append(link_candidate)
                     except OSError as link_exc:
                         raise FileNotFoundError(
                             "Reference FASTA index missing and automatic creation failed; "
@@ -247,4 +251,19 @@ class Cresil(ExternalTool):
         )
 
         self.logger.info(f"Cresil pipeline completed. Output: {eccDNA_output}")
+
+        # Cleanup any symlinks created during the process
+        for symlink in symlinks_to_cleanup:
+            try:
+                if symlink.is_symlink():
+                    symlink.unlink()
+                    self.logger.debug(f"Cleaned up temporary symlink: {symlink}")
+                    # Also cleanup any .fai file created alongside the symlink
+                    fai_file = symlink.with_suffix(symlink.suffix + ".fai")
+                    if fai_file.exists():
+                        fai_file.unlink()
+                        self.logger.debug(f"Cleaned up temporary index: {fai_file}")
+            except OSError as e:
+                self.logger.warning(f"Failed to cleanup symlink {symlink}: {e}")
+
         return eccDNA_output

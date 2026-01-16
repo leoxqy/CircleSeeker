@@ -129,6 +129,6 @@ class TideHunterRunner(TideHunter):
         super().__init__(threads=num_threads)
         self.num_threads = num_threads
 
-    def run(self, input_fasta, output_path):
+    def run(self, input_fasta: Path, output_path: Path) -> None:  # type: ignore[override]
         """Run TideHunter with legacy interface."""
         return self.run_analysis(input_file=Path(input_fasta), output_file=Path(output_path))

@@ -2,20 +2,121 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from circleseeker.core.pipeline_types import ResultKeys
 from circleseeker.exceptions import PipelineError
 
+if TYPE_CHECKING:
+    from circleseeker.core.pipeline import Pipeline
 
-def read_filter(pipeline) -> None:
+
+def _get_xecc_source_read_names(xecc_fasta: Path, logger: logging.Logger) -> set[str]:
+    """
+    Extract original read names from XeccDNA FASTA.
+
+    XeccDNA FASTA IDs have format: {readName}|{repN}|{consLen}|{copyNum}|circular
+    or with suffix: {readName}|...|circular__X{n}
+
+    Returns set of original read names.
+    """
+    if not xecc_fasta.exists() or xecc_fasta.stat().st_size == 0:
+        return set()
+
+    read_names: set[str] = set()
+    try:
+        with open(xecc_fasta, "r") as f:
+            for line in f:
+                if line.startswith(">"):
+                    # Parse ID: >readName|repN|consLen|copyNum|circular or similar
+                    seq_id = line[1:].split()[0]  # Remove > and take first part
+                    # Original read name is the first part before |
+                    original_read_name = seq_id.split("|")[0]
+                    if original_read_name:
+                        read_names.add(original_read_name)
+    except Exception as e:
+        logger.warning(f"Failed to parse XeccDNA FASTA: {e}")
+        return set()
+
+    logger.info(f"Found {len(read_names)} unique source reads from XeccDNA")
+    return read_names
+
+
+def _append_reads_from_fasta(
+    source_fasta: Path,
+    target_fasta: Path,
+    read_names: set[str],
+    logger: logging.Logger,
+) -> int:
+    """
+    Append specific reads from source FASTA to target FASTA.
+
+    Args:
+        source_fasta: Original input FASTA file
+        target_fasta: Target file to append reads to
+        read_names: Set of read names to extract
+        logger: Logger instance
+
+    Returns:
+        Number of reads appended
+    """
+    if not source_fasta.exists() or not read_names:
+        return 0
+
+    appended_count = 0
+    try:
+        with open(target_fasta, "ab") as out_f:
+            with open(source_fasta, "rb") as in_f:
+                current_header: Optional[bytes] = None
+                current_lines: list[bytes] = []
+                write_current = False
+
+                for line in in_f:
+                    if line.startswith(b">"):
+                        # Write previous sequence if needed
+                        if current_header is not None and write_current:
+                            out_f.write(current_header)
+                            for seq_line in current_lines:
+                                out_f.write(seq_line)
+                            appended_count += 1
+
+                        # Start new sequence
+                        current_header = line
+                        current_lines = []
+
+                        # Check if this read should be included
+                        header_str = line[1:].decode("utf-8", errors="replace").split()[0]
+                        write_current = header_str in read_names
+                    else:
+                        current_lines.append(line)
+
+                # Write last sequence
+                if current_header is not None and write_current:
+                    out_f.write(current_header)
+                    for seq_line in current_lines:
+                        out_f.write(seq_line)
+                    appended_count += 1
+
+    except Exception as e:
+        logger.warning(f"Failed to append XeccDNA source reads: {e}")
+        return 0
+
+    if appended_count > 0:
+        logger.info(f"Appended {appended_count} XeccDNA source reads to inference input")
+    return appended_count
+
+
+def read_filter(pipeline: Pipeline) -> None:
     """Step 9: Filter sequences using read_filter module (Sieve)."""
     from circleseeker.modules.read_filter import Sieve
 
     carousel_csv = pipeline.config.output_dir / "tandem_to_ring.csv"
 
     original_fasta = pipeline.config.input_file
+    if original_fasta is None:
+        raise PipelineError("Input file is required")
     if not original_fasta.exists():
         pipeline.logger.error("Original input FASTA file not found; cannot run sieve step")
         raise PipelineError(f"Missing input FASTA: {original_fasta}")
@@ -52,7 +153,7 @@ def read_filter(pipeline) -> None:
     )
 
 
-def minimap2(pipeline) -> None:
+def minimap2(pipeline: Pipeline) -> None:
     """Step 10: Prepare mapping artifacts (alignment optional for Cresil)."""
     from circleseeker.external.minimap2 import Minimap2, MiniMapConfig
 
@@ -93,7 +194,27 @@ def minimap2(pipeline) -> None:
             pipeline.logger.error(f"Failed to create combined FASTA: {e}")
             raise
 
+    # Append XeccDNA source reads to inference input
+    # XeccDNA are rings that couldn't be classified as U/M/C, their source reads
+    # should also be included in inference to see if they can be detected
+    xecc_fasta = pipeline.config.output_dir / f"{pipeline.config.prefix}_XeccDNA.fasta"
+    xecc_appended = 0
+    if xecc_fasta.exists() and xecc_fasta.stat().st_size > 0:
+        xecc_read_names = _get_xecc_source_read_names(xecc_fasta, pipeline.logger)
+        if xecc_read_names:
+            original_input = pipeline.config.input_file
+            if original_input and Path(original_input).exists():
+                xecc_appended = _append_reads_from_fasta(
+                    source_fasta=Path(original_input),
+                    target_fasta=input_fasta,
+                    read_names=xecc_read_names,
+                    logger=pipeline.logger,
+                )
+    else:
+        pipeline.logger.debug("No XeccDNA FASTA found or empty; skipping XeccDNA source reads")
+
     pipeline._set_result(ResultKeys.ALL_FILTERED_FASTA, str(input_fasta))
+    pipeline._set_result(ResultKeys.XECC_SOURCE_READS_ADDED, xecc_appended)
 
     if not input_fasta.exists() or input_fasta.stat().st_size == 0:
         pipeline.logger.warning(
@@ -110,14 +231,17 @@ def minimap2(pipeline) -> None:
         pipeline.logger.info("Cresil selected; skipping minimap2 alignment (BAM not required)")
         return
 
+    # Read minimap2 config from pipeline configuration
+    minimap2_cfg = pipeline.config.tools.minimap2
     config = MiniMapConfig(
-        preset="map-hifi",
+        preset=minimap2_cfg.get("preset", "map-hifi"),
         threads=pipeline.config.threads,
         output_format="bam",
         allow_secondary=True,
         build_index=True,
         sort_bam=True,
         index_bam=True,
+        additional_args=minimap2_cfg.get("additional_args", ""),
     )
 
     minimap2_tool = Minimap2(config=config, logger=pipeline.logger.getChild("minimap2"))
@@ -133,7 +257,7 @@ def minimap2(pipeline) -> None:
     pipeline._set_result(ResultKeys.MINIMAP2_BAM, str(output_bam))
 
 
-def ecc_inference(pipeline) -> None:
+def ecc_inference(pipeline: Pipeline) -> None:
     """Step 11: Circular DNA detection - Cresil preferred, Cyrcular fallback."""
     pipeline.state.results.pop(ResultKeys.INFERENCE_FAILED, None)
     pipeline.state.results.pop(ResultKeys.INFERENCE_ERROR, None)
@@ -205,7 +329,7 @@ def ecc_inference(pipeline) -> None:
         _mark_inference_failed(tool_name=locals().get("tool", "unknown"), exc=exc)
 
 
-def run_cresil_inference(pipeline) -> None:
+def run_cresil_inference(pipeline: Pipeline) -> None:
     """Run Cresil inference pipeline (replaces Steps 10-11 when available)."""
     from circleseeker.external.cresil import Cresil
     from circleseeker.modules.cresil_adapter import write_cyrcular_compatible_tsv
@@ -216,25 +340,36 @@ def run_cresil_inference(pipeline) -> None:
         input_fasta = Path(sieve_output)
     else:
         input_fasta = pipeline.config.output_dir / f"{pipeline.config.prefix}_all_filtered.fasta"
-        if not input_fasta.exists():
-            pipeline.logger.warning("No filtered FASTA found, using original input")
-            input_fasta = pipeline.config.input_file
+        if not input_fasta.exists() or input_fasta.stat().st_size == 0:
+            pipeline.logger.warning(
+                "No filtered FASTA found; skipping Cresil inference. "
+                "Inference requires filtered reads from earlier pipeline steps."
+            )
+            pipeline.state.results[ResultKeys.CYRCULAR_RESULT_COUNT] = 0
+            pipeline.state.results[ResultKeys.CYRCULAR_OVERVIEW] = None
+            return
 
     reference_mmi_str = pipeline._get_result(ResultKeys.REFERENCE_MMI)
     reference_mmi = Path(reference_mmi_str) if reference_mmi_str else None
     if not (reference_mmi and reference_mmi.exists()):
         reference_mmi = pipeline._ensure_reference_mmi()
         pipeline._set_result(ResultKeys.REFERENCE_MMI, str(reference_mmi))
+    if reference_mmi is None:
+        raise PipelineError("Failed to create or locate reference MMI index")
 
     cresil = Cresil(logger=pipeline.logger.getChild("cresil"))
 
     output_dir = pipeline.config.output_dir / "cresil_output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    reference_fasta = pipeline.config.reference
+    if reference_fasta is None:
+        raise PipelineError("Reference genome is required")
+
     pipeline.logger.info("Running Cresil pipeline (trim + identify)")
     eccDNA_final = cresil.run_full_pipeline(
         fasta_query=input_fasta,
-        reference_fasta=pipeline.config.reference,
+        reference_fasta=reference_fasta,
         reference_mmi=reference_mmi,
         output_dir=output_dir,
         threads=pipeline.config.threads,
@@ -259,7 +394,7 @@ def run_cresil_inference(pipeline) -> None:
         pipeline.state.results[ResultKeys.CYRCULAR_RESULT_COUNT] = 0
 
 
-def run_cyrcular_inference(pipeline) -> None:
+def run_cyrcular_inference(pipeline: Pipeline) -> None:
     """Run Cyrcular inference pipeline (original implementation)."""
     from circleseeker.modules.cyrcular_calling import PipelineConfig as CCConfig
     from circleseeker.modules.cyrcular_calling import CyrcularCallingPipeline
@@ -269,9 +404,13 @@ def run_cyrcular_inference(pipeline) -> None:
         pipeline.logger.warning("No BAM file from minimap2, skipping Cyrcular-Calling step")
         return
 
+    reference = pipeline.config.reference
+    if reference is None:
+        raise PipelineError("Reference genome is required")
+
     cfg = CCConfig(
         bam_file=Path(bam_file),
-        reference=pipeline.config.reference,
+        reference=reference,
         output_dir=pipeline.config.output_dir,
         sample_name=pipeline.config.prefix,
         threads=pipeline.config.threads,
@@ -292,7 +431,7 @@ def run_cyrcular_inference(pipeline) -> None:
     pipeline.state.results[ResultKeys.CYRCULAR_RESULT_COUNT] = len(results) if results else 0
 
 
-def curate_inferred_ecc(pipeline) -> list[str] | None:
+def curate_inferred_ecc(pipeline: Pipeline) -> list[str] | None:
     """Step 12: Curate inferred eccDNA tables from Cyrcular overview TSV."""
     from circleseeker.modules.iecc_curator import (
         curate_ecc_tables,
@@ -323,6 +462,7 @@ def curate_inferred_ecc(pipeline) -> list[str] | None:
         pipeline.state.results[ResultKeys.INFERRED_CHIMERIC_TSV] = None
         pipeline.state.results[ResultKeys.INFERRED_SIMPLE_FASTA] = None
         pipeline.state.results[ResultKeys.INFERRED_CHIMERIC_FASTA] = None
+        pipeline.state.results[ResultKeys.INFERRED_DIR] = None
         return None
 
     pipeline.state.results[ResultKeys.CYRCULAR_OVERVIEW] = pipeline._serialize_path_for_state(
@@ -365,7 +505,7 @@ def curate_inferred_ecc(pipeline) -> list[str] | None:
             inferred_prefix,
         )
 
-    written: List[str] = []
+    written: list[str] = []
     if simple_csv_path and simple_csv_path.exists() and simple_csv_path.stat().st_size > 0:
         pipeline.state.results[ResultKeys.INFERRED_SIMPLE_TSV] = pipeline._serialize_path_for_state(
             simple_csv_path
@@ -421,4 +561,3 @@ def curate_inferred_ecc(pipeline) -> list[str] | None:
         )
 
     return written or None
-

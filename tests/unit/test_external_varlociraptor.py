@@ -228,14 +228,20 @@ class TestVarlociraptor:
         # Mock successful pipeline processes
         mock_p1 = MagicMock()
         mock_p1.wait.return_value = 0
+        mock_p1.returncode = 0
         mock_p1.stdout = MagicMock()
+        mock_p1.communicate.return_value = (None, b"")
 
         mock_p2 = MagicMock()
         mock_p2.wait.return_value = 0
+        mock_p2.returncode = 0
         mock_p2.stdout = MagicMock()
+        mock_p2.communicate.return_value = (None, b"")
 
         mock_p3 = MagicMock()
         mock_p3.wait.return_value = 0
+        mock_p3.returncode = 0
+        mock_p3.communicate.return_value = (None, b"")
 
         mock_popen.side_effect = [mock_p1, mock_p2, mock_p3]
 
@@ -277,8 +283,9 @@ class TestVarlociraptor:
 
     @patch.object(Varlociraptor, '_check_installation')
     @patch('subprocess.Popen')
-    def test_filter_calls_fdr_does_not_pipe_stderr(self, mock_popen, mock_check, tmp_path):
-        """Ensure filter_calls_fdr_local_smart doesn't pipe stderr to avoid deadlocks."""
+    def test_filter_calls_fdr_captures_stderr(self, mock_popen, mock_check, tmp_path):
+        """Ensure filter_calls_fdr_local_smart captures stderr for error handling."""
+        import subprocess
         input_calls_bcf = tmp_path / "calls.bcf"
         output_calls_fdr_bcf = tmp_path / "output" / "calls_filtered.bcf"
 
@@ -286,14 +293,20 @@ class TestVarlociraptor:
 
         mock_p1 = MagicMock()
         mock_p1.wait.return_value = 0
+        mock_p1.returncode = 0
         mock_p1.stdout = MagicMock()
+        mock_p1.communicate.return_value = (None, b"")
 
         mock_p2 = MagicMock()
         mock_p2.wait.return_value = 0
+        mock_p2.returncode = 0
         mock_p2.stdout = MagicMock()
+        mock_p2.communicate.return_value = (None, b"")
 
         mock_p3 = MagicMock()
         mock_p3.wait.return_value = 0
+        mock_p3.returncode = 0
+        mock_p3.communicate.return_value = (None, b"")
 
         mock_popen.side_effect = [mock_p1, mock_p2, mock_p3]
 
@@ -303,8 +316,9 @@ class TestVarlociraptor:
             output_calls_fdr_bcf=output_calls_fdr_bcf,
         )
 
+        # Verify stderr is captured via PIPE for proper error handling
         for call in mock_popen.call_args_list:
-            assert call.kwargs.get("stderr") is None
+            assert call.kwargs.get("stderr") == subprocess.PIPE
 
     @patch.object(Varlociraptor, '_check_installation')
     @patch('subprocess.Popen')
@@ -318,14 +332,20 @@ class TestVarlociraptor:
         # Mock successful processes
         mock_p1 = MagicMock()
         mock_p1.wait.return_value = 0
+        mock_p1.returncode = 0
         mock_p1.stdout = MagicMock()
+        mock_p1.communicate.return_value = (None, b"")
 
         mock_p2 = MagicMock()
         mock_p2.wait.return_value = 0
+        mock_p2.returncode = 0
         mock_p2.stdout = MagicMock()
+        mock_p2.communicate.return_value = (None, b"")
 
         mock_p3 = MagicMock()
         mock_p3.wait.return_value = 0
+        mock_p3.returncode = 0
+        mock_p3.communicate.return_value = (None, b"")
 
         mock_popen.side_effect = [mock_p1, mock_p2, mock_p3]
 
@@ -355,15 +375,20 @@ class TestVarlociraptor:
         # Mock failed first process
         mock_p1 = MagicMock()
         mock_p1.wait.return_value = 1
+        mock_p1.returncode = 1
         mock_p1.communicate.return_value = (None, b"Filter failed")
         mock_p1.stdout = MagicMock()
 
         mock_p2 = MagicMock()
         mock_p2.wait.return_value = 0
+        mock_p2.returncode = 0
         mock_p2.stdout = MagicMock()
+        mock_p2.communicate.return_value = (None, b"")
 
         mock_p3 = MagicMock()
         mock_p3.wait.return_value = 0
+        mock_p3.returncode = 0
+        mock_p3.communicate.return_value = (None, b"")
 
         mock_popen.side_effect = [mock_p1, mock_p2, mock_p3]
 

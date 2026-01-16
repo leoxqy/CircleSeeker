@@ -1,6 +1,6 @@
-# CircleSeeker Pipeline 模块说明（v0.9.15）
+# CircleSeeker Pipeline 模块说明（v0.10.3）
 
-本文件概述 CircleSeeker 0.9.15 的 16 个管线步骤、输入输出关系以及关键实现要点，帮助使用者理解整体流程与模块职责。
+本文件概述 CircleSeeker 0.10.3 的 16 个管线步骤、输入输出关系以及关键实现要点，帮助使用者理解整体流程与模块职责。
 
 ---
 
@@ -14,6 +14,13 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 | **处理阶段** | 7-10 | 对 U/M/C 三类候选进行聚合、去重与过滤 |
 | **推断阶段** | 11-13 | 使用 Cresil（或 Cyrcular）补充推断结果并进行整理 |
 | **整合阶段** | 14-16 | 合并所有信息、生成报告并打包产物 |
+
+从证据来源角度，16 个步骤也可以更直观地理解为“两条 Caller + 一个整合阶段”：
+
+- **CtcReads**：含 **Ctc**（**C**oncatemeric **t**andem **c**opies）信号的 reads（对应 `tandem_to_ring.csv` 中的 CtcR-* 分类）。
+- **CtcReads-Caller**（步骤 1-10）：基于 CtcReads 证据产出 **Confirmed** U/M/C eccDNA。
+- **SplitReads-Caller**（步骤 11-13）：基于 split-reads/junction 证据进行推断（Cresil 优先，Cyrcular 备用），产出 **Inferred** eccDNA。
+- **Integration**（步骤 14-16）：对 Confirmed/Inferred 做去冗余合并、统计与打包交付。
 
 运行过程中，所有中间文件写入 `<output>/.tmp_work/`，最终由 `ecc_packager` 复制到目标目录结构。
 
@@ -44,7 +51,7 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 
 ## 3. 阶段详解
 
-### 3.1 检测阶段（步骤 1-6）
+### 3.1 检测阶段（CtcReads-Caller，步骤 1-6）
 
 1. **check_dependencies**
    启动时预检外部工具与推断引擎（至少需要 Cresil 或 Cyrcular 之一）。缺失依赖会中止运行并给出安装提示。
@@ -64,7 +71,7 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 6. **cecc_build**
    基于 `um_classify.all.csv`（或回退到 `um_classify.unclassified.csv`）进行多段链构建，输出 `cecc_build.csv`。同时拦截并单独输出 `ambiguous_uc.csv` / `ambiguous_mc.csv`（不进入后续主流程），用于后续研究与参数调优。
 
-### 3.2 处理阶段（步骤 7-10）
+### 3.2 处理阶段（CtcReads-Caller，步骤 7-10）
 
 7. **umc_process**
    统一整理 U/M/C 三类结果，生成标准化 CSV 与 FASTA，并统计对应数量。
@@ -78,7 +85,7 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 10. **read_filter**
     依据过滤规则筛选确认的 eccDNA reads，输出与 downstream 兼容的 FASTA。
 
-### 3.3 推断阶段（步骤 11-13）
+### 3.3 推断阶段（SplitReads-Caller，步骤 11-13）
 
 11. **minimap2**
     检查并生成参考基因组 `.mmi` 索引，用于 Cresil 或 Cyrcular。若索引缺失会自动运行 `minimap2 -d`。
@@ -91,7 +98,7 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 13. **curate_inferred_ecc**
     对推断结果进行清洗、格式化，生成 CSV/FASTA，并与既有标准列名称对齐（内部调用 `iecc_curator` 模块）。
 
-### 3.4 整合阶段（步骤 14-16）
+### 3.4 整合阶段（Integration，步骤 14-16）
 
 14. **ecc_unify**
     汇总确认与推断结果，检测并标记冗余的嵌合体 eccDNA。v0.9.4 引入了基于片段重叠的检测算法：

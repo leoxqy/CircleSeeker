@@ -14,7 +14,7 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Set, Union
+from typing import Optional, Sequence, Union
 
 import numpy as np
 import pandas as pd
@@ -41,18 +41,111 @@ def _sanitize_fasta_id(id_str: str) -> str:
     return id_str
 
 
-def _coerce_to_paths(value: Optional[Union[Path, Sequence[Path]]]) -> List[Path]:
+def _coerce_to_paths(value: Optional[Union[Path, Sequence[Path]]]) -> list[Path]:
     """Normalize path inputs to a list of Path objects."""
     if value is None:
         return []
     if isinstance(value, (str, Path)):
         return [Path(value)]
-    paths: List[Path] = []
+    paths: list[Path] = []
     for item in value:
         if not item:
             continue
         paths.append(Path(item))
     return paths
+
+
+from abc import ABC, abstractmethod
+
+
+class BaseEccProcessor(ABC):
+    """Base class for eccDNA processors with shared functionality.
+
+    This abstract class provides common functionality for UeccProcessor,
+    MeccProcessor, and CeccProcessor to reduce code duplication.
+    """
+
+    def __init__(
+        self,
+        seq_library: "SequenceLibrary",
+        config: UMCProcessConfig,
+        logger: Optional[logging.Logger] = None,
+    ):
+        """Initialize eccDNA processor.
+
+        Args:
+            seq_library: SequenceLibrary instance for sequence lookup
+            config: Processing configuration
+            logger: Optional logger instance
+        """
+        self.seq_library = seq_library
+        self.config = config
+        self.logger = logger if logger else get_logger(self.__class__.__name__)
+        self.fasta_records: list[SeqRecord] = []
+        self.counter = 0
+
+    @abstractmethod
+    def get_eccDNA_prefix(self) -> str:
+        """Return the prefix for this eccDNA type (U, M, or C)."""
+        pass
+
+    @abstractmethod
+    def cluster_by_signature(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Type-specific clustering implementation."""
+        pass
+
+    def load_csv_files(self, csv_files: Sequence[Path]) -> Optional[pd.DataFrame]:
+        """Load and concatenate CSV files.
+
+        Args:
+            csv_files: Sequence of CSV file paths
+
+        Returns:
+            Combined DataFrame or None if no valid data
+        """
+        dataframes: list[pd.DataFrame] = []
+        for csv_file in csv_files:
+            if not csv_file:
+                continue
+            csv_path = Path(csv_file)
+            if not csv_path.exists() or csv_path.stat().st_size == 0:
+                continue
+            try:
+                df = pd.read_csv(csv_path)
+                if not df.empty:
+                    dataframes.append(df)
+            except Exception as exc:
+                self.logger.warning(f"Unable to read {csv_path}: {exc}")
+
+        if not dataframes:
+            return None
+
+        return pd.concat(dataframes, ignore_index=True)
+
+    def save_outputs(
+        self,
+        df: pd.DataFrame,
+        output_dir: Path,
+        prefix: str,
+        ecc_type: str,
+    ) -> None:
+        """Save processed outputs to CSV and FASTA files.
+
+        Args:
+            df: Processed DataFrame
+            output_dir: Output directory
+            prefix: Sample prefix
+            ecc_type: eccDNA type (UeccDNA, MeccDNA, CeccDNA)
+        """
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_csv = output_dir / f"{prefix}_{ecc_type}_processed.csv"
+        df.to_csv(output_csv, index=False)
+
+        if self.fasta_records:
+            output_fasta = output_dir / f"{prefix}_{ecc_type}_pre.fasta"
+            with open(output_fasta, "w") as handle:
+                SeqIO.write(self.fasta_records, handle, "fasta")
+            self.logger.debug(f"Saved {len(self.fasta_records)} {ecc_type} sequences")
 
 
 class SequenceLibrary:
@@ -61,8 +154,8 @@ class SequenceLibrary:
     def __init__(self, logger: Optional[logging.Logger] = None):
         """Initialize sequence library."""
         self.logger = logger if logger else get_logger(self.__class__.__name__)
-        self.fasta_sequences: Dict[str, str] = {}
-        self.primary_ids: Set[str] = set()
+        self.fasta_sequences: dict[str, str] = {}
+        self.primary_ids: set[str] = set()
 
     def load_fasta(self, fasta_file: Path) -> None:
         """Load FASTA sequences into memory."""
@@ -132,7 +225,7 @@ class UeccProcessor:
         self.seq_library = seq_library
         self.config = config
         self.logger = logger if logger else get_logger(self.__class__.__name__)
-        self.fasta_records: List[SeqRecord] = []
+        self.fasta_records: list[SeqRecord] = []
         self.counter = 0
 
     def cluster_by_location(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -180,7 +273,7 @@ class UeccProcessor:
 
                 # Aggregate reads if present
                 if "reads" in group.columns:
-                    all_reads = []
+                    all_reads: list[str] = []
                     for reads_str in group["reads"].dropna():
                         if str(reads_str) not in ["", "NA"]:
                             reads_list = str(reads_str).split(";")
@@ -284,7 +377,7 @@ class UeccProcessor:
         self.counter = 0
 
         # Load all CSV files
-        dataframes: List[pd.DataFrame] = []
+        dataframes: list[pd.DataFrame] = []
         for csv_file in csv_files:
             if not csv_file:
                 continue
@@ -354,7 +447,7 @@ class MeccProcessor:
         self.seq_library = seq_library
         self.config = config
         self.logger = logger if logger else get_logger(self.__class__.__name__)
-        self.fasta_records: List[SeqRecord] = []
+        self.fasta_records: list[SeqRecord] = []
         self.counter = 0
 
     def generate_mecc_signature(self, df_group: pd.DataFrame) -> str:
@@ -616,7 +709,7 @@ class MeccProcessor:
         self.counter = 0
 
         # Load all CSV files
-        dataframes: List[pd.DataFrame] = []
+        dataframes: list[pd.DataFrame] = []
         for csv_file in csv_files:
             if not csv_file:
                 continue
@@ -692,7 +785,7 @@ class CeccProcessor:
         self.seq_library = seq_library
         self.config = config
         self.logger = logger if logger else get_logger(self.__class__.__name__)
-        self.fasta_records: List[SeqRecord] = []
+        self.fasta_records: list[SeqRecord] = []
         self.counter = 0
 
     def generate_cecc_signature(self, df_group: pd.DataFrame) -> str:
@@ -953,7 +1046,7 @@ class CeccProcessor:
         self.counter = 0
 
         # Load all CSV files
-        dataframes: List[pd.DataFrame] = []
+        dataframes: list[pd.DataFrame] = []
         for csv_file in csv_files:
             if not csv_file:
                 continue
@@ -1024,9 +1117,9 @@ class XeccExporter:
         self.config = config
         self.logger = logger if logger else get_logger(self.__class__.__name__)
 
-    def _get_classified_ids(self, classified_csvs: List[Path]) -> Set[str]:
+    def _get_classified_ids(self, classified_csvs: Sequence[Path]) -> set[str]:
         """Reads all classified query_ids from the U/M/C CSV files."""
-        classified_ids: Set[str] = set()
+        classified_ids: set[str] = set()
 
         for csv_file in classified_csvs:
             if not csv_file.exists():
@@ -1109,7 +1202,7 @@ class UMCProcess:
         cecc_csv: Optional[Union[Path, Sequence[Path]]],
         output_dir: Path,
         prefix: str = "sample",
-    ) -> Dict[str, Union[pd.DataFrame, Path]]:
+    ) -> dict[str, Union[pd.DataFrame, Path]]:
         """Process all eccDNA types with correct logic."""
         self.logger.info("Starting UMC processing module")
 
@@ -1121,7 +1214,7 @@ class UMCProcess:
         mecc_files = _coerce_to_paths(mecc_csv)
         cecc_files = _coerce_to_paths(cecc_csv)
 
-        results: Dict[str, Union[pd.DataFrame, Path]] = {}
+        results: dict[str, Union[pd.DataFrame, Path]] = {}
 
         # Process X (unclassified) first
         if self.config.process_xecc:
@@ -1172,7 +1265,7 @@ class UMCProcess:
         cecc_csv: Optional[Path] = None,
         output_dir: Optional[Path] = None,
         prefix: str = "sample",
-    ) -> Dict[str, Union[pd.DataFrame, Path]]:
+    ) -> dict[str, Union[pd.DataFrame, Path]]:
         """Run the UMC processing pipeline with auto-discovery of input files."""
 
         # Auto-discover file paths if not provided

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Any, cast
 import yaml
 from circleseeker.exceptions import ConfigurationError
 
@@ -34,10 +34,10 @@ class PerformanceConfig:
 class ToolConfig:
     """External tool configuration."""
 
-    tidehunter: Dict[str, Any] = field(
+    tidehunter: dict[str, Any] = field(
         default_factory=lambda: {"k": 16, "w": 1, "p": 100, "P": 2000000, "e": 0.1, "f": 2}
     )
-    um_classify: Dict[str, Any] = field(
+    um_classify: dict[str, Any] = field(
         default_factory=lambda: {
             "gap_threshold": 10.0,
             # Coverage model parameters (preferred, fractions 0-1)
@@ -56,6 +56,10 @@ class ToolConfig:
             "u_secondary_min_frac": 0.01,
             "u_secondary_min_bp": 50,
             "u_contig_gap_bp": 1000,
+            # Adaptive secondary mapping thresholds (for improved large-scale performance)
+            "u_secondary_max_ratio": 0.05,  # Max secondary/primary ratio before veto
+            "u_high_coverage_threshold": 0.98,  # Coverage above this gets relaxed thresholds
+            "u_high_mapq_threshold": 50,  # MAPQ above this increases confidence
             "theta_locus": 0.95,
             "pos_tol_bp": 50,
             # Ambiguity interception (fractions 0-1)
@@ -66,7 +70,7 @@ class ToolConfig:
             "max_identity_gap_for_mecc": 5.0,
         }
     )
-    cecc_build: Dict[str, Any] = field(
+    cecc_build: dict[str, Any] = field(
         default_factory=lambda: {
             "overlap_threshold": 0.95,
             "min_segments": 2,
@@ -85,13 +89,33 @@ class ToolConfig:
             "max_rotations": 20,
         }
     )
-    minimap2_align: Dict[str, Any] = field(
-        default_factory=lambda: {"preset": "sr", "max_target_seqs": 200, "additional_args": ""}
+    minimap2_align: dict[str, Any] = field(
+        default_factory=lambda: {
+            "preset": "sr",
+            "max_target_seqs": 200,
+            "additional_args": "",
+            # min_identity: Base identity threshold (%).
+            # For HiFi data, 99.0 is recommended as HiFi error rate is ~1%.
+            "min_identity": 99.0,
+            # identity_decay_per_10kb: Length-based compensation (%).
+            # Longer sequences are allowed lower identity because errors accumulate.
+            # For HiFi data, 0.5 per 10kb is recommended.
+            # Example: 10kb -> 98.5%, 20kb -> 98.0%, 40kb+ -> 97.0% (floor)
+            "identity_decay_per_10kb": 0.5,
+            # min_identity_floor: Identity threshold never goes below this (%).
+            "min_identity_floor": 97.0,
+            # split_by_length: Use different presets for short/long sequences.
+            # For HiFi data, True gives optimal alignment quality.
+            "split_by_length": True,
+            "split_length": 5000,  # Length threshold in bp
+            "preset_short": "sr",  # Preset for sequences < split_length
+            "preset_long": "asm5",  # Preset for sequences >= split_length
+        }
     )
-    minimap2: Dict[str, Any] = field(
+    minimap2: dict[str, Any] = field(
         default_factory=lambda: {"preset": "map-hifi", "additional_args": ""}
     )
-    samtools: Dict[str, Any] = field(default_factory=dict)
+    samtools: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -123,7 +147,7 @@ class Config:
         return self.performance.threads
 
     @threads.setter
-    def threads(self, value: int):
+    def threads(self, value: int) -> None:
         self.performance.threads = value
 
     @property
@@ -131,7 +155,7 @@ class Config:
         return self.runtime.keep_tmp
 
     @keep_tmp.setter
-    def keep_tmp(self, value: bool):
+    def keep_tmp(self, value: bool) -> None:
         self.runtime.keep_tmp = value
 
     def validate(self) -> None:
@@ -153,8 +177,6 @@ class Config:
         # - Relative tmp_dir must be a subdirectory name/path (not '.', not escaping via '..')
         # - If you want temp files outside the output dir, use an absolute path.
         tmp_dir = self.runtime.tmp_dir
-        if not isinstance(tmp_dir, Path):
-            tmp_dir = Path(tmp_dir)
         if not tmp_dir.is_absolute():
             if tmp_dir == Path(".") or str(tmp_dir).strip() in {"", "."}:
                 raise ConfigurationError(
@@ -167,10 +189,10 @@ class Config:
                     "Use an absolute path if you want an external temp directory."
                 )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
 
-        def path_to_str(obj):
+        def path_to_str(obj: Any) -> Any:
             if isinstance(obj, Path):
                 return str(obj)
             elif isinstance(obj, dict):
@@ -179,7 +201,10 @@ class Config:
                 return [path_to_str(item) for item in obj]
             return obj
 
-        return path_to_str(asdict(self))
+        converted = path_to_str(asdict(self))
+        if not isinstance(converted, dict):
+            raise TypeError("Config.to_dict() expected dict")
+        return cast(dict[str, Any], converted)
 
     # ---- New canonical skip flags via properties (backward-compatible) ----
     @property
@@ -191,11 +216,30 @@ class Config:
         self.skip_carousel = value
 
 def load_config(path: Path) -> Config:
-    """Load configuration from YAML file."""
-    with open(path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
+    """Load configuration from YAML file.
 
-    def build_config(data: Dict[str, Any]) -> Config:
+    Args:
+        path: Path to the YAML configuration file
+
+    Returns:
+        Config object populated with values from the file
+
+    Raises:
+        ConfigurationError: If the file cannot be read or contains invalid YAML
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except yaml.YAMLError as e:
+        raise ConfigurationError(f"Invalid YAML syntax in config file {path}: {e}") from e
+    except FileNotFoundError:
+        raise ConfigurationError(f"Config file not found: {path}") from None
+    except PermissionError:
+        raise ConfigurationError(f"Permission denied reading config file: {path}") from None
+    except OSError as e:
+        raise ConfigurationError(f"Error reading config file {path}: {e}") from e
+
+    def build_config(data: dict[str, Any]) -> Config:
         cfg = Config()
 
         # Direct attributes
@@ -244,13 +288,17 @@ def load_config(path: Path) -> Config:
                 if hasattr(cfg.performance, key):
                     setattr(cfg.performance, key, value)
 
-        # Tool config
+        # Tool config with deep merge support
         if "tools" in data:
             for tool, params in data["tools"].items():
-                if hasattr(cfg.tools, tool):
-                    if params is None:
-                        continue
-                    setattr(cfg.tools, tool, params)
+                if hasattr(cfg.tools, tool) and params is not None:
+                    existing = getattr(cfg.tools, tool)
+                    if isinstance(existing, dict) and isinstance(params, dict):
+                        # Deep merge: update existing dict with new values
+                        existing.update(params)
+                    else:
+                        # Non-dict values: replace entirely
+                        setattr(cfg.tools, tool, params)
 
         return cfg
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 from circleseeker.external.base import ExternalTool
 from circleseeker.exceptions import PipelineError
@@ -99,6 +100,7 @@ class Varlociraptor(ExternalTool):
         *,
         fdr: float = 0.2,
         memory_limit: str = "4G",
+        timeout: Optional[int] = None,
     ) -> None:
         """Filter calls with control-FDR, decode phred, and sort to BCF.
 
@@ -106,66 +108,112 @@ class Varlociraptor(ExternalTool):
           varlociraptor filter-calls control-fdr ... input | \
           varlociraptor decode-phred | \
           bcftools sort -m MEM -Ob -o OUTPUT -
+
+        Args:
+            input_calls_bcf: Input BCF file with variant calls
+            output_calls_fdr_bcf: Output BCF file path
+            fdr: False discovery rate threshold (default: 0.2)
+            memory_limit: Memory limit for bcftools sort (default: "4G")
+            timeout: Maximum time in seconds for the pipeline (default: None = no timeout)
         """
+        from circleseeker.exceptions import ExternalToolError
+
         output_calls_fdr_bcf.parent.mkdir(parents=True, exist_ok=True)
 
-        p1 = subprocess.Popen(
-            [
-                self.tool_name,
-                "filter-calls",
-                "control-fdr",
-                "--mode",
-                "local-smart",
-                "--events",
-                "PRESENT",
-                "--var",
-                "BND",
-                "--fdr",
-                str(fdr),
-                str(input_calls_bcf),
-            ],
-            stdout=subprocess.PIPE,
-        )
+        p1 = None
+        p2 = None
+        p3 = None
 
-        p2 = subprocess.Popen(
-            [self.tool_name, "decode-phred"],
-            stdin=p1.stdout,
-            stdout=subprocess.PIPE,
-        )
+        try:
+            p1 = subprocess.Popen(
+                [
+                    self.tool_name,
+                    "filter-calls",
+                    "control-fdr",
+                    "--mode",
+                    "local-smart",
+                    "--events",
+                    "PRESENT",
+                    "--var",
+                    "BND",
+                    "--fdr",
+                    str(fdr),
+                    str(input_calls_bcf),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
 
-        p3 = subprocess.Popen(
-            [
-                "bcftools",
-                "sort",
-                "-m",
-                memory_limit,
-                "-O",
-                "b",
-                "-o",
-                str(output_calls_fdr_bcf),
-                "-",
-            ],
-            stdin=p2.stdout,
-        )
+            p2 = subprocess.Popen(
+                [self.tool_name, "decode-phred"],
+                stdin=p1.stdout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
 
-        # Ensure upstream pipes close
-        if p1.stdout:
-            p1.stdout.close()
-        if p2.stdout:
-            p2.stdout.close()
+            p3 = subprocess.Popen(
+                [
+                    "bcftools",
+                    "sort",
+                    "-m",
+                    memory_limit,
+                    "-O",
+                    "b",
+                    "-o",
+                    str(output_calls_fdr_bcf),
+                    "-",
+                ],
+                stdin=p2.stdout,
+                stderr=subprocess.PIPE,
+            )
 
-        rc3 = p3.wait()
-        rc2 = p2.wait()
-        rc1 = p1.wait()
+            # Allow p1 to receive SIGPIPE if p2 exits
+            if p1.stdout:
+                p1.stdout.close()
+            # Allow p2 to receive SIGPIPE if p3 exits
+            if p2.stdout:
+                p2.stdout.close()
 
-        if rc1 != 0:
-            _, err = p1.communicate()
-            err_text = err.decode(errors="ignore") if err else ""
-            raise PipelineError(f"varlociraptor filter-calls failed: {err_text}")
-        if rc2 != 0:
-            _, err = p2.communicate()
-            err_text = err.decode(errors="ignore") if err else ""
-            raise PipelineError(f"varlociraptor decode-phred failed: {err_text}")
-        if rc3 != 0:
-            err = p3.stderr.read().decode(errors="ignore") if p3.stderr else ""
-            raise PipelineError(f"bcftools sort failed: {err}")
+            # Wait for processes in reverse order to avoid deadlock
+            # No timeout - bioinformatics pipelines can run for extended periods
+            _, stderr3 = p3.communicate(timeout=timeout)
+            _, stderr2 = p2.communicate(timeout=timeout)
+            _, stderr1 = p1.communicate(timeout=timeout)
+
+            # Check return codes
+            if p1.returncode != 0:
+                err_text = stderr1.decode(errors="ignore") if stderr1 else ""
+                raise ExternalToolError(
+                    f"varlociraptor filter-calls failed: {err_text}",
+                    command=[self.tool_name, "filter-calls"],
+                    returncode=p1.returncode,
+                    stderr=err_text,
+                )
+            if p2.returncode != 0:
+                err_text = stderr2.decode(errors="ignore") if stderr2 else ""
+                raise ExternalToolError(
+                    f"varlociraptor decode-phred failed: {err_text}",
+                    command=[self.tool_name, "decode-phred"],
+                    returncode=p2.returncode,
+                    stderr=err_text,
+                )
+            if p3.returncode != 0:
+                err_text = stderr3.decode(errors="ignore") if stderr3 else ""
+                raise ExternalToolError(
+                    f"bcftools sort failed: {err_text}",
+                    command=["bcftools", "sort"],
+                    returncode=p3.returncode,
+                    stderr=err_text,
+                )
+
+        except ExternalToolError:
+            raise
+        except Exception as e:
+            # Clean up processes on unexpected errors
+            for proc in [p1, p2, p3]:
+                if proc is not None:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+            raise PipelineError(f"Pipeline execution failed: {e}") from e

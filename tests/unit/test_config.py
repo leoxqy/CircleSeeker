@@ -455,10 +455,10 @@ class TestLoadConfig:
             config_path.unlink()
 
     def test_load_config_nonexistent_file(self):
-        """Test loading config from nonexistent file."""
+        """Test loading config from nonexistent file raises ConfigurationError."""
         nonexistent_path = Path("nonexistent_config.yaml")
 
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(ConfigurationError, match="Config file not found"):
             load_config(nonexistent_path)
 
 
