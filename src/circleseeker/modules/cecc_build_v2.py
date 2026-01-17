@@ -143,12 +143,52 @@ class CeccBuildV2:
 
         return True
 
+    def _merge_adjacent_regions(
+        self,
+        regions: list[GenomicRegion],
+    ) -> list[GenomicRegion]:
+        """
+        Merge genomically adjacent regions.
+
+        If two consecutive regions are on the same chromosome, same strand,
+        and their genomic coordinates are adjacent (within tolerance),
+        merge them into one region.
+
+        This handles cases where a long genomic region is split into
+        multiple alignment segments.
+        """
+        if len(regions) <= 1:
+            return regions
+
+        merged = [regions[0]]
+        for r in regions[1:]:
+            last = merged[-1]
+            # Check if same chr, same strand, and genomically adjacent
+            if (last.chr == r.chr and
+                last.strand == r.strand and
+                abs(r.start - last.end) <= self.region_tolerance):
+                # Merge: extend the last region
+                merged[-1] = GenomicRegion(
+                    chr=last.chr,
+                    start=min(last.start, r.start),
+                    end=max(last.end, r.end),
+                    strand=last.strand,
+                )
+            else:
+                merged.append(r)
+
+        return merged
+
     def _find_region_repeat(
         self,
         regions: list[GenomicRegion],
     ) -> Optional[tuple[int, int]]:
         """
-        Find the first repeat starting from region[1].
+        Find the first repeat by checking all regions starting from region[1].
+
+        We skip region[0] as it may be incomplete (the ring's start point
+        could be anywhere). We then check region[1], region[2], etc.
+        until we find one that repeats later in the sequence.
 
         Returns:
             Tuple of (start_index, end_index) if repeat found, None otherwise.
@@ -157,13 +197,13 @@ class CeccBuildV2:
         if len(regions) < 3:
             return None
 
-        # Target is the second region (skip first as it may be incomplete)
-        target = regions[1]
-
-        for i in range(2, len(regions)):
-            if regions[i].matches(target, self.region_tolerance):
-                # Found repeat! Cycle is from index 1 to i
-                return (1, i)
+        # Check regions[1], regions[2], ... until we find a repeat
+        for start_idx in range(1, len(regions) - 1):
+            target = regions[start_idx]
+            for end_idx in range(start_idx + 1, len(regions)):
+                if regions[end_idx].matches(target, self.region_tolerance):
+                    # Found repeat! Cycle is from start_idx to end_idx
+                    return (start_idx, end_idx)
 
         return None
 
@@ -183,10 +223,13 @@ class CeccBuildV2:
         # Extract genomic regions
         regions = [self._parse_region(row) for _, row in sorted_alns.iterrows()]
 
+        # Merge adjacent regions (handles split alignments)
+        regions = self._merge_adjacent_regions(regions)
+
         if len(regions) < 3:
             return None
 
-        # Find repeat starting from region[1]
+        # Find repeat (check all regions starting from region[1])
         repeat_info = self._find_region_repeat(regions)
 
         if repeat_info is None:
