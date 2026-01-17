@@ -162,11 +162,8 @@ def _run_last_alignment(
     alignment_output: Path,
     cfg: dict,
 ) -> None:
-    """Run LAST alignment."""
+    """Run LAST alignment (no filtering, LAST defaults are strict)."""
     from circleseeker.external.last import LastAligner
-
-    min_identity = float(cfg.get("min_identity", 90.0))
-    min_alignment_length = int(cfg.get("min_alignment_length", 50))
 
     # LAST database prefix (can be pre-built or auto-generated)
     db_prefix = cfg.get("db_prefix")
@@ -182,6 +179,4 @@ def _run_last_alignment(
         reference_fasta=reference,
         output_tsv=alignment_output,
         db_prefix=db_prefix,
-        min_identity=min_identity,
-        min_alignment_length=min_alignment_length,
     )

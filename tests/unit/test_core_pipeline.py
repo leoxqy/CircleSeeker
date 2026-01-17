@@ -566,10 +566,11 @@ def test_cecc_build_uses_unclassified_only(tmp_path):
         {"query_id": "read_c", "C_cov_best": 0.97, "C_cov_2nd": 0.50},
     ]
 
-    with patch("circleseeker.core.pipeline.CeccBuild") as mock_cecc_build:
+    with patch("circleseeker.modules.cecc_build_v2.CeccBuildV2") as mock_cecc_build:
         def fake_run_pipeline(*, input_csv, output_csv, **_kwargs):
             assert str(input_csv).endswith("um_classify.unclassified.csv")
             pd.DataFrame(cecc_rows).to_csv(output_csv, index=False)
+            return pd.DataFrame(cecc_rows)
 
         mock_cecc_build.return_value.run_pipeline.side_effect = fake_run_pipeline
 

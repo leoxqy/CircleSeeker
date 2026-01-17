@@ -102,8 +102,6 @@ def last_tab_to_blast_tsv(
     tab_path: Path,
     output_path: Path,
     logger: Optional[logging.Logger] = None,
-    min_identity: float = 0.0,
-    min_alignment_length: int = 0,
 ) -> int:
     """Convert LAST TAB format to BLAST outfmt 6-like TSV + MAPQ.
 
@@ -130,8 +128,6 @@ def last_tab_to_blast_tsv(
         tab_path: Path to LAST TAB file
         output_path: Path to output TSV file
         logger: Optional logger
-        min_identity: Minimum identity threshold (%)
-        min_alignment_length: Minimum alignment length filter
 
     Returns:
         Number of alignments written
@@ -145,8 +141,6 @@ def last_tab_to_blast_tsv(
 
     written = 0
     skipped = 0
-    filtered_identity = 0
-    filtered_length = 0
 
     with open(tab_path, "r") as infile, open(output_path, "w") as outfile:
         for line_num, line in enumerate(infile, 1):
@@ -198,22 +192,12 @@ def last_tab_to_blast_tsv(
             if alignment_length <= 0:
                 alignment_length = total_matches + gap_bases
 
-            # Filter by alignment length
-            if min_alignment_length > 0 and alignment_length < min_alignment_length:
-                filtered_length += 1
-                continue
-
             # Calculate identity
             # For LAST, identity = matches / alignment_length
             if alignment_length > 0:
                 identity = (total_matches / alignment_length) * 100.0
             else:
                 identity = 0.0
-
-            # Filter by identity
-            if min_identity > 0 and identity < min_identity:
-                filtered_identity += 1
-                continue
 
             # Convert to MAPQ
             mapq = mismap_to_mapq(mismap)
@@ -258,10 +242,6 @@ def last_tab_to_blast_tsv(
 
     if skipped > 0:
         log.warning(f"Skipped {skipped} malformed lines in TAB file")
-    if filtered_identity > 0:
-        log.info(f"Filtered {filtered_identity} alignments below {min_identity}% identity")
-    if filtered_length > 0:
-        log.info(f"Filtered {filtered_length} alignments below {min_alignment_length}bp length")
 
     log.info(f"Converted {written} alignments from LAST TAB to BLAST TSV")
     return written
@@ -409,22 +389,18 @@ class LastAligner(ExternalTool):
         reference_fasta: Path,
         output_tsv: Path,
         db_prefix: Optional[Path] = None,
-        min_identity: float = 90.0,
-        min_alignment_length: int = 50,
     ) -> Path:
         """Run complete LAST alignment workflow.
 
         1. Build database (if needed)
         2. Run alignment
-        3. Convert to BLAST TSV format
+        3. Convert to BLAST TSV format (no filtering, LAST default thresholds are strict)
 
         Args:
             query_fasta: Query FASTA file
             reference_fasta: Reference FASTA file
             output_tsv: Output TSV file (BLAST format)
             db_prefix: Optional pre-built database prefix
-            min_identity: Minimum identity filter (%)
-            min_alignment_length: Minimum alignment length filter
 
         Returns:
             Path to output TSV file
@@ -449,13 +425,11 @@ class LastAligner(ExternalTool):
         tab_file = output_tsv.with_suffix(".last.tab")
         self.align(query_fasta, db_prefix, tab_file)
 
-        # Convert to BLAST TSV format
+        # Convert to BLAST TSV format (no filtering)
         last_tab_to_blast_tsv(
             tab_file,
             output_tsv,
             logger=self.logger,
-            min_identity=min_identity,
-            min_alignment_length=min_alignment_length,
         )
 
         return output_tsv
