@@ -16,7 +16,9 @@ from circleseeker.utils.column_standards import ColumnStandard
 from pathlib import Path
 from typing import Any, Optional, Iterable
 import pandas as pd
+import numpy as np
 import logging
+import json
 
 
 class UMeccClassifier:
@@ -56,6 +58,8 @@ class UMeccClassifier:
         theta_m: Optional[float] = None,
         theta_u2_max: Optional[float] = None,
         mapq_u_min: int = 0,
+        mapq_m_ambiguous_threshold: int = 0,
+        mecc_identity_gap_threshold: float = 1.0,
         u_secondary_min_frac: float = 0.01,
         u_secondary_min_bp: int = 50,
         u_contig_gap_bp: int = 1000,
@@ -82,6 +86,19 @@ class UMeccClassifier:
                 Set to 1.0 to disable the uniqueness constraint.
             mapq_u_min: If >0, require best-locus minimap2 MAPQ >= this threshold for Uecc.
                 Intended to reduce false-positive Uecc calls in repetitive regions. Default 0 (off).
+            mapq_m_ambiguous_threshold: When ALL loci in a potential Mecc have MAPQ below
+                this threshold, the query is NOT classified as Mecc (left as unclassified).
+                This can help avoid false-positive Mecc calls for Uecc from repetitive regions.
+                WARNING: Most true MeccDNA also have low MAPQ (they come from repetitive regions).
+                Enabling this filter (e.g., threshold=20) can remove ~85% misclassified UeccDNA
+                but also loses ~67% of true MeccDNA. Use with caution.
+                Default 0 (disabled). Set to 20 to enable a moderate filter.
+            mecc_identity_gap_threshold: When the gap between max and second-max locus
+                identity exceeds this threshold, reject Mecc classification.
+                This detects Uecc from repetitive regions that align to multiple loci
+                but have one clearly superior match (identity gap > threshold).
+                A gap >= 1.0 is 100% safe (never rejects true Mecc in benchmarks).
+                Default 1.0. Set to 0 to disable this check.
             u_secondary_min_frac: Secondary coverage fraction threshold that triggers a
                 contiguity check when attempting to call Uecc (default: 0.01).
             u_secondary_min_bp: Secondary coverage absolute bp threshold that triggers a
@@ -115,6 +132,14 @@ class UMeccClassifier:
             self._as_fraction(theta_u2_max) if theta_u2_max is not None else 0.05
         )
         self.mapq_u_min = int(mapq_u_min) if mapq_u_min is not None else 0
+        self.mapq_m_ambiguous_threshold = (
+            int(mapq_m_ambiguous_threshold) if mapq_m_ambiguous_threshold is not None else 0
+        )
+        self.mecc_identity_gap_threshold = (
+            float(mecc_identity_gap_threshold)
+            if mecc_identity_gap_threshold is not None
+            else 1.0
+        )
         self.u_secondary_min_frac = self._as_fraction(u_secondary_min_frac)
         self.u_secondary_min_bp = int(u_secondary_min_bp)
         self.u_contig_gap_bp = int(u_contig_gap_bp)
@@ -818,6 +843,41 @@ class UMeccClassifier:
                 )
                 low_mapq = mapq_best < int(self.MAPQ_LOW_THRESHOLD)
                 low_identity = identity_best < float(self.IDENTITY_LOW_THRESHOLD)
+
+                # MAPQ ambiguity check for Mecc: if ALL loci have low MAPQ,
+                # this might be a Uecc from a repetitive region, not a true Mecc.
+                # Skip classification and leave as unclassified.
+                if self.mapq_m_ambiguous_threshold > 0:
+                    all_loci_low_mapq = True
+                    for lid_check in full_loci:
+                        lid_mapq, _, _, _ = locus_evidence(lid_check)
+                        if lid_mapq >= self.mapq_m_ambiguous_threshold:
+                            all_loci_low_mapq = False
+                            break
+                    if all_loci_low_mapq:
+                        self.stats["mecc_vetoed_low_mapq"] = self.stats.get(
+                            "mecc_vetoed_low_mapq", 0
+                        ) + 1
+                        continue  # Skip Mecc classification, leave as unclassified
+
+                # Identity gap check for Mecc: if one locus has significantly higher
+                # identity than all others, this is likely a Uecc from a repetitive
+                # region rather than a true Mecc (which should have similar identity
+                # across all loci).
+                if self.mecc_identity_gap_threshold > 0:
+                    loci_max_identities = []
+                    for lid_check in full_loci:
+                        _, _, lid_id_best, _ = locus_evidence(lid_check)
+                        loci_max_identities.append(float(lid_id_best))
+                    if len(loci_max_identities) >= 2:
+                        loci_max_identities.sort(reverse=True)
+                        identity_gap = loci_max_identities[0] - loci_max_identities[1]
+                        if identity_gap >= self.mecc_identity_gap_threshold:
+                            self.stats["mecc_vetoed_identity_gap"] = self.stats.get(
+                                "mecc_vetoed_identity_gap", 0
+                            ) + 1
+                            continue  # Skip Mecc classification, leave as unclassified
+
                 conf = self._geom_mean(
                     [
                         self._norm_mapq(mapq_best),
@@ -937,6 +997,26 @@ class UMeccClassifier:
 
         self.logger.info("Uecc: %d queries", uecc_df["query_id"].nunique() if not uecc_df.empty else 0)
         self.logger.info("Mecc: %d queries", mecc_df["query_id"].nunique() if not mecc_df.empty else 0)
+
+        # Log filtering statistics
+        if self.stats.get("mecc_vetoed_low_mapq", 0) > 0:
+            self.logger.info(
+                "Mecc vetoed due to low MAPQ (all loci < %d): %d queries",
+                self.mapq_m_ambiguous_threshold,
+                self.stats["mecc_vetoed_low_mapq"],
+            )
+        if self.stats.get("mecc_vetoed_identity_gap", 0) > 0:
+            self.logger.info(
+                "Mecc vetoed due to identity gap (>= %.1f): %d queries",
+                self.mecc_identity_gap_threshold,
+                self.stats["mecc_vetoed_identity_gap"],
+            )
+        if self.stats.get("uecc_vetoed_low_mapq", 0) > 0:
+            self.logger.info(
+                "Uecc vetoed due to low MAPQ (< %d): %d queries",
+                self.mapq_u_min,
+                self.stats["uecc_vetoed_low_mapq"],
+            )
 
         return uecc_df, mecc_df, classified_queries
 

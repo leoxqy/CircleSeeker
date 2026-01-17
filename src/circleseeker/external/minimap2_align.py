@@ -230,7 +230,7 @@ class Minimap2Aligner(ExternalTool):
         split_by_length: bool = False,
         split_length: int = 5000,
         preset_short: str = "sr",
-        preset_long: str = "asm5",
+        preset_long: str = "sr",
     ) -> Path:
         """Run minimap2 alignment with optional length-based preset splitting.
 
@@ -251,7 +251,7 @@ class Minimap2Aligner(ExternalTool):
             split_by_length: Split queries by length and use different presets
             split_length: Length threshold for splitting (default: 5000bp)
             preset_short: Preset for short sequences (default: "sr")
-            preset_long: Preset for long sequences (default: "asm5")
+            preset_long: Preset for long sequences (default: "sr")
 
         Returns:
             Path to output TSV file

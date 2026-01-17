@@ -274,11 +274,11 @@ tools:
     min_identity: 99.0           # Base identity threshold (%)
     identity_decay_per_10kb: 0.5 # Identity decay per 10kb of sequence length (%)
     min_identity_floor: 97.0     # Minimum identity floor (%)
-    # Length-based preset splitting
-    split_by_length: true        # Use different presets for short/long sequences
+    # Length-based preset splitting (only useful when preset_short != preset_long)
+    split_by_length: false       # Disabled since both presets are "sr"
     split_length: 5000           # Length threshold (bp)
     preset_short: "sr"           # Preset for sequences < split_length
-    preset_long: "asm5"          # Preset for sequences >= split_length
+    preset_long: "sr"            # Preset for sequences >= split_length
 
   minimap2:  # For read mapping (Step 11)
     preset: "map-hifi"

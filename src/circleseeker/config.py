@@ -105,11 +105,14 @@ class ToolConfig:
             # min_identity_floor: Identity threshold never goes below this (%).
             "min_identity_floor": 97.0,
             # split_by_length: Use different presets for short/long sequences.
-            # For HiFi data, True gives optimal alignment quality.
-            "split_by_length": True,
+            # Only useful when preset_short != preset_long.
+            "split_by_length": False,
             "split_length": 5000,  # Length threshold in bp
             "preset_short": "sr",  # Preset for sequences < split_length
-            "preset_long": "asm5",  # Preset for sequences >= split_length
+            # NOTE: For chimera-sensitive Cecc detection, long queries should still use a
+            # split-friendly preset. Assembly presets like asm5 can drop short chimeric
+            # segments (e.g. ~100bp tails) in practice.
+            "preset_long": "sr",  # Preset for sequences >= split_length
         }
     )
     minimap2: dict[str, Any] = field(

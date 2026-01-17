@@ -110,10 +110,10 @@ def run_alignment(pipeline: Pipeline) -> None:
     identity_decay_per_10kb = float(minimap_cfg.get("identity_decay_per_10kb", 0.5))
     min_identity_floor = float(minimap_cfg.get("min_identity_floor", 97.0))
     # Length-based preset splitting: use different presets for short/long sequences
-    split_by_length = bool(minimap_cfg.get("split_by_length", True))
+    split_by_length = bool(minimap_cfg.get("split_by_length", False))
     split_length = int(minimap_cfg.get("split_length", 5000))
     preset_short = minimap_cfg.get("preset_short", "sr")
-    preset_long = minimap_cfg.get("preset_long", "asm5")
+    preset_long = minimap_cfg.get("preset_long", "sr")
 
     runner = Minimap2Aligner(
         threads=pipeline.config.threads, logger=pipeline.logger.getChild("minimap2_align")

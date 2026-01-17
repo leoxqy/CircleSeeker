@@ -86,6 +86,7 @@ class TestToolConfig:
         assert config.minimap2_align["preset"] == "sr"
         assert config.minimap2_align["max_target_seqs"] == 200
         assert config.minimap2_align["additional_args"] == ""
+        assert config.minimap2_align["preset_long"] == "sr"
 
         # Check minimap2 defaults
         assert config.minimap2["preset"] == "map-hifi"

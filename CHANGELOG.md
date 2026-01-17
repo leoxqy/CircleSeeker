@@ -5,6 +5,43 @@ All notable changes to CircleSeeker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.10] - 2026-01-17
+
+### Changed
+- **ML filter disabled by default**: Set `use_ml_filter=False` as default
+  - ML model showed severe overfitting: 99.9% recall on simulated data but 0% filtering on real data
+  - Feature distributions differ significantly between simulated and real data (e.g., n_loci: 2 vs 33)
+  - Rule-based filter (`mecc_identity_gap_threshold=1.0`) remains effective and is now the sole active filter
+  - ML code preserved for future improvements when better training data is available
+
+### Technical Notes
+- Validated new ML model (trained on 57,012 simulated samples) against real hs4 test data
+- ML-only achieved 0% false positive removal vs Rule-only's 21% removal rate
+- Rule-based method: 100% recall, 91.1% precision on real data
+
+## [0.10.9] - 2026-01-16
+
+### Fixed
+- **scikit-learn version constraint**: Limited to `<1.6.0` for compatibility with older GCC/numpy environments
+
+## [0.10.8] - 2026-01-16
+
+### Added
+- **ML-based Mecc false positive filtering**: Two-layer cascade filter to reduce Mecc misclassification
+  - Rule filter (`mecc_identity_gap_threshold=1.0`): 100% safe, rejects candidates where one locus has significantly higher identity than others (identity gap ≥ 1.0)
+  - ML filter (`use_ml_filter=True`, `ml_threshold=0.5`): Random Forest classifier trained on 1958 samples to further reduce false positives
+  - Combined effect: Precision improved from 77.0% → 99.1%, retaining 96.6% of true MeccDNA
+- **Pre-trained Mecc classifier model**: Bundled `mecc_classifier.pkl` and metadata in `circleseeker/models/`
+  - 12 features: length, n_loci, U_cov, locus_cov_min/std, identity_max/min/mean/std, mapq_best, id_gap, id_gap_3rd
+  - No retraining required; model loaded automatically when `use_ml_filter=True`
+- **New um_classify parameters**:
+  - `mecc_identity_gap_threshold`: Identity gap threshold for rule-based veto (default: 1.0)
+  - `use_ml_filter`: Enable/disable ML filtering (default: True)
+  - `ml_threshold`: ML probability threshold for Mecc acceptance (default: 0.5)
+
+### Changed
+- **Dependencies**: Added `scikit-learn>=1.0.0` as required dependency for ML functionality
+
 ## [0.10.3] - 2026-01-16
 
 ### Added

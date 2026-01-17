@@ -147,6 +147,90 @@ class CeccBuild:
 
             self._overlap_numba = _overlap_numba_impl
 
+    def select_non_overlapping_alignments(
+        self, group: pd.DataFrame, overlap_tolerance: int = 10
+    ) -> pd.DataFrame:
+        """
+        Select non-overlapping alignments from a group using greedy algorithm.
+
+        When BLAST produces multiple overlapping alignments for the same query region,
+        this method selects the best non-overlapping subset by prioritizing longer
+        alignments.
+
+        Args:
+            group: DataFrame containing alignments for a single query
+            overlap_tolerance: Maximum allowed overlap in bp (default: 10)
+
+        Returns:
+            DataFrame with selected non-overlapping alignments
+        """
+        if len(group) <= 1:
+            return group.copy()
+
+        # Sort by alignment_length descending to prioritize longer alignments
+        sorted_group = group.sort_values("alignment_length", ascending=False)
+
+        selected_indices = []
+        selected_intervals = []  # [(q_start, q_end), ...]
+
+        for idx, row in sorted_group.iterrows():
+            q_start = float(row["q_start"])
+            q_end = float(row["q_end"])
+
+            # Check overlap with already selected alignments
+            is_overlapping = False
+            for sel_start, sel_end in selected_intervals:
+                overlap_start = max(q_start, sel_start)
+                overlap_end = min(q_end, sel_end)
+                overlap_len = max(0, overlap_end - overlap_start)
+
+                if overlap_len > overlap_tolerance:
+                    is_overlapping = True
+                    break
+
+            if not is_overlapping:
+                selected_indices.append(idx)
+                selected_intervals.append((q_start, q_end))
+
+        return group.loc[selected_indices].copy()
+
+    def preprocess_overlapping_alignments(
+        self, df: pd.DataFrame, overlap_tolerance: int = 10
+    ) -> pd.DataFrame:
+        """
+        Preprocess all queries to select non-overlapping alignment subsets.
+
+        This fixes the bug where overlapping BLAST alignments cause the circular
+        detection algorithm to fail due to negative gaps between adjacent records.
+
+        Args:
+            df: DataFrame with all alignment records
+            overlap_tolerance: Maximum allowed overlap in bp (default: 10)
+
+        Returns:
+            Preprocessed DataFrame with non-overlapping alignments per query
+        """
+        original_count = len(df)
+        original_queries = df["query_id"].nunique()
+
+        processed_parts = []
+
+        for query_id, group in df.groupby("query_id", sort=False):
+            processed = self.select_non_overlapping_alignments(group, overlap_tolerance)
+            processed_parts.append(processed)
+
+        if not processed_parts:
+            return df.iloc[0:0].copy()
+
+        result = pd.concat(processed_parts, ignore_index=True)
+
+        self.logger.info(
+            f"Overlap preprocessing: {original_count} -> {len(result)} alignments "
+            f"({original_queries} queries)"
+        )
+
+        return result
+
     def detect_genomic_overlaps_sweepline(self, segments: pd.DataFrame) -> bool:
         """
         Detect overlapping genomic segments on the reference.
@@ -872,7 +956,7 @@ class CeccBuild:
         output_csv: Path,
         overlap_threshold: float = 0.95,
         min_segments: int = 2,
-        edge_tolerance: int = 20,
+        edge_tolerance: int = 100,  # Increased from 20 to improve CeccDNA detection
         position_tolerance: int = 50,
         min_match_degree: float = 90.0,
         max_rotations: int = 20,
@@ -931,6 +1015,12 @@ class CeccBuild:
         # Ensure required columns and clean data
         df = self.ensure_required_columns(df)
         self.logger.info(f"Validated columns; {df['query_id'].nunique()} unique queries")
+
+        # Preprocess: select non-overlapping alignments for each query
+        # This fixes the bug where overlapping BLAST alignments cause circular
+        # detection to fail due to negative gaps between adjacent records
+        self.logger.info("Preprocessing: selecting non-overlapping alignments per query")
+        df = self.preprocess_overlapping_alignments(df, overlap_tolerance=10)
 
         self.logger.info("Rotating segments by q_start")
         df_rot = self.rotate_all(df)
