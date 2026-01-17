@@ -92,11 +92,11 @@ class ToolConfig:
     # General alignment configuration (supports multiple aligners)
     alignment: dict[str, Any] = field(
         default_factory=lambda: {
-            # aligner: "minimap2" (default) or "last"
+            # aligner: "last" (default) or "minimap2"
             # LAST is better for complex eccDNA with multiple segments
-            "aligner": "minimap2",
+            "aligner": "last",
             # Common options
-            "min_identity": 90.0,
+            "min_identity": 99.0,
             "min_alignment_length": 50,
             # LAST-specific options
             "db_prefix": None,  # Pre-built LAST database (optional)

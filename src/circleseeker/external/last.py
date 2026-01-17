@@ -319,14 +319,12 @@ class LastAligner(ExternalTool):
         self,
         reference_fasta: Path,
         db_prefix: Path,
-        soft_mask: bool = True,
     ) -> Path:
         """Build LAST database from reference.
 
         Args:
             reference_fasta: Path to reference FASTA
             db_prefix: Output database prefix
-            soft_mask: Use soft masking for lowercase letters
 
         Returns:
             Path to database prefix
@@ -336,8 +334,6 @@ class LastAligner(ExternalTool):
         db_prefix.parent.mkdir(parents=True, exist_ok=True)
 
         cmd = ["lastdb"]
-        if soft_mask:
-            cmd.extend(["-c"])  # Soft mask lowercase letters
         cmd.extend(["-P", str(self.threads)])
         cmd.extend([str(db_prefix), str(reference_fasta)])
 
@@ -360,9 +356,7 @@ class LastAligner(ExternalTool):
         query_fasta: Path,
         db_prefix: Path,
         output_tab: Path,
-        output_maf: Optional[Path] = None,
-        min_score: int = 0,
-        split_alignments: bool = False,
+        max_multiplicity: int = 10,
     ) -> Path:
         """Run LAST alignment.
 
@@ -370,9 +364,7 @@ class LastAligner(ExternalTool):
             query_fasta: Path to query FASTA
             db_prefix: LAST database prefix
             output_tab: Output TAB file path
-            output_maf: Optional MAF output path
-            min_score: Minimum alignment score
-            split_alignments: Run last-split for 1-to-1 mappings
+            max_multiplicity: Maximum alignments per query position (-m)
 
         Returns:
             Path to output TAB file
@@ -385,8 +377,8 @@ class LastAligner(ExternalTool):
         # Build lastal command
         cmd = ["lastal"]
         cmd.extend(["-P", str(self.threads)])
-        if min_score > 0:
-            cmd.extend(["-e", str(min_score)])
+        cmd.extend(["-Q", "0"])  # FASTA input format
+        cmd.extend(["-m", str(max_multiplicity)])  # Max alignments per query position
         # Output format: TAB with mismap probabilities
         cmd.extend(["-f", "TAB"])
         cmd.extend([str(db_prefix), str(query_fasta)])
