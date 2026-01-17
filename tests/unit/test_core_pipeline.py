@@ -419,7 +419,7 @@ class TestPipeline:
     @pytest.mark.parametrize("step_name,description", [
         ("check_dependencies", "Check required tools and dependencies"),
         ("tidehunter", "Run TideHunter for tandem repeat detection"),
-        ("run_alignment", "Run minimap2 alignment"),
+        ("run_alignment", "Run alignment (minimap2 or LAST)"),
         ("ecc_unify", "Merge eccDNA tables into unified output"),
         ("ecc_summary", "Generate summary report"),
         ("ecc_packager", "Package output files"),

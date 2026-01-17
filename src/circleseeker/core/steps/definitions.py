@@ -19,7 +19,7 @@ PIPELINE_STEPS: list[PipelineStep] = [
         "Process TideHunter output",
         skip_condition="skip_tandem_to_ring",
     ),
-    PipelineStep("run_alignment", "Run minimap2 alignment"),
+    PipelineStep("run_alignment", "Run alignment (minimap2 or LAST)"),
     PipelineStep("um_classify", "Classify eccDNA types"),
     PipelineStep("cecc_build", "Process Cecc candidates"),
     PipelineStep("umc_process", "Generate FASTA files"),
