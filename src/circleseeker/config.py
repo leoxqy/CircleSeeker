@@ -26,6 +26,9 @@ PRESETS: dict[PresetName, dict[str, dict[str, Any]]] = {
             "c": 2,         # Min copy number (TideHunter requires >=2)
             "p": 30,        # Detect shorter periods (default: 100, TideHunter min: 30)
         },
+        "tandem_to_ring": {
+            "min_ave_match": 98.0,
+        },
         "minimap2_align": {
             "min_identity": 97.0,           # Lower identity threshold
             "identity_decay_per_10kb": 1.0, # More lenient for long reads
@@ -65,6 +68,9 @@ PRESETS: dict[PresetName, dict[str, dict[str, Any]]] = {
             "e": 0.05,      # Require fewer errors
             "c": 3,         # Require more copies (min copy number)
             "p": 150,       # Require longer periods
+        },
+        "tandem_to_ring": {
+            "min_ave_match": 99.5,
         },
         "minimap2_align": {
             "min_identity": 99.5,           # Higher identity threshold
@@ -141,7 +147,18 @@ class ToolConfig:
     """External tool configuration."""
 
     tidehunter: dict[str, Any] = field(
-        default_factory=lambda: {"k": 16, "w": 1, "p": 100, "P": 2000000, "e": 0.1, "c": 2}
+        default_factory=lambda: {
+            "k": 16,
+            "w": 1,
+            "p": 100,
+            "P": 2000000,
+            "e": 0.1,
+            "f": 2,
+            "c": 2,
+        }
+    )
+    tandem_to_ring: dict[str, Any] = field(
+        default_factory=lambda: {"min_ave_match": 99.0}
     )
     um_classify: dict[str, Any] = field(
         default_factory=lambda: {

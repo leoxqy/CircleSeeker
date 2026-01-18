@@ -39,11 +39,13 @@ class TandemToRing:
         input_file: str | Path,
         output_file: str | Path,
         circular_fasta: str | Path,
+        min_ave_match: float = 99.0,
         logger: Optional[logging.Logger] = None,
     ):
         self.input_file = Path(input_file)
         self.output_file = Path(output_file)
         self.circular_fasta = Path(circular_fasta)
+        self.min_ave_match = float(min_ave_match)
 
         # Setup logger
         self.logger = logger or get_logger(self.__class__.__name__)
@@ -84,8 +86,8 @@ class TandemToRing:
         # Drop fullLen column
         df = df.drop(columns=["fullLen"])
 
-        # Filter low quality (aveMatch < 99)
-        df = df[df["aveMatch"] >= 99]
+        # Filter low quality (aveMatch < threshold)
+        df = df[df["aveMatch"] >= self.min_ave_match]
 
         # Reset index
         df = df.reset_index(drop=True)

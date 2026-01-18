@@ -5,6 +5,16 @@ All notable changes to CircleSeeker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1] - 2026-01-19
+
+### Fixed
+- **Analysis re-exports**: `circleseeker.modules.analysis` now imports core modules correctly.
+- **CeccBuild thresholds**: Enforce `min_match_degree` and require same-strand repeat pairs.
+- **CeccBuild performance**: Replace per-base coverage sets with interval merging.
+- **CeccBuild metadata**: Resolve metadata by `query_id` first, then fallback to read ID.
+- **Alignment config usage**: Honor `tools.alignment` for aligner selection/min identity/min length.
+- **TandemToRing quality filter**: `aveMatch` threshold now configurable via `tandem_to_ring`.
+
 ## [0.13.0] - 2026-01-18
 
 ### Changed

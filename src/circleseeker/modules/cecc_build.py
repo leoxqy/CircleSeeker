@@ -98,10 +98,24 @@ class CeccBuild:
     MAPQ_LOW_THRESHOLD = 20
     IDENTITY_LOW_THRESHOLD = 95.0
 
-    REQUIRED_COLS = [
-        "query_id", "subject_id", "q_start", "q_end",
-        "s_start", "s_end", "alignment_length"
+    BASE_REQUIRED_COLS = [
+        "query_id",
+        "subject_id",
+        "q_start",
+        "q_end",
+        "s_start",
+        "s_end",
+        "alignment_length",
     ]
+    STANDARD_EXTRA_COLS = [
+        "strand",
+        "reads",
+        "length",
+        "copy_number",
+        "mapq",
+        "identity",
+    ]
+    REQUIRED_COLS = BASE_REQUIRED_COLS
 
     METADATA_COLS = ["reads", "length", "copy_number", "mapq", "identity"]
 
@@ -145,6 +159,10 @@ class CeccBuild:
         self._reference_fasta: Optional[Path] = None
         self._fasta_file: Optional[Path] = None
         self._last_db: Optional[Path] = None
+        # Graph-based detection tuning (used in fallback path)
+        self.overlap_threshold: float = 0.95
+        self.locus_overlap_threshold: float = 0.95
+        self.max_rotations: int = 20
 
     @staticmethod
     def _clamp01(value: float) -> float:
@@ -153,6 +171,16 @@ class CeccBuild:
         except (TypeError, ValueError):
             return 0.0
         return max(0.0, min(1.0, x))
+
+    @classmethod
+    def _as_fraction(cls, value: Any, default: float = 0.0) -> float:
+        try:
+            val = float(value)
+        except (TypeError, ValueError):
+            return float(default)
+        if val > 1.0:
+            val = val / 100.0
+        return cls._clamp01(val)
 
     @classmethod
     def _norm_mapq(cls, mapq: float) -> float:
@@ -181,6 +209,391 @@ class CeccBuild:
                 return 0.0
             prod *= float(v)
         return float(prod ** (1.0 / float(len(values))))
+
+    @staticmethod
+    def _merge_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
+        cleaned = [(int(s), int(e)) for s, e in intervals if int(e) > int(s)]
+        if not cleaned:
+            return []
+        cleaned.sort(key=lambda x: (x[0], x[1]))
+        merged: list[tuple[int, int]] = []
+        cur_start, cur_end = cleaned[0]
+        for start, end in cleaned[1:]:
+            if start <= cur_end:
+                cur_end = max(cur_end, end)
+            else:
+                merged.append((cur_start, cur_end))
+                cur_start, cur_end = start, end
+        merged.append((cur_start, cur_end))
+        return merged
+
+    @classmethod
+    def _coverage_length(cls, alns: list[LastAlignment]) -> int:
+        intervals = [(aln.query_start, aln.query_end) for aln in alns]
+        merged = cls._merge_intervals(intervals)
+        return sum(end - start for start, end in merged)
+
+    @classmethod
+    def _coverage_fraction(cls, alns: list[LastAlignment], query_len: int) -> float:
+        if query_len <= 0:
+            return 0.0
+        covered = cls._coverage_length(alns)
+        return covered / float(query_len)
+
+    def _parse_segment(self, row: pd.Series) -> AlignmentSegment:
+        """Parse a DataFrame row into an AlignmentSegment."""
+        chr_val = row.get("subject_id", row.get(ColumnStandard.CHR, ""))
+
+        q_start = int(row.get("q_start", 0))
+        q_end = int(row.get("q_end", 0))
+
+        start0 = None
+        end0 = None
+        if "s_start" in row and "s_end" in row:
+            s_start = int(row.get("s_start", 0))
+            s_end = int(row.get("s_end", 0))
+            start0 = min(s_start, s_end) - 1
+            end0 = max(s_start, s_end)
+        elif ColumnStandard.START0 in row and ColumnStandard.END0 in row:
+            start0 = int(row.get(ColumnStandard.START0, 0))
+            end0 = int(row.get(ColumnStandard.END0, 0))
+
+        if start0 is None or end0 is None:
+            raise ValueError("Missing genomic coordinates for alignment segment")
+
+        strand = str(row.get("strand", row.get("sstrand", "+")))
+        strand = strand.strip()
+        if strand in ("plus", "1"):
+            strand = "+"
+        elif strand in ("minus", "-1"):
+            strand = "-"
+        elif strand not in ("+", "-"):
+            strand = "+" if start0 <= end0 else "-"
+
+        alignment_length = int(row.get("alignment_length", max(0, q_end - q_start)))
+
+        return AlignmentSegment(
+            chr=str(chr_val),
+            start0=start0,
+            end0=end0,
+            strand=strand,
+            q_start=q_start,
+            q_end=q_end,
+            alignment_length=alignment_length,
+            row_data=row.to_dict(),
+        )
+
+    def detect_genomic_overlaps_sweepline(self, segments: pd.DataFrame) -> bool:
+        """Detect problematic overlaps between genomic segments (same chr+strand)."""
+        if segments is None or len(segments) <= 1:
+            return False
+
+        threshold = self._as_fraction(self.locus_overlap_threshold, default=0.95)
+        chr_col = ColumnStandard.CHR
+        start_col = ColumnStandard.START0
+        end_col = ColumnStandard.END0
+        strand_col = ColumnStandard.STRAND
+
+        if chr_col not in segments.columns or start_col not in segments.columns or end_col not in segments.columns:
+            return False
+
+        if strand_col not in segments.columns:
+            segments = segments.copy()
+            segments[strand_col] = "+"
+
+        for (_, _), group in segments.groupby([chr_col, strand_col], sort=False):
+            if len(group) <= 1:
+                continue
+            df_int = group[[start_col, end_col]].copy()
+            df_int = df_int.sort_values([start_col, end_col])
+            cur_start = int(df_int.iloc[0][start_col])
+            cur_end = int(df_int.iloc[0][end_col])
+
+            for _, row in df_int.iloc[1:].iterrows():
+                start = int(row[start_col])
+                end = int(row[end_col])
+
+                if start >= cur_end:
+                    cur_start, cur_end = start, end
+                    continue
+
+                overlap_start = max(cur_start, start)
+                overlap_end = min(cur_end, end)
+                overlap_len = max(0, overlap_end - overlap_start)
+
+                len_a = max(1, cur_end - cur_start)
+                len_b = max(1, end - start)
+
+                rec_ov_a = overlap_len / len_a
+                rec_ov_b = overlap_len / len_b
+
+                if rec_ov_a >= threshold and rec_ov_b >= threshold:
+                    cur_start = min(cur_start, start)
+                    cur_end = max(cur_end, end)
+                else:
+                    return True
+
+        return False
+
+    def _same_locus(self, a: AlignmentSegment, b: AlignmentSegment, threshold: float) -> bool:
+        if a.chr != b.chr or a.strand != b.strand:
+            return False
+        overlap_start = max(a.start0, b.start0)
+        overlap_end = min(a.end0, b.end0)
+        overlap_len = max(0, overlap_end - overlap_start)
+        if overlap_len <= 0:
+            return False
+        len_a = max(1, a.end0 - a.start0)
+        len_b = max(1, b.end0 - b.start0)
+        rec_ov_a = overlap_len / len_a
+        rec_ov_b = overlap_len / len_b
+        return rec_ov_a >= threshold and rec_ov_b >= threshold
+
+    def filter_overlapping_queries(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Drop queries with problematic genomic overlaps."""
+        if df.empty or "query_id" not in df.columns:
+            return df
+
+        keep_ids: list[str] = []
+        for query_id, group in df.groupby("query_id", sort=False):
+            if len(group) <= 1:
+                keep_ids.append(str(query_id))
+                continue
+
+            seg_rows = []
+            for _, row in group.iterrows():
+                try:
+                    seg = self._parse_segment(row)
+                except ValueError:
+                    continue
+                seg_rows.append(
+                    {
+                        ColumnStandard.CHR: seg.chr,
+                        ColumnStandard.START0: seg.start0,
+                        ColumnStandard.END0: seg.end0,
+                        ColumnStandard.STRAND: seg.strand,
+                    }
+                )
+
+            segments = pd.DataFrame(seg_rows)
+            if segments.empty:
+                keep_ids.append(str(query_id))
+                continue
+
+            if not self.detect_genomic_overlaps_sweepline(segments):
+                keep_ids.append(str(query_id))
+
+        keep_mask = df["query_id"].astype(str).isin(keep_ids)
+        return df.loc[keep_mask].copy()
+
+    def find_circular(
+        self,
+        group: pd.DataFrame,
+        edge_tol: int,
+        pos_tol: int,
+    ) -> Optional[dict[str, Any]]:
+        """Find a circular path within a query's alignment segments."""
+        sorted_df = group.sort_values("q_start").reset_index(drop=True)
+        if len(sorted_df) < 2:
+            return None
+
+        segments = [self._parse_segment(row) for _, row in sorted_df.iterrows()]
+        cons_len = 0
+        if "length" in sorted_df.columns and pd.notna(sorted_df.iloc[0].get("length")):
+            try:
+                cons_len = int(sorted_df.iloc[0].get("length"))
+            except (TypeError, ValueError):
+                cons_len = 0
+        if cons_len <= 0:
+            cons_len = int(sorted_df["q_end"].max() - sorted_df["q_start"].min())
+
+        closing_pair = None
+        dup_threshold = self._as_fraction(self.overlap_threshold, default=0.95)
+        for i in range(len(segments) - 1):
+            for j in range(i + 1, len(segments)):
+                if self._same_locus(segments[i], segments[j], dup_threshold):
+                    closing_pair = (i, j)
+                    break
+            if closing_pair:
+                break
+
+        if closing_pair:
+            path = list(range(closing_pair[0], closing_pair[1] + 1))
+            closing_at = closing_pair[1]
+        else:
+            path = list(range(len(segments)))
+            gaps = []
+            for i in range(len(segments) - 1):
+                gaps.append(segments[i + 1].q_start - segments[i].q_end)
+            big_gaps = [i for i, g in enumerate(gaps) if g > edge_tol]
+            if len(big_gaps) > 1:
+                return None
+            if len(big_gaps) == 1:
+                cut = big_gaps[0] + 1
+                path = list(range(cut, len(segments))) + list(range(0, cut))
+            closing_at = path[-1] if path else 0
+
+        cum_len = sum(segments[i].alignment_length for i in path)
+        match_degree = (cum_len / cons_len * 100.0) if cons_len > 0 else 0.0
+        if match_degree < float(self.min_match_degree):
+            return None
+
+        return {
+            "path": path,
+            "closing_at": closing_at,
+            "cum_len": cum_len,
+            "mat_degree": match_degree,
+            "cons_len": cons_len,
+        }
+
+    def detect_circles(
+        self,
+        df: pd.DataFrame,
+        edge_tol: Optional[int] = None,
+        pos_tol: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """Graph-based Cecc detection for fallback mode."""
+        base_required = ["query_id", "q_start", "q_end", "alignment_length"]
+        missing = [c for c in base_required if c not in df.columns]
+        has_subject_coords = all(c in df.columns for c in ("subject_id", "s_start", "s_end"))
+        has_standard_coords = all(
+            c in df.columns
+            for c in (ColumnStandard.CHR, ColumnStandard.START0, ColumnStandard.END0)
+        )
+        if not (has_subject_coords or has_standard_coords):
+            missing.extend(["subject_id", "s_start", "s_end"])
+        if missing:
+            raise ValueError(f"Missing required columns: {missing}")
+
+        edge_tol_val = int(edge_tol) if edge_tol is not None else int(self.gap_tolerance)
+        pos_tol_val = int(pos_tol) if pos_tol is not None else int(self.position_tolerance)
+
+        rows: list[dict] = []
+        for query_id, group in df.groupby("query_id", sort=False):
+            if len(group) < 2:
+                continue
+
+            result = self.find_circular(group, edge_tol_val, pos_tol_val)
+            if result is None:
+                continue
+
+            sorted_df = group.sort_values("q_start").reset_index(drop=True)
+            segments = [self._parse_segment(row) for _, row in sorted_df.iterrows()]
+            path_segments = [segments[i] for i in result["path"]]
+            if len(path_segments) < 2:
+                continue
+
+            unique_loci: list[AlignmentSegment] = []
+            dup_threshold = self._as_fraction(self.overlap_threshold, default=0.95)
+            for seg in path_segments:
+                if not any(self._same_locus(seg, u, dup_threshold) for u in unique_loci):
+                    unique_loci.append(seg)
+
+            if len(unique_loci) < self.min_segments:
+                continue
+
+            cum_len = float(result["cum_len"])
+            cons_len = float(result.get("cons_len", 0.0))
+            match_degree = float(result["mat_degree"])
+
+            chroms = list(set(seg.chr for seg in unique_loci))
+            cecc_class = "Cecc-InterChr" if len(chroms) > 1 else "Cecc-IntraChr"
+
+            mapq_values = []
+            identity_values = []
+            for seg in path_segments:
+                if "mapq" in seg.row_data and pd.notna(seg.row_data.get("mapq")):
+                    mapq_values.append(float(seg.row_data["mapq"]))
+                if "identity" in seg.row_data and pd.notna(seg.row_data.get("identity")):
+                    identity_values.append(float(seg.row_data["identity"]))
+
+            mapq_best = int(max(mapq_values)) if mapq_values else 0
+            mapq_min = int(min(mapq_values)) if mapq_values else 0
+            identity_best = max(identity_values) if identity_values else 0.0
+            identity_min = min(identity_values) if identity_values else 0.0
+
+            query_span = sorted_df["q_end"].max() - sorted_df["q_start"].min()
+            cov_best = cum_len / query_span if query_span > 0 else 0.0
+            cov_2nd = 0.0
+
+            chain_unique = len(unique_loci) / len(path_segments) if path_segments else 0.0
+            conf = self._geom_mean(
+                [
+                    self._norm_mapq(mapq_best),
+                    self._norm_identity(identity_best),
+                    self._clamp01(cov_best),
+                    self._clamp01(chain_unique),
+                ]
+            )
+
+            low_mapq = mapq_best < self.MAPQ_LOW_THRESHOLD
+            low_identity = identity_best < self.IDENTITY_LOW_THRESHOLD
+
+            first_row = sorted_df.iloc[0]
+            reads = first_row.get("reads", query_id)
+            copy_number = first_row.get("copy_number", 1.0)
+            length = int(first_row.get("length", cons_len))
+
+            base = {
+                "query_id": str(query_id),
+                "reads": reads,
+                "eccdna_type": "Cecc",
+                "CeccClass": cecc_class,
+                "length": length,
+                "copy_number": copy_number,
+                "num_segments": len(path_segments),
+                "cumulative_length": cum_len,
+                "match_degree": round(match_degree, 2),
+                "match_degree_2nd": None,
+                "best_chain_signature": None,
+                "second_chain_signature": None,
+                ColumnStandard.MAPQ_BEST: mapq_best,
+                ColumnStandard.MAPQ_MIN: mapq_min,
+                ColumnStandard.IDENTITY_BEST: round(identity_best, 3),
+                ColumnStandard.IDENTITY_MIN: round(identity_min, 3),
+                ColumnStandard.QUERY_COV_BEST: round(cov_best, 6),
+                ColumnStandard.QUERY_COV_2ND: round(cov_2nd, 6),
+                ColumnStandard.CONFIDENCE_SCORE: round(conf, 6),
+                ColumnStandard.LOW_MAPQ: low_mapq,
+                ColumnStandard.LOW_IDENTITY: low_identity,
+                "C_cov_best": round(cov_best, 6),
+                "C_cov_2nd": round(cov_2nd, 6),
+                "max_gap": 0,
+                "avg_gap": 0,
+                "chromosomes": ",".join(str(c) for c in chroms),
+            }
+
+            for i, seg in enumerate(path_segments):
+                if len(path_segments) == 1:
+                    role = "single"
+                elif i == 0:
+                    role = "head"
+                elif i == len(path_segments) - 1:
+                    role = "tail"
+                else:
+                    role = "middle"
+                row = dict(base)
+                row.update(
+                    {
+                        "segment_in_circle": i + 1,
+                        "segment_role": role,
+                        ColumnStandard.CHR: seg.chr,
+                        ColumnStandard.START0: seg.start0,
+                        ColumnStandard.END0: seg.end0,
+                        ColumnStandard.STRAND: seg.strand,
+                        "q_start": seg.q_start,
+                        "q_end": seg.q_end,
+                        "alignment_length": seg.alignment_length,
+                    }
+                )
+                rows.append(row)
+
+        result_df = pd.DataFrame(rows)
+        if not result_df.empty:
+            self.logger.info(
+                f"Circular patterns detected: {result_df['query_id'].nunique()} queries"
+            )
+        return result_df
 
     def _check_last_available(self) -> bool:
         """Check if LAST tools are available."""
@@ -310,11 +723,7 @@ class CeccBuild:
         half_len = query_len // 2
 
         # Calculate coverage
-        covered = set()
-        for aln in alns:
-            for pos in range(aln.query_start, aln.query_end):
-                covered.add(pos)
-        coverage = len(covered) / query_len
+        coverage = self._coverage_fraction(alns, query_len)
 
         if coverage < self.min_query_coverage:
             return False, f"low_coverage_{coverage:.2f}", []
@@ -340,6 +749,8 @@ class CeccBuild:
 
                 # Check same chromosome
                 if aln1.chrom != aln2.chrom:
+                    continue
+                if aln1.strand != aln2.strand:
                     continue
 
                 # Check genomic position overlap/proximity
@@ -406,6 +817,8 @@ class CeccBuild:
         # Calculate match degree
         cum_len = sum(seg.alignment_length for seg in segments)
         match_degree = (cum_len / (cons_len * 2) * 100) if cons_len > 0 else 0.0
+        if match_degree < float(self.min_match_degree):
+            return None
 
         # Identify unique loci
         unique_loci = []
@@ -438,11 +851,7 @@ class CeccBuild:
 
         # Coverage
         query_len = alns[0].query_len
-        covered = set()
-        for aln in alns:
-            for pos in range(aln.query_start, aln.query_end):
-                covered.add(pos)
-        cov_best = len(covered) / query_len if query_len > 0 else 0.0
+        cov_best = self._coverage_fraction(alns, query_len)
 
         # Confidence score
         chain_unique = len(unique_loci) / len(segments) if segments else 0.0
@@ -524,13 +933,17 @@ class CeccBuild:
         """Extract metadata for each read from input CSV."""
         metadata = {}
         for _, row in df.iterrows():
-            reads = str(row.get("reads", row.get("query_id", "")))
-            if reads not in metadata:
-                metadata[reads] = {
-                    "reads": reads,
-                    "length": int(row.get("length", 0)),
-                    "copy_number": float(row.get("copy_number", 1.0)),
-                }
+            query_id = str(row.get("query_id", ""))
+            reads = str(row.get("reads", query_id))
+            entry = {
+                "reads": reads,
+                "length": int(row.get("length", 0)),
+                "copy_number": float(row.get("copy_number", 1.0)),
+            }
+            if query_id and query_id not in metadata:
+                metadata[query_id] = entry
+            if reads and reads not in metadata:
+                metadata[reads] = entry
         return metadata
 
     def detect_circles_from_last(
@@ -544,7 +957,9 @@ class CeccBuild:
         for query_id, alns in alignments.items():
             # Extract base read ID
             base_id = query_id.split("|")[0]
-            meta = metadata.get(base_id, {"reads": base_id, "length": 0, "copy_number": 1.0})
+            meta = metadata.get(query_id) or metadata.get(
+                base_id, {"reads": base_id, "length": 0, "copy_number": 1.0}
+            )
 
             result = self._detect_single_query_last(query_id, alns, meta)
             if result is None:
@@ -737,107 +1152,15 @@ class CeccBuild:
 
     def _detect_circles_graph(self, df: pd.DataFrame) -> list:
         """Graph-based circle detection (V3 fallback)."""
-        # Simplified V3 logic
-        rows = []
-        for query_id, group in df.groupby("query_id", sort=False):
-            sorted_df = group.sort_values("q_start").reset_index(drop=True)
-            if len(sorted_df) < 2:
-                continue
-
-            # Parse segments
-            segments = []
-            for i, (_, row) in enumerate(sorted_df.iterrows()):
-                s_start = int(row["s_start"])
-                s_end = int(row["s_end"])
-                start0 = min(s_start, s_end) - 1
-                end0 = max(s_start, s_end)
-                strand = str(row.get("strand", row.get("sstrand", "+")))
-                if strand in ("plus", "1"):
-                    strand = "+"
-                elif strand in ("minus", "-1"):
-                    strand = "-"
-
-                seg = AlignmentSegment(
-                    chr=str(row["subject_id"]),
-                    start0=start0,
-                    end0=end0,
-                    strand=strand,
-                    q_start=int(row["q_start"]),
-                    q_end=int(row["q_end"]),
-                    alignment_length=int(row["alignment_length"]),
-                    node_id=i,
-                )
-                segments.append(seg)
-
-            # Check for repeat pattern
-            tol = self.position_tolerance
-            has_repeat = False
-            for i in range(len(segments)):
-                for j in range(i + 1, len(segments)):
-                    if segments[i].matches_position(segments[j], tol):
-                        has_repeat = True
-                        break
-                if has_repeat:
-                    break
-
-            if not has_repeat:
-                continue
-
-            # Build output
-            first_row = sorted_df.iloc[0]
-            reads = first_row.get("reads", query_id)
-            cons_len = int(first_row.get("length", 0))
-            copy_number = first_row.get("copy_number", 1.0)
-            cum_len = sum(seg.alignment_length for seg in segments)
-            match_degree = (cum_len / cons_len * 100) if cons_len > 0 else 0.0
-
-            chroms = list(set(seg.chr for seg in segments))
-            cecc_class = "Cecc-InterChr" if len(chroms) > 1 else "Cecc-IntraChr"
-
-            base = {
-                "query_id": str(query_id),
-                "reads": reads,
-                "eccdna_type": "Cecc",
-                "CeccClass": cecc_class,
-                "length": cons_len,
-                "copy_number": copy_number,
-                "num_segments": len(segments),
-                "cumulative_length": cum_len,
-                "match_degree": round(match_degree, 2),
-                "match_degree_2nd": None,
-                "best_chain_signature": None,
-                "second_chain_signature": None,
-                ColumnStandard.MAPQ_BEST: 60,
-                ColumnStandard.MAPQ_MIN: 0,
-                ColumnStandard.IDENTITY_BEST: 99.0,
-                ColumnStandard.IDENTITY_MIN: 95.0,
-                ColumnStandard.QUERY_COV_BEST: 1.0,
-                ColumnStandard.QUERY_COV_2ND: 0.0,
-                ColumnStandard.CONFIDENCE_SCORE: 1.0,
-                ColumnStandard.LOW_MAPQ: False,
-                ColumnStandard.LOW_IDENTITY: False,
-                "C_cov_best": 1.0,
-                "C_cov_2nd": 0.0,
-                "max_gap": 0,
-                "avg_gap": 0,
-                "chromosomes": ",".join(chroms),
-            }
-
-            for i, seg in enumerate(segments):
-                row = dict(base)
-                row.update({
-                    "segment_in_circle": i + 1,
-                    ColumnStandard.CHR: seg.chr,
-                    ColumnStandard.START0: seg.start0,
-                    ColumnStandard.END0: seg.end0,
-                    ColumnStandard.STRAND: seg.strand,
-                    "q_start": seg.q_start,
-                    "q_end": seg.q_end,
-                    "alignment_length": seg.alignment_length,
-                })
-                rows.append(row)
-
-        return rows
+        filtered = self.filter_overlapping_queries(df)
+        result_df = self.detect_circles(
+            filtered,
+            edge_tol=self.gap_tolerance,
+            pos_tol=self.position_tolerance,
+        )
+        if result_df.empty:
+            return []
+        return result_df.to_dict(orient="records")
 
     def run_pipeline(
         self,
@@ -862,6 +1185,9 @@ class CeccBuild:
         self.gap_tolerance = edge_tolerance
         self.position_tolerance = position_tolerance
         self.min_match_degree = min_match_degree
+        self.overlap_threshold = overlap_threshold
+        self.max_rotations = max_rotations
+        self.locus_overlap_threshold = locus_overlap_threshold
 
         return self.run(
             input_csv=input_csv,
