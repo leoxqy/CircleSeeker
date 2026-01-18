@@ -159,6 +159,28 @@ def count_reads_from_string(s: str) -> int:
     return len({x.strip() for x in s.split(";") if x.strip()})
 
 
+def extract_eccDNA_base_id(name: str) -> str:
+    """Extract base eccDNA ID from full read/query ID.
+
+    Examples:
+        CeccDNA_000001.1_2|rep0|5765|2|circular -> CeccDNA_000001
+        CeccDNA_000001.1_2 -> CeccDNA_000001
+        CeccDNA_000001 -> CeccDNA_000001
+
+    This is used to identify unique eccDNA molecules from multiple reads/queries.
+    """
+    if pd.isna(name) or not isinstance(name, str):
+        return str(name)
+    # Handle semicolon-separated lists - take first
+    if ";" in name:
+        name = name.split(";")[0].strip()
+    # Remove pipeline suffixes after |
+    base = name.split("|")[0]
+    # Extract base ID pattern: TypeDNA_NNNNNN
+    match = re.match(r"([A-Za-z]+_\d+)", base)
+    return match.group(1) if match else base
+
+
 def ensure_int64_column(df: pd.DataFrame, col: str) -> None:
     """Ensure column is Int64 type."""
     if col not in df.columns:
@@ -1480,6 +1502,79 @@ class eccDedup:
 
         return df
 
+    def merge_cecc_by_original_base_id(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Merge Cecc entries that belong to the same original eccDNA.
+
+        When the same eccDNA has multiple reads that end up in different CD-HIT clusters,
+        this function merges them into a single eccDNA entry by using the original
+        eccDNA base ID (e.g., CeccDNA_000001) from the read_name column.
+
+        This ensures that the final output has one entry per unique eccDNA, not one
+        entry per CD-HIT cluster.
+        """
+        if df.empty:
+            return df
+
+        df = df.copy()
+
+        # Try to find original base ID from read_name or reads column
+        read_col = None
+        for col in ["read_name", ColumnStandard.READS, "reads"]:
+            if col in df.columns and df[col].notna().any():
+                read_col = col
+                break
+
+        if read_col is None:
+            self.logger.warning("Cannot find read_name/reads column for base ID merge")
+            return df
+
+        # Extract base ID for each row
+        df["_orig_base_id"] = df[read_col].apply(extract_eccDNA_base_id)
+
+        # Check if there are duplicate base IDs (indicating same eccDNA in multiple clusters)
+        base_id_counts = df.groupby("_orig_base_id")[ColumnStandard.ECCDNA_ID].nunique()
+        duplicates = base_id_counts[base_id_counts > 1]
+
+        if duplicates.empty:
+            df = df.drop(columns=["_orig_base_id"])
+            return df
+
+        self.logger.info(f"Found {len(duplicates)} base IDs with multiple clusters, merging...")
+
+        # For each duplicate base ID, merge the clusters
+        new_cluster_map = {}
+        for base_id in duplicates.index:
+            # Get all cluster IDs for this base ID
+            clusters = df[df["_orig_base_id"] == base_id]["cluster_id"].unique()
+            # Use the first cluster as the merged cluster
+            merged_cluster = clusters[0]
+            for cluster in clusters[1:]:
+                new_cluster_map[cluster] = merged_cluster
+
+        # Remap cluster IDs
+        df["cluster_id"] = df["cluster_id"].apply(
+            lambda x: new_cluster_map.get(x, x)
+        )
+
+        # Update merged_from_ids to include all original IDs
+        merged_ids = df.groupby("cluster_id")["merged_from_ids"].apply(
+            lambda s: ";".join(sorted(set(";".join(s.dropna().astype(str)).split(";"))))
+        )
+        df["merged_from_ids"] = df["cluster_id"].map(merged_ids).fillna(df["merged_from_ids"])
+
+        # Update read_name to include all reads
+        if read_col in df.columns:
+            merged_reads = df.groupby("cluster_id")[read_col].apply(merge_read_lists)
+            df[read_col] = df["cluster_id"].map(merged_reads).fillna(df[read_col])
+
+        # Update num_merged
+        cluster_counts = df.groupby("cluster_id")[ColumnStandard.ECCDNA_ID].nunique()
+        df["num_merged"] = df["cluster_id"].map(cluster_counts).fillna(1).astype(int)
+
+        df = df.drop(columns=["_orig_base_id"])
+
+        return df
+
     def write_uecc_outputs(
         self, df: pd.DataFrame, output_dir: Path, prefix: Optional[str], drop_seq: bool = False
     ) -> None:
@@ -2297,6 +2392,9 @@ class eccDedup:
                     cecc_df["eccDNA_id"] = cecc_df["eccdna_id"]
 
                 processed_cecc = self.process_mecc_cecc(cecc_df, cecc_clusters, "Cecc")
+                # Merge Cecc entries that belong to the same original eccDNA
+                # (different reads from same eccDNA may end up in different clusters)
+                processed_cecc = self.merge_cecc_by_original_base_id(processed_cecc)
                 processed_cecc = self.renumber_eccdna_ids(processed_cecc, "Cecc")
 
                 results["Cecc"] = processed_cecc

@@ -27,6 +27,14 @@ htmlcov/
 # Local scratch
 backup/
 
+# Test data (large files)
+Demo/
+Demo_*/
+
+# Temporary scripts and tarballs
+*.tar.gz
+run_*.sh
+
 # OS
 .DS_Store
 Col/

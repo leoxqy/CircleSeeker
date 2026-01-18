@@ -142,7 +142,23 @@ def paf_to_alignment_tsv(
                 mismatches = max(alen - nmatch, 0)
                 gap_opens = 0
 
-            identity = (nmatch / alen * 100.0) if alen else 0.0
+            # Calculate identity using de:f tag (per-base divergence) if available.
+            # This is more accurate than nmatch/alen because it doesn't penalize
+            # indels as heavily - important for sequences from repetitive regions
+            # like MeccDNA which often have insertions/deletions.
+            identity = None
+            for tag in parts[12:]:
+                if tag.startswith("de:f:"):
+                    try:
+                        divergence = float(tag[5:])
+                        identity = (1.0 - divergence) * 100.0
+                    except ValueError:
+                        pass
+                    break
+
+            # Fallback to nmatch/alen if de:f tag not available
+            if identity is None:
+                identity = (nmatch / alen * 100.0) if alen else 0.0
 
             # Filter by identity threshold with length-based compensation
             # Longer sequences allow slightly lower identity (sequencing errors accumulate)

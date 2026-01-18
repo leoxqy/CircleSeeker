@@ -83,10 +83,10 @@ class TestToolConfig:
         assert config.tidehunter["f"] == 2
 
         # Check minimap2_align defaults
-        assert config.minimap2_align["preset"] == "sr"
-        assert config.minimap2_align["max_target_seqs"] == 200
+        assert config.minimap2_align["preset"] == "map-hifi"
+        assert config.minimap2_align["max_target_seqs"] == 5
         assert config.minimap2_align["additional_args"] == ""
-        assert config.minimap2_align["preset_long"] == "sr"
+        assert config.minimap2_align["preset_long"] == "map-hifi"
 
         # Check minimap2 defaults
         assert config.minimap2["preset"] == "map-hifi"
@@ -391,7 +391,7 @@ class TestLoadConfig:
         try:
             config = load_config(config_path)
             assert isinstance(config.tools.minimap2_align, dict)
-            assert config.tools.minimap2_align["preset"] == "sr"
+            assert config.tools.minimap2_align["preset"] == "map-hifi"
         finally:
             config_path.unlink()
 

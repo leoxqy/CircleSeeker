@@ -189,6 +189,19 @@ def cecc_build(pipeline: Pipeline) -> None:
             except (TypeError, ValueError):
                 pass
 
+        # Prepare LAST-based detection parameters
+        reference_fasta = getattr(pipeline.config, "reference", None)
+        if reference_fasta:
+            reference_fasta = Path(reference_fasta)
+            if not reference_fasta.exists():
+                reference_fasta = None
+
+        fasta_file = pipeline.config.output_dir / "tandem_to_ring.fasta"
+        if not fasta_file.exists():
+            fasta_file = pipeline.config.output_dir / f"{pipeline.config.prefix}_circular.fasta"
+            if not fasta_file.exists():
+                fasta_file = None
+
         builder.run_pipeline(
             input_csv=input_csv,
             output_csv=output_file,
@@ -199,6 +212,8 @@ def cecc_build(pipeline: Pipeline) -> None:
             min_match_degree=float(min_match_degree),
             max_rotations=int(cecc_cfg.get("max_rotations", 20)),
             locus_overlap_threshold=cecc_cfg.get("locus_overlap_threshold", 0.95),
+            reference_fasta=reference_fasta,
+            fasta_file=fasta_file,
         )
 
         df_cecc = (

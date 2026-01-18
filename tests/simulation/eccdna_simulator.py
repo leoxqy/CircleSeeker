@@ -437,37 +437,38 @@ class MeccDNASimulator(EccDNASimulator):
         self.repeat_families = repeat_families or []
 
     def generate(self, count: int) -> List[EccDNARecord]:
-        """Generate MeccDNA records."""
+        """Generate MeccDNA records.
+
+        MeccDNA definition: The *whole eccDNA sequence* has multiple near-full-length
+        matches on the reference genome (multi-locus mapping).
+
+        According to UMC_Classification_Model.md:
+        - A 1000bp MeccDNA should have ~1000bp matches at multiple genomic loci
+        - Each locus should cover ~95% of the MeccDNA length
+
+        Therefore, MeccDNA sequence = single repeat unit (NOT tandem repeat).
+        The sequence can align fully to multiple genomic loci where the repeat exists.
+        """
         records = []
 
         for i in range(1, count + 1):
-            # "Mecc" in this project means: the *whole eccDNA sequence* has multiple
-            # near-full-length matches on the reference genome (multi-locus mapping).
-            # We therefore generate one locus as the eccDNA sequence, and record
-            # additional genomic loci that carry the same repeat family.
             if not self.repeat_families:
-                # Fallback: generate tandem repeat from single locus
+                # Fallback: generate from single locus (can only align to one location)
+                # This is a degenerate case - real MeccDNA requires embedded repeat families
                 min_unit, max_unit = self.config.mecc_unit_range
                 source_region = self._random_region(min_unit, max_unit)
                 unit_seq = self._get_sequence(source_region)
                 regions_used = [source_region]
                 unit_length = source_region.length
-
-                # Generate tandem repeat even in fallback mode
-                min_copy, max_copy = self.config.mecc_copy_range
-                copy_number = random.uniform(min_copy, max_copy)
-                full_copies = int(copy_number)
-                partial_fraction = copy_number - full_copies
-                partial_len = int(len(unit_seq) * partial_fraction)
-                sequence = unit_seq * full_copies + unit_seq[:partial_len]
+                n_loci = 1
+                sequence = unit_seq  # Single unit, not tandem repeat
             else:
                 family = self.repeat_families[(i - 1) % len(self.repeat_families)]
                 unit_length = family.unit_length
 
-                # Choose how many distinct loci to expose (>=2).
+                # Choose how many distinct loci to expose (>=2 for true Mecc).
                 min_copy, max_copy = self.config.mecc_copy_range
-                copy_number = random.uniform(min_copy, max_copy)
-                n_loci = max(2, int(round(copy_number)))
+                n_loci = max(2, int(round(random.uniform(min_copy, max_copy))))
                 n_loci = min(n_loci, len(family.copies))
 
                 source_region = random.choice(family.copies)
@@ -475,17 +476,16 @@ class MeccDNASimulator(EccDNASimulator):
                 additional = random.sample(other_choices, k=max(0, n_loci - 1)) if other_choices else []
                 regions_used = [source_region] + additional
 
-                # MeccDNA is a tandem repeat: repeat the unit sequence copy_number times
+                # MeccDNA sequence = single repeat unit (NOT tandem repeat)
+                # This allows the sequence to align fully to multiple genomic loci
                 unit_seq = self._get_sequence(source_region)
-                full_copies = int(copy_number)
-                partial_fraction = copy_number - full_copies
-                partial_len = int(len(unit_seq) * partial_fraction)
-                sequence = unit_seq * full_copies + unit_seq[:partial_len]
+                sequence = unit_seq
 
             sequence = self._add_errors(sequence)
 
             # Create read ID with metadata
-            read_id = f"sim_mecc_{i:04d}|unit_1|{unit_length}|{copy_number:.1f}"
+            # Note: copy_number here represents the number of genomic loci, not tandem copies
+            read_id = f"sim_mecc_{i:04d}|unit_1|{unit_length}|{float(n_loci):.1f}"
 
             record = EccDNARecord(
                 eccdna_id=f"MeccDNA{i}",
@@ -493,7 +493,7 @@ class MeccDNASimulator(EccDNASimulator):
                 read_id=read_id,
                 regions=regions_used,
                 length=len(sequence),
-                copy_number=round(copy_number, 2),
+                copy_number=float(n_loci),  # Number of genomic loci
                 sequence=sequence,
                 num_segments=len(regions_used),
             )

@@ -59,7 +59,7 @@ class UMeccClassifier:
         theta_u2_max: Optional[float] = None,
         mapq_u_min: int = 0,
         mapq_m_ambiguous_threshold: int = 0,
-        mecc_identity_gap_threshold: float = 1.0,
+        mecc_identity_gap_threshold: float = 0,  # Disabled by default
         u_secondary_min_frac: float = 0.01,
         u_secondary_min_bp: int = 50,
         u_contig_gap_bp: int = 1000,
@@ -95,10 +95,12 @@ class UMeccClassifier:
                 Default 0 (disabled). Set to 20 to enable a moderate filter.
             mecc_identity_gap_threshold: When the gap between max and second-max locus
                 identity exceeds this threshold, reject Mecc classification.
-                This detects Uecc from repetitive regions that align to multiple loci
-                but have one clearly superior match (identity gap > threshold).
-                A gap >= 1.0 is 100% safe (never rejects true Mecc in benchmarks).
-                Default 1.0. Set to 0 to disable this check.
+                Originally designed to detect Uecc from repetitive regions that align
+                to multiple loci but have one clearly superior match.
+                However, true Mecc can also have identity gaps (~1%) due to mutation
+                between repeat copies, causing false rejections. The coverage-based
+                Mecc criteria (>= 2 loci with >= 95% coverage) is usually sufficient.
+                Default 0 (disabled). Set to 1.5+ to enable a conservative filter.
             u_secondary_min_frac: Secondary coverage fraction threshold that triggers a
                 contiguity check when attempting to call Uecc (default: 0.01).
             u_secondary_min_bp: Secondary coverage absolute bp threshold that triggers a
@@ -872,7 +874,9 @@ class UMeccClassifier:
                     if len(loci_max_identities) >= 2:
                         loci_max_identities.sort(reverse=True)
                         identity_gap = loci_max_identities[0] - loci_max_identities[1]
-                        if identity_gap >= self.mecc_identity_gap_threshold:
+                        # Use > instead of >= to allow exact threshold matches
+                        # (e.g., 1.0% gap with 1.0% threshold is allowed)
+                        if identity_gap > self.mecc_identity_gap_threshold:
                             self.stats["mecc_vetoed_identity_gap"] = self.stats.get(
                                 "mecc_vetoed_identity_gap", 0
                             ) + 1

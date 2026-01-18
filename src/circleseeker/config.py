@@ -92,21 +92,20 @@ class ToolConfig:
     # General alignment configuration (supports multiple aligners)
     alignment: dict[str, Any] = field(
         default_factory=lambda: {
-            # aligner: "last" (default) or "minimap2"
-            # LAST is better for complex eccDNA with multiple segments
-            "aligner": "last",
+            # aligner: "minimap2" (default) or "last"
+            "aligner": "minimap2",
             # Common options
             "min_identity": 99.0,
             "min_alignment_length": 50,
-            # LAST-specific options
+            # LAST-specific options (only used when aligner="last")
             "db_prefix": None,  # Pre-built LAST database (optional)
         }
     )
-    # Minimap2-specific alignment configuration (legacy, use 'alignment' for new code)
+    # Minimap2-specific alignment configuration for run_alignment step
     minimap2_align: dict[str, Any] = field(
         default_factory=lambda: {
-            "preset": "sr",
-            "max_target_seqs": 200,
+            "preset": "map-hifi",
+            "max_target_seqs": 5,
             "additional_args": "",
             # min_identity: Base identity threshold (%).
             # For HiFi data, 99.0 is recommended as HiFi error rate is ~1%.
@@ -119,14 +118,10 @@ class ToolConfig:
             # min_identity_floor: Identity threshold never goes below this (%).
             "min_identity_floor": 97.0,
             # split_by_length: Use different presets for short/long sequences.
-            # Only useful when preset_short != preset_long.
             "split_by_length": False,
             "split_length": 5000,  # Length threshold in bp
-            "preset_short": "sr",  # Preset for sequences < split_length
-            # NOTE: For chimera-sensitive Cecc detection, long queries should still use a
-            # split-friendly preset. Assembly presets like asm5 can drop short chimeric
-            # segments (e.g. ~100bp tails) in practice.
-            "preset_long": "sr",  # Preset for sequences >= split_length
+            "preset_short": "map-hifi",  # Preset for sequences < split_length
+            "preset_long": "map-hifi",  # Preset for sequences >= split_length
         }
     )
     minimap2: dict[str, Any] = field(
