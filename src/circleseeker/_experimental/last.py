@@ -101,6 +101,7 @@ def mismap_to_mapq(mismap: float) -> int:
 def last_tab_to_blast_tsv(
     tab_path: Path,
     output_path: Path,
+    min_identity: float = 0.0,
     logger: Optional[logging.Logger] = None,
 ) -> int:
     """Convert LAST TAB format to BLAST outfmt 6-like TSV + MAPQ.
@@ -127,6 +128,7 @@ def last_tab_to_blast_tsv(
     Args:
         tab_path: Path to LAST TAB file
         output_path: Path to output TSV file
+        min_identity: Minimum identity percentage to keep (0-100, default 0 = no filter)
         logger: Optional logger
 
     Returns:
@@ -141,6 +143,7 @@ def last_tab_to_blast_tsv(
 
     written = 0
     skipped = 0
+    filtered = 0
 
     with open(tab_path, "r") as infile, open(output_path, "w") as outfile:
         for line_num, line in enumerate(infile, 1):
@@ -174,15 +177,21 @@ def last_tab_to_blast_tsv(
                     log.warning(f"Line {line_num}: parse error: {e}")
                 continue
 
-            # Parse mismap probability
+            # Parse E-value and mismap probability from extra fields
+            # LAST outputs: EG=expected_alignments E=e_value mismap=probability
+            evalue = 1.0  # Default
             mismap = 1.0  # Default: unknown
             for part in parts[12:]:
-                if part.startswith("mismap="):
+                if part.startswith("E="):
+                    try:
+                        evalue = float(part.split("=")[1])
+                    except (ValueError, IndexError):
+                        pass
+                elif part.startswith("mismap="):
                     try:
                         mismap = float(part.split("=")[1])
                     except (ValueError, IndexError):
                         pass
-                    break
 
             # Parse alignment blocks
             total_matches, mismatches, gap_opens, gap_bases = parse_alignment_blocks(alignment_blocks)
@@ -198,6 +207,11 @@ def last_tab_to_blast_tsv(
                 identity = (total_matches / alignment_length) * 100.0
             else:
                 identity = 0.0
+
+            # Filter by minimum identity
+            if identity < min_identity:
+                filtered += 1
+                continue
 
             # Convert to MAPQ
             mapq = mismap_to_mapq(mismap)
@@ -232,7 +246,7 @@ def last_tab_to_blast_tsv(
                 str(q_end_1based),
                 str(s_start_1based),
                 str(s_end_1based),
-                f"{mismap:.2e}",  # Use mismap as evalue
+                f"{evalue:.2e}",  # E-value from LAST
                 str(score),       # Use score as bit_score
                 sstrand,
                 str(mapq),
@@ -242,6 +256,9 @@ def last_tab_to_blast_tsv(
 
     if skipped > 0:
         log.warning(f"Skipped {skipped} malformed lines in TAB file")
+
+    if filtered > 0:
+        log.info(f"Filtered {filtered} alignments below {min_identity:.1f}% identity")
 
     log.info(f"Converted {written} alignments from LAST TAB to BLAST TSV")
     return written
@@ -256,6 +273,8 @@ class LastAligner(ExternalTool):
     3. last-split - split alignments (optional)
     4. Convert TAB to BLAST TSV format
     """
+
+    tool_name = "lastal"
 
     def __init__(
         self,
@@ -336,7 +355,7 @@ class LastAligner(ExternalTool):
         query_fasta: Path,
         db_prefix: Path,
         output_tab: Path,
-        max_multiplicity: int = 10,
+        max_multiplicity: int = 5,
     ) -> Path:
         """Run LAST alignment.
 
@@ -344,7 +363,7 @@ class LastAligner(ExternalTool):
             query_fasta: Path to query FASTA
             db_prefix: LAST database prefix
             output_tab: Output TAB file path
-            max_multiplicity: Maximum alignments per query position (-m)
+            max_multiplicity: Maximum alignments per query position (-m, default 5)
 
         Returns:
             Path to output TAB file
@@ -389,18 +408,20 @@ class LastAligner(ExternalTool):
         reference_fasta: Path,
         output_tsv: Path,
         db_prefix: Optional[Path] = None,
+        min_identity: float = 99.0,
     ) -> Path:
         """Run complete LAST alignment workflow.
 
         1. Build database (if needed)
         2. Run alignment
-        3. Convert to BLAST TSV format (no filtering, LAST default thresholds are strict)
+        3. Convert to BLAST TSV format with identity filtering
 
         Args:
             query_fasta: Query FASTA file
             reference_fasta: Reference FASTA file
             output_tsv: Output TSV file (BLAST format)
             db_prefix: Optional pre-built database prefix
+            min_identity: Minimum identity percentage to keep (default 99%)
 
         Returns:
             Path to output TSV file
@@ -425,10 +446,11 @@ class LastAligner(ExternalTool):
         tab_file = output_tsv.with_suffix(".last.tab")
         self.align(query_fasta, db_prefix, tab_file)
 
-        # Convert to BLAST TSV format (no filtering)
+        # Convert to BLAST TSV format with identity filtering
         last_tab_to_blast_tsv(
             tab_file,
             output_tsv,
+            min_identity=min_identity,
             logger=self.logger,
         )
 

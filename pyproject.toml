@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "circleseeker"
-version = "0.10.11"
+version = "0.10.10"
 description = "Comprehensive eccDNA detection from PacBio HiFi sequencing data"
 readme = "README.md"
 authors = [

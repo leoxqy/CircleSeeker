@@ -74,12 +74,9 @@ def tandem_to_ring(pipeline: Pipeline) -> None:
 
 
 def run_alignment(pipeline: Pipeline) -> None:
-    """Step 3: Run alignment (minimap2 or LAST).
+    """Step 3: Run minimap2 alignment."""
+    from circleseeker.external.minimap2_align import Minimap2Aligner
 
-    The aligner can be configured via tools.alignment.aligner:
-    - "minimap2" (default): Use minimap2 for alignment
-    - "last": Use LAST for alignment (better for complex eccDNA)
-    """
     alignment_output = (
         pipeline.config.output_dir / f"{pipeline.config.prefix}_alignment_results.tsv"
     )
@@ -96,44 +93,27 @@ def run_alignment(pipeline: Pipeline) -> None:
     if reference is None:
         raise PipelineError("Reference genome is required")
 
-    # Get alignment config (supports both old minimap2_align and new alignment format)
-    align_cfg = pipeline.config.tools.alignment or pipeline.config.tools.minimap2_align or {}
-    if not isinstance(align_cfg, dict):
-        align_cfg = {}
-
-    # Determine which aligner to use
-    aligner = align_cfg.get("aligner", "minimap2")
-
-    if aligner == "last":
-        _run_last_alignment(pipeline, query_file, reference, alignment_output, align_cfg)
-    else:
-        _run_minimap2_alignment(pipeline, query_file, reference, alignment_output, align_cfg)
-
-    pipeline.state.results[ResultKeys.ALIGNMENT_OUTPUT] = str(alignment_output)
-
-
-def _run_minimap2_alignment(
-    pipeline: Pipeline,
-    query_file: Path,
-    reference: Path,
-    alignment_output: Path,
-    cfg: dict,
-) -> None:
-    """Run minimap2 alignment."""
-    from circleseeker.external.minimap2_align import Minimap2Aligner
-
-    preset = cfg.get("preset", "sr")
-    additional_args = cfg.get("additional_args", "")
-    max_target_seqs = cfg.get("max_target_seqs", 200)
-    # Identity filter with length-based compensation for HiFi data
-    min_identity = float(cfg.get("min_identity", 99.0))
-    identity_decay_per_10kb = float(cfg.get("identity_decay_per_10kb", 0.5))
-    min_identity_floor = float(cfg.get("min_identity_floor", 97.0))
-    # Length-based preset splitting
-    split_by_length = bool(cfg.get("split_by_length", False))
-    split_length = int(cfg.get("split_length", 5000))
-    preset_short = cfg.get("preset_short", "sr")
-    preset_long = cfg.get("preset_long", "sr")
+    minimap_cfg = pipeline.config.tools.minimap2_align or {}
+    if not isinstance(minimap_cfg, dict):
+        raise PipelineError(
+            "Invalid minimap2_align config; expected mapping, "
+            f"got {type(minimap_cfg).__name__}"
+        )
+    preset = minimap_cfg.get("preset", "sr")
+    additional_args = minimap_cfg.get("additional_args", "")
+    max_target_seqs = minimap_cfg.get("max_target_seqs", 200)
+    # Identity filter with length-based compensation for HiFi data:
+    # - Base threshold: 99.0% (HiFi error rate is ~1%)
+    # - Decay: 0.5% per 10kb (longer sequences accumulate more errors)
+    # - Floor: 97.0% (never go below this)
+    min_identity = float(minimap_cfg.get("min_identity", 99.0))
+    identity_decay_per_10kb = float(minimap_cfg.get("identity_decay_per_10kb", 0.5))
+    min_identity_floor = float(minimap_cfg.get("min_identity_floor", 97.0))
+    # Length-based preset splitting: use different presets for short/long sequences
+    split_by_length = bool(minimap_cfg.get("split_by_length", False))
+    split_length = int(minimap_cfg.get("split_length", 5000))
+    preset_short = minimap_cfg.get("preset_short", "sr")
+    preset_long = minimap_cfg.get("preset_long", "sr")
 
     runner = Minimap2Aligner(
         threads=pipeline.config.threads, logger=pipeline.logger.getChild("minimap2_align")
@@ -153,30 +133,4 @@ def _run_minimap2_alignment(
         preset_short=preset_short,
         preset_long=preset_long,
     )
-
-
-def _run_last_alignment(
-    pipeline: Pipeline,
-    query_file: Path,
-    reference: Path,
-    alignment_output: Path,
-    cfg: dict,
-) -> None:
-    """Run LAST alignment (no filtering, LAST defaults are strict)."""
-    from circleseeker.external.last import LastAligner
-
-    # LAST database prefix (can be pre-built or auto-generated)
-    db_prefix = cfg.get("db_prefix")
-    if db_prefix:
-        db_prefix = Path(db_prefix)
-
-    runner = LastAligner(
-        threads=pipeline.config.threads,
-        logger=pipeline.logger.getChild("last"),
-    )
-    runner.run_alignment(
-        query_fasta=query_file,
-        reference_fasta=reference,
-        output_tsv=alignment_output,
-        db_prefix=db_prefix,
-    )
+    pipeline.state.results[ResultKeys.ALIGNMENT_OUTPUT] = str(alignment_output)

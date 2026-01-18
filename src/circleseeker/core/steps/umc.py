@@ -127,10 +127,9 @@ def um_classify(pipeline: Pipeline) -> None:
 
 
 def cecc_build(pipeline: Pipeline) -> None:
-    """Step 5: Process Cecc candidates using simplified cecc_build_v2 module."""
+    """Step 5: Process Cecc candidates using cecc_build module."""
     import pandas as pd
-
-    from circleseeker.modules.cecc_build_v2 import CeccBuildV2
+    import circleseeker.core.pipeline as pipeline_module
 
     unclass_input = pipeline.config.output_dir / "um_classify.unclassified.csv"
     input_csv = unclass_input
@@ -161,31 +160,56 @@ def cecc_build(pipeline: Pipeline) -> None:
 
     output_file = pipeline.config.output_dir / "cecc_build.csv"
 
-    # Get config
-    cecc_cfg = getattr(pipeline.config.tools, "cecc_build", {}) or {}
-    if not isinstance(cecc_cfg, dict):
-        raise PipelineError(
-            "Invalid cecc_build config; expected mapping, "
-            f"got {type(cecc_cfg).__name__}"
-        )
+    from circleseeker.modules.cecc_build import CeccBuild as DefaultCeccBuild
 
-    # Create builder with simplified parameters
-    builder = CeccBuildV2(
-        gap_tolerance=int(cecc_cfg.get("tau_gap", cecc_cfg.get("edge_tolerance", 50))),
-        region_tolerance=int(cecc_cfg.get("position_tolerance", 50)),
-        min_regions=int(cecc_cfg.get("min_segments", 2)),
-        logger=pipeline.logger.getChild("cecc_build"),
-    )
+    builder_cls = getattr(pipeline_module, "CeccBuild", None)
+    if builder_cls is None:
+        builder_cls = DefaultCeccBuild
 
-    pipeline.logger.info("Running cecc_build_v2 module")
+    builder = cast(type[Any], builder_cls)(logger=pipeline.logger.getChild("cecc_build"))
+
+    pipeline.logger.info("Running cecc_build module")
     try:
-        result_df = builder.run_pipeline(
+        cecc_cfg = getattr(pipeline.config.tools, "cecc_build", {}) or {}
+        if not isinstance(cecc_cfg, dict):
+            raise PipelineError(
+                "Invalid cecc_build config; expected mapping, "
+                f"got {type(cecc_cfg).__name__}"
+            )
+
+        tau_gap = cecc_cfg.get("tau_gap") or cecc_cfg.get("edge_tolerance") or 20
+        min_match_degree = cecc_cfg.get("min_match_degree", 95.0)
+        theta_chain = cecc_cfg.get("theta_chain")
+        if theta_chain is not None:
+            try:
+                theta_chain_val = float(theta_chain)
+                min_match_degree = (
+                    theta_chain_val * 100.0 if theta_chain_val <= 1.0 else theta_chain_val
+                )
+            except (TypeError, ValueError):
+                pass
+
+        builder.run_pipeline(
             input_csv=input_csv,
             output_csv=output_file,
+            overlap_threshold=cecc_cfg.get("overlap_threshold", 0.95),
+            min_segments=int(cecc_cfg.get("min_segments", 2)),
+            edge_tolerance=int(tau_gap),
+            position_tolerance=int(cecc_cfg.get("position_tolerance", 50)),
+            min_match_degree=float(min_match_degree),
+            max_rotations=int(cecc_cfg.get("max_rotations", 20)),
+            locus_overlap_threshold=cecc_cfg.get("locus_overlap_threshold", 0.95),
         )
 
-        # Safety guard: ensure we never emit Cecc calls that overlap with U/Mecc
-        if not result_df.empty and "query_id" in result_df.columns:
+        df_cecc = (
+            pd.read_csv(output_file)
+            if output_file.exists() and output_file.stat().st_size > 1
+            else pd.DataFrame()
+        )
+
+        # Safety guard: even though we only analyze unclassified reads, ensure we never emit
+        # Cecc calls that overlap with existing U/Mecc classifications.
+        if not df_cecc.empty and "query_id" in df_cecc.columns:
             uecc_path = pipeline.config.output_dir / "um_classify.uecc.csv"
             mecc_path = pipeline.config.output_dir / "um_classify.mecc.csv"
             uecc_df = (
@@ -202,20 +226,18 @@ def cecc_build(pipeline: Pipeline) -> None:
             mecc_ids = set(mecc_df.get("query_id", pd.Series([], dtype=str)).astype(str))
             exclude_from_c = uecc_ids | mecc_ids
             if exclude_from_c:
-                result_df = result_df[~result_df["query_id"].astype(str).isin(exclude_from_c)].copy()
-                result_df.to_csv(output_file, index=False)
+                df_cecc = df_cecc[~df_cecc["query_id"].astype(str).isin(exclude_from_c)].copy()
+                df_cecc.to_csv(output_file, index=False)
 
         pipeline._set_result(ResultKeys.CECC_BUILD_OUTPUT, str(output_file))
         pipeline._set_result(
             ResultKeys.CECC_BUILD_COUNT,
-            int(result_df["query_id"].nunique())
-            if (not result_df.empty and "query_id" in result_df.columns)
+            int(df_cecc["query_id"].nunique())
+            if (not df_cecc.empty and "query_id" in df_cecc.columns)
             else 0,
         )
     except Exception as e:
         pipeline.logger.warning(f"cecc_build failed: {e}")
-        import traceback
-        pipeline.logger.debug(traceback.format_exc())
         pd.DataFrame().to_csv(output_file, index=False)
         pipeline._set_result(ResultKeys.CECC_BUILD_OUTPUT, str(output_file))
         pipeline._set_result(ResultKeys.CECC_BUILD_COUNT, 0)

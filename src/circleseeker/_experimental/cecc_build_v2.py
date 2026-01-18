@@ -63,6 +63,14 @@ class CeccResult:
     cycle_length: int
     is_inter_chr: bool
     coverage: float
+    # Quality metrics from alignment data
+    mapq_best: int = 0
+    identity_best: float = 0.0
+    query_cov_best: float = 0.0
+    query_cov_2nd: float = 0.0
+    # Sequence extraction info (for umc_process)
+    q_start: int = 0
+    length: int = 0
 
     @property
     def num_regions(self) -> int:
@@ -239,7 +247,7 @@ class CeccBuildV2:
         cycle_regions = regions[start_idx:end_idx]
 
         # Check minimum distinct regions
-        unique_regions = []
+        unique_regions: list[GenomicRegion] = []
         for r in cycle_regions:
             is_dup = False
             for u in unique_regions:
@@ -261,12 +269,45 @@ class CeccBuildV2:
         chrs = set(r.chr for r in unique_regions)
         is_inter_chr = len(chrs) > 1
 
+        # Extract quality metrics from alignment data
+        mapq_best = 0
+        identity_best = 0.0
+        if "mapq" in sorted_alns.columns:
+            mapq_best = int(sorted_alns["mapq"].max())
+        if "identity" in sorted_alns.columns:
+            identity_best = float(sorted_alns["identity"].max())
+
+        # Calculate query coverage (best and 2nd best by subject)
+        query_cov_best = coverage  # Use overall coverage as best
+        query_cov_2nd = 0.0
+        if len(unique_regions) > 1:
+            # Approximate 2nd coverage from region lengths
+            region_lengths = sorted([r.length for r in unique_regions], reverse=True)
+            if len(region_lengths) > 1 and query_len > 0:
+                query_cov_2nd = region_lengths[1] / query_len
+
+        # Extract q_start and length for sequence extraction
+        # q_start: first alignment's query start position
+        q_start = int(sorted_alns["q_start"].min())
+        # length: try to get from input data, otherwise use total region length
+        if "length" in sorted_alns.columns:
+            length = int(sorted_alns["length"].iloc[0])
+        else:
+            # Use sum of unique region lengths as approximation
+            length = sum(r.length for r in unique_regions)
+
         return CeccResult(
             query_id=query_id,
             regions=unique_regions,
             cycle_length=len(unique_regions),
             is_inter_chr=is_inter_chr,
             coverage=coverage,
+            mapq_best=mapq_best,
+            identity_best=identity_best,
+            query_cov_best=query_cov_best,
+            query_cov_2nd=query_cov_2nd,
+            q_start=q_start,
+            length=length,
         )
 
     def detect(self, alignments_df: pd.DataFrame) -> list[CeccResult]:
@@ -295,23 +336,53 @@ class CeccBuildV2:
 
         return results
 
+    # Thresholds for low quality flags
+    MAPQ_LOW_THRESHOLD = 20
+    IDENTITY_LOW_THRESHOLD = 90.0
+
     def results_to_dataframe(self, results: list[CeccResult]) -> pd.DataFrame:
-        """Convert CeccResult list to DataFrame."""
+        """Convert CeccResult list to DataFrame with all required columns."""
         rows = []
 
         for res in results:
+            # Calculate confidence score (geometric mean of normalized metrics)
+            norm_mapq = min(res.mapq_best / 60.0, 1.0) if res.mapq_best > 0 else 0.0
+            norm_identity = res.identity_best / 100.0 if res.identity_best > 0 else 0.0
+            norm_cov = min(res.query_cov_best, 1.0)
+
+            if norm_mapq > 0 and norm_identity > 0 and norm_cov > 0:
+                confidence_score = (norm_mapq * norm_identity * norm_cov) ** (1/3)
+            else:
+                confidence_score = 0.0
+
+            # Quality flags
+            low_mapq = res.mapq_best < self.MAPQ_LOW_THRESHOLD
+            low_identity = res.identity_best < self.IDENTITY_LOW_THRESHOLD
+
             for i, region in enumerate(res.regions):
                 rows.append({
+                    # Required columns per contract
                     "query_id": res.query_id,
                     "eccdna_type": "Cecc",
+                    "chr": region.chr,
+                    "start0": region.start,  # 0-based
+                    "end0": region.end,      # 0-based, half-open
+                    "strand": region.strand,
+                    "segment_in_circle": i + 1,
+                    "confidence_score": round(confidence_score, 4),
+                    "mapq_best": res.mapq_best,
+                    "identity_best": round(res.identity_best, 3),
+                    "query_cov_best": round(res.query_cov_best, 4),
+                    "query_cov_2nd": round(res.query_cov_2nd, 4),
+                    "low_mapq": low_mapq,
+                    "low_identity": low_identity,
+                    # Sequence extraction columns (for umc_process)
+                    "q_start": res.q_start,
+                    "length": res.length,
+                    # Extra informational columns
                     "cecc_class": res.cecc_class,
                     "num_regions": res.num_regions,
                     "coverage": round(res.coverage, 4),
-                    "segment_order": i + 1,
-                    "chr": region.chr,
-                    "start": region.start,
-                    "end": region.end,
-                    "strand": region.strand,
                     "region_length": region.length,
                 })
 
@@ -347,9 +418,18 @@ class CeccBuildV2:
         except Exception:
             df = pd.read_csv(input_csv, sep="\t")  # Fallback to TSV
 
+        # Define required columns for empty DataFrame
+        required_columns = [
+            "query_id", "eccdna_type", "chr", "start0", "end0", "strand",
+            "segment_in_circle", "confidence_score", "mapq_best", "identity_best",
+            "query_cov_best", "query_cov_2nd", "low_mapq", "low_identity",
+            "q_start", "length",  # For sequence extraction
+            "cecc_class", "num_regions", "coverage", "region_length",
+        ]
+
         if df.empty:
             self.logger.warning("Input file is empty")
-            result_df = pd.DataFrame()
+            result_df = pd.DataFrame(columns=required_columns)
             output_csv.parent.mkdir(parents=True, exist_ok=True)
             result_df.to_csv(output_csv, index=False)
             return result_df
@@ -360,7 +440,10 @@ class CeccBuildV2:
         results = self.detect(df)
 
         # Convert to DataFrame
-        result_df = self.results_to_dataframe(results)
+        if results:
+            result_df = self.results_to_dataframe(results)
+        else:
+            result_df = pd.DataFrame(columns=required_columns)
 
         # Save
         output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -403,7 +486,7 @@ def main():
     )
 
     builder.run_pipeline(
-        input_tsv=Path(args.input),
+        input_csv=Path(args.input),
         output_csv=Path(args.output),
     )
 
