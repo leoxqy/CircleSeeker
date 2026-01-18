@@ -10,7 +10,7 @@ from typing import Optional
 
 import click
 
-from circleseeker.config import Config, load_config, save_config
+from circleseeker.config import Config, load_config, save_config, apply_preset, PRESETS
 from circleseeker.utils.display import ConsoleFormatter, print_formatted
 from circleseeker.utils.logging import setup_logging
 
@@ -49,6 +49,8 @@ class PipelineOptions:
     # Logging options from CLI (used to determine if config should override)
     noise: int = 0  # -n count
     debug: bool = False  # --debug flag
+    # Sensitivity preset: relaxed, balanced (default), strict
+    preset: Optional[str] = None
 
 
 def show_pipeline_steps() -> None:
@@ -127,6 +129,16 @@ def execute_pipeline(
 
     # Load configuration first to allow config file values
     cfg = load_config(opts.config_path) if opts.config_path else Config()
+
+    # Apply sensitivity preset if specified
+    # Preset is applied AFTER loading config but BEFORE CLI overrides
+    # This allows: defaults -> config file -> preset -> CLI args
+    if opts.preset:
+        try:
+            apply_preset(cfg, opts.preset)  # type: ignore[arg-type]
+        except Exception as exc:
+            click.echo(f"Error: {exc}", err=True)
+            sys.exit(1)
 
     # Reconfigure logging if config specifies different values and CLI didn't override
     # CLI flags (--debug, -n, --log-output) take precedence over config file
@@ -258,13 +270,15 @@ def execute_pipeline(
     # Print header
     print_formatted(formatter.header())
 
-    # Print configuration (including inference engine)
+    # Print configuration (including inference engine and preset)
     # Use user_output_dir for display (cfg.output_dir was changed to temp_dir by Pipeline)
+    preset_display = opts.preset.capitalize() if opts.preset else "Balanced"
     config_dict = {
         "input_file": input_file.name,
         "reference": reference.name,
         "output_dir": str(user_output_dir.absolute()),
         "threads": cfg.threads,
+        "preset": preset_display,
         "inference": inference_info,
     }
     print_formatted(formatter.format_config(config_dict))

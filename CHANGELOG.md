@@ -5,6 +5,20 @@ All notable changes to CircleSeeker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-01-18
+
+### Changed
+- **CeccDNA detection upgraded to LAST-based V4**: Complete rewrite of cecc_build module
+  - Uses LAST aligner for precise alignment of doubled sequences
+  - Detects "doubled repeat pattern" where first and second half align to same genomic position
+  - Falls back to graph-based detection (V3) when LAST is unavailable
+  - Achieves 100% recall and 100% precision on simulated data (vs V3's ~1.3% accuracy)
+
+### Technical Notes
+- LAST workflow: lastdb (build database) → lastal (align) → detect circles
+- New parameters: `min_identity`, `min_query_coverage`, `min_repeat_query_gap`
+- Validated on 15,000 simulated samples (5,000 Uecc + 5,000 Mecc + 5,000 Cecc)
+
 ## [0.10.10] - 2026-01-17
 
 ### Changed

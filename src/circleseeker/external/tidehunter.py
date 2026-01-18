@@ -51,15 +51,34 @@ class TideHunter(ExternalTool):
         p: int = 100,
         P: int = 2000000,
         e: float = 0.1,
-        f: int = 2,
+        c: int = 2,
+        out_fmt: int = 2,
+        # Legacy parameter name (maps to out_fmt)
+        f: int | None = None,
     ) -> None:
-        """Run TideHunter analysis."""
+        """Run TideHunter analysis.
+
+        Args:
+            k: k-mer length (max 16)
+            w: window size for minimizer seeding
+            p: minimum period size
+            P: maximum period size
+            e: maximum divergence rate
+            c: minimum copy number (TideHunter -c)
+            out_fmt: output format (1=FASTA, 2=Tabular, 3=FASTQ, 4=Tabular+qual)
+            f: deprecated alias for out_fmt (for backward compatibility)
+        """
         import subprocess
+
+        # Handle legacy 'f' parameter (was incorrectly used for output format)
+        output_format = f if f is not None else out_fmt
 
         cmd = [
             self.tool_name,
             "-f",
-            str(f),
+            str(output_format),
+            "-c",
+            str(c),
             "-t",
             str(self.threads),
             "-k",

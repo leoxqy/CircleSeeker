@@ -4,9 +4,115 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Optional, Any, cast
+from typing import Optional, Any, cast, Literal
 import yaml
 from circleseeker.exceptions import ConfigurationError
+
+
+# ================== Preset Definitions ==================
+# Three sensitivity presets: relaxed (high recall), balanced (default), strict (high precision)
+
+PresetName = Literal["relaxed", "balanced", "strict"]
+
+PRESETS: dict[PresetName, dict[str, dict[str, Any]]] = {
+    # ------------------------------------------------
+    # RELAXED: High recall, may have more false positives
+    # Use when: exploratory analysis, don't want to miss anything
+    # ------------------------------------------------
+    "relaxed": {
+        "tidehunter": {
+            # k=16 unchanged (lower k changes output format)
+            "e": 0.15,      # Allow more errors (default: 0.1)
+            "c": 2,         # Min copy number (TideHunter requires >=2)
+            "p": 30,        # Detect shorter periods (default: 100, TideHunter min: 30)
+        },
+        "minimap2_align": {
+            "min_identity": 97.0,           # Lower identity threshold
+            "identity_decay_per_10kb": 1.0, # More lenient for long reads
+            "min_identity_floor": 95.0,     # Lower floor
+        },
+        "um_classify": {
+            "theta_full": 0.90,         # Lower coverage requirement
+            "theta_u": 0.90,
+            "theta_m": 0.90,
+            "theta_u2_max": 0.10,       # Allow more secondary coverage
+            "theta_locus": 0.90,
+            "u_secondary_max_ratio": 0.10,
+        },
+        "cecc_build": {
+            "overlap_threshold": 0.90,
+            "theta_chain": 0.90,
+            "min_match_degree": 90.0,
+            "edge_tolerance": 50,       # More tolerant of edge mismatches
+        },
+    },
+
+    # ------------------------------------------------
+    # BALANCED: Default settings, good precision-recall trade-off
+    # Use when: standard analysis
+    # ------------------------------------------------
+    "balanced": {
+        # Empty dict = use default values from ToolConfig
+    },
+
+    # ------------------------------------------------
+    # STRICT: High precision, may miss some true positives
+    # Use when: validation studies, publication-quality results
+    # ------------------------------------------------
+    "strict": {
+        "tidehunter": {
+            # k=16 unchanged (default)
+            "e": 0.05,      # Require fewer errors
+            "c": 3,         # Require more copies (min copy number)
+            "p": 150,       # Require longer periods
+        },
+        "minimap2_align": {
+            "min_identity": 99.5,           # Higher identity threshold
+            "identity_decay_per_10kb": 0.25,# Less decay allowed
+            "min_identity_floor": 98.0,     # Higher floor
+        },
+        "um_classify": {
+            "theta_full": 0.98,         # Higher coverage requirement
+            "theta_u": 0.98,
+            "theta_m": 0.98,
+            "theta_u2_max": 0.02,       # Stricter secondary filtering
+            "mapq_u_min": 20,           # Require decent MAPQ
+            "theta_locus": 0.98,
+            "u_secondary_max_ratio": 0.02,
+        },
+        "cecc_build": {
+            "overlap_threshold": 0.98,
+            "min_segments": 3,          # Require more supporting segments
+            "theta_chain": 0.98,
+            "min_match_degree": 98.0,
+            "edge_tolerance": 10,       # Less tolerant
+        },
+    },
+}
+
+
+def apply_preset(cfg: "Config", preset: PresetName) -> None:
+    """Apply a preset to the configuration.
+
+    Args:
+        cfg: Configuration object to modify in-place
+        preset: One of 'relaxed', 'balanced', 'strict'
+
+    Raises:
+        ConfigurationError: If preset name is invalid
+    """
+    if preset not in PRESETS:
+        valid = ", ".join(PRESETS.keys())
+        raise ConfigurationError(f"Invalid preset '{preset}'. Valid options: {valid}")
+
+    preset_values = PRESETS[preset]
+
+    # Apply each tool's preset values
+    for tool_name, params in preset_values.items():
+        if hasattr(cfg.tools, tool_name):
+            tool_dict = getattr(cfg.tools, tool_name)
+            if isinstance(tool_dict, dict):
+                tool_dict.update(params)
 
 
 @dataclass
@@ -35,7 +141,7 @@ class ToolConfig:
     """External tool configuration."""
 
     tidehunter: dict[str, Any] = field(
-        default_factory=lambda: {"k": 16, "w": 1, "p": 100, "P": 2000000, "e": 0.1, "f": 2}
+        default_factory=lambda: {"k": 16, "w": 1, "p": 100, "P": 2000000, "e": 0.1, "c": 2}
     )
     um_classify: dict[str, Any] = field(
         default_factory=lambda: {

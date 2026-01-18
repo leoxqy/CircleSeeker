@@ -105,6 +105,13 @@ def _print_advanced_help(ctx: click.Context, _param: click.Parameter, value: boo
 @config_option
 @threads_option
 @keep_tmp_option
+# Sensitivity preset option
+@click.option(
+    "--preset",
+    type=click.Choice(["relaxed", "balanced", "strict"], case_sensitive=False),
+    default=None,
+    help="Sensitivity preset: relaxed (high recall), balanced (default), strict (high precision)",
+)
 # Verbosity option (unified: -v/--verbose)
 @click.option(
     "-v",
@@ -150,6 +157,7 @@ def cli(
     config: Optional[Path],
     threads: Optional[int],
     keep_tmp: bool,
+    preset: Optional[str],
     verbose: int,
     start_from: Optional[int],
     stop_at: Optional[int],
@@ -246,6 +254,7 @@ def cli(
             log_file=log_file,
             noise=verbose,
             debug=debug,
+            preset=preset,
         )
         execute_pipeline(opts, logger)
 
