@@ -16,6 +16,8 @@ build:
   entry_points:
     - circleseeker = circleseeker.cli:main
     - CircleSeeker = circleseeker.cli:main
+  run_exports:
+    - {{ pin_subpackage(name, max_pin="x") }}
 
 requirements:
   host:
@@ -63,6 +65,7 @@ about:
   home: https://github.com/leoxqy/CircleSeeker
   license: GPL-3.0-only
   license_family: GPL
+  license_file: LICENSE
   summary: Comprehensive eccDNA detection from PacBio HiFi sequencing data with dual-engine support
   description: |
     CircleSeeker is a specialized bioinformatics pipeline designed for the
