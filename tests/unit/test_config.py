@@ -60,8 +60,11 @@ class TestPerformanceConfig:
 
     def test_performance_config_defaults(self):
         """Test PerformanceConfig default values."""
+        import os
         config = PerformanceConfig()
-        assert config.threads == 8
+        # Default is min(8, cpu_count * 2)
+        expected = min(8, (os.cpu_count() or 4) * 2)
+        assert config.threads == expected
 
     def test_performance_config_custom_values(self):
         """Test PerformanceConfig with custom values."""
@@ -166,10 +169,12 @@ class TestConfig:
 
     def test_config_threads_property(self):
         """Test threads property getter and setter."""
+        import os
         config = Config()
 
-        # Default threads
-        assert config.threads == 8
+        # Default is min(8, cpu_count * 2)
+        expected = min(8, (os.cpu_count() or 4) * 2)
+        assert config.threads == expected
 
         # Set threads via property
         config.threads = 16
