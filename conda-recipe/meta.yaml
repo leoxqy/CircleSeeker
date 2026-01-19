@@ -6,11 +6,8 @@ package:
   version: {{ version }}
 
 source:
-  # For local builds from the working tree
-  path: ..
-  # For Bioconda, replace the above with an sdist or GitHub tag URL and sha256, e.g.:
-  # url: https://github.com/leoxqy/CircleSeeker/archive/refs/tags/v{{ version }}.tar.gz
-  # sha256: <fill-in-from-release>
+  url: https://github.com/leoxqy/CircleSeeker/archive/refs/tags/v{{ version }}.tar.gz
+  sha256: 3c13aa469d3deb826d3ea3a8e6bdf497c212086142ba1d43da795c4696fae606
 
 build:
   noarch: python
