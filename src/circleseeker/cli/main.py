@@ -6,7 +6,8 @@ import logging
 import signal
 import sys
 from pathlib import Path
-from typing import Optional, cast
+from types import FrameType
+from typing import Any, Optional, cast
 
 import click
 
@@ -18,7 +19,7 @@ from circleseeker.cli.exit_codes import (
     EXIT_SIGTERM,
 )
 
-def _handle_signal(signum: int, frame) -> None:
+def _handle_signal(signum: int, frame: Optional[FrameType]) -> None:
     """Handle interrupt signals for graceful shutdown."""
     sig_name = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
     click.echo(f"\n{sig_name} received, initiating graceful shutdown...", err=True)

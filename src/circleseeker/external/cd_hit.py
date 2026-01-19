@@ -44,7 +44,7 @@ class CDHitEst(ExternalTool):
     def __init__(
         self,
         config: Optional[CDHitConfig] = None,
-        logger=None,
+        logger: Any = None,
         *,
         threads: int = 24,
         c: float = 0.99,

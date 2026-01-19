@@ -14,7 +14,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Union
+from typing import Any, Optional, Union
 import argparse
 import logging
 from circleseeker.utils.logging import get_logger
@@ -220,7 +220,7 @@ class EccSummary:
             df = pd.read_csv(merged_csv)
 
             # Function to calculate statistics for a subset
-            def calc_stats(data):
+            def calc_stats(data: Any) -> dict[str, Any]:
                 if len(data) == 0:
                     return {
                         "count": 0,

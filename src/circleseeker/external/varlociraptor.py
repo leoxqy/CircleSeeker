@@ -129,7 +129,7 @@ class Varlociraptor(ExternalTool):
             for proc in [p1, p2, p3]:
                 if proc is None:
                     continue
-                try:
+                try:  # type: ignore[unreachable]
                     # First try graceful termination
                     proc.terminate()
                     proc.wait(timeout=5)

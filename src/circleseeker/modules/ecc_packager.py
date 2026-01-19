@@ -157,7 +157,7 @@ def first_glob(dirpath: Optional[Path], pattern: str) -> Optional[Path]:
 # ---------------------- Core packaging ----------------------- #
 
 
-def run(args) -> int:
+def run(args: argparse.Namespace) -> int:
     sample = args.sample_name
 
     # Sources

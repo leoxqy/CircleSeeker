@@ -107,7 +107,7 @@ class ModuleBase(ABC):
         return path
 
     @abstractmethod
-    def validate_inputs(self, **kwargs) -> bool:
+    def validate_inputs(self, **kwargs: Any) -> bool:
         """
         Validate all required inputs for the module.
 
@@ -120,7 +120,7 @@ class ModuleBase(ABC):
         pass
 
     @abstractmethod
-    def execute(self, **kwargs) -> ModuleResult:
+    def execute(self, **kwargs: Any) -> ModuleResult:
         """
         Execute the module's main logic.
 
@@ -129,7 +129,7 @@ class ModuleBase(ABC):
         """
         pass
 
-    def run(self, **kwargs) -> ModuleResult:
+    def run(self, **kwargs: Any) -> ModuleResult:
         """
         Main entry point for running the module.
 
@@ -193,7 +193,7 @@ class ModuleBase(ABC):
 class ExternalToolModule(ModuleBase):
     """Base class for modules that wrap external tools."""
 
-    def __init__(self, tool_name: str, required_version: Optional[str] = None, **kwargs):
+    def __init__(self, tool_name: str, required_version: Optional[str] = None, **kwargs: Any):
         """
         Initialize external tool module.
 

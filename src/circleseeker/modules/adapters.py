@@ -9,6 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from typing import Any
+
 from circleseeker.modules.base import ModuleBase, ModuleResult
 
 
@@ -18,7 +20,7 @@ class CLIModuleAdapter(ModuleBase):
     This allows us to use existing modules without modification.
     """
 
-    def __init__(self, module_path: str, **kwargs) -> None:
+    def __init__(self, module_path: str, **kwargs: Any) -> None:
         """
         Initialize CLI module adapter.
 
@@ -31,7 +33,7 @@ class CLIModuleAdapter(ModuleBase):
         if not self.module_path.exists():
             raise FileNotFoundError(f"Module not found: {module_path}")
 
-    def validate_inputs(self, **kwargs) -> bool:
+    def validate_inputs(self, **kwargs: Any) -> bool:
         """Basic validation - check if required files exist."""
         # Check common input files
         for key in ["input_file", "input", "fasta_file", "alignment_file"]:
@@ -41,7 +43,7 @@ class CLIModuleAdapter(ModuleBase):
                     raise FileNotFoundError(f"Input file not found: {file_path}")
         return True
 
-    def build_command(self, **kwargs) -> list:
+    def build_command(self, **kwargs: Any) -> list[str]:
         """Build command line arguments for the module."""
         cmd = [sys.executable, str(self.module_path)]
 
@@ -64,7 +66,7 @@ class CLIModuleAdapter(ModuleBase):
 
         return cmd
 
-    def execute(self, **kwargs) -> ModuleResult:
+    def execute(self, **kwargs: Any) -> ModuleResult:
         """Execute the CLI module and capture results."""
         result = ModuleResult(success=False, module_name=self.name)
 
@@ -103,11 +105,11 @@ class CLIModuleAdapter(ModuleBase):
 class TandemToRingAdapter(CLIModuleAdapter):
     """Specific adapter for tandem_to_ring module."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any):
         module_path = "src/circleseeker/modules/tandem_to_ring.py"
         super().__init__(module_path=module_path, name="tandem_to_ring", **kwargs)
 
-    def execute(self, **kwargs) -> ModuleResult:
+    def execute(self, **kwargs: Any) -> ModuleResult:
         """Execute tandem_to_ring with specific handling."""
         # Import the module directly for better integration
         try:
@@ -153,11 +155,11 @@ class TandemToRingAdapter(CLIModuleAdapter):
 class UMClassifyAdapter(CLIModuleAdapter):
     """Specific adapter for um_classify module."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any):
         module_path = "src/circleseeker/modules/um_classify.py"
         super().__init__(module_path=module_path, name="um_classify", **kwargs)
 
-    def execute(self, **kwargs) -> ModuleResult:
+    def execute(self, **kwargs: Any) -> ModuleResult:
         """Execute um_classify with specific handling."""
         try:
             from circleseeker.modules.um_classify import UMeccClassifier

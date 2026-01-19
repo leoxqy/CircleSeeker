@@ -87,7 +87,7 @@ class CircularDNAResult:
 class DependencyChecker:
     REQUIRED_TOOLS = ["samtools", "bcftools", "cyrcular", "varlociraptor"]
 
-    def __init__(self, logger=None) -> None:
+    def __init__(self, logger: Any = None) -> None:
         self.logger = logger or get_logger(self.__class__.__name__)
 
     def check_all(self) -> None:
@@ -101,7 +101,7 @@ class DependencyChecker:
 
 
 class CyrcularCallingPipeline:
-    def __init__(self, config: PipelineConfig, logger=None) -> None:
+    def __init__(self, config: PipelineConfig, logger: Any = None) -> None:
         self.config = config
         self.logger = logger or get_logger(self.__class__.__name__)
         self.checker = DependencyChecker(self.logger)

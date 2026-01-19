@@ -838,7 +838,7 @@ class CeccBuild:
             return None
 
         # Identify unique loci
-        unique_loci = []
+        unique_loci: list[Any] = []
         for seg in segments:
             is_dup = any(seg.matches_position(u, self.position_tolerance) for u in unique_loci)
             if not is_dup:
@@ -918,9 +918,9 @@ class CeccBuild:
         """Extract sequences for given read IDs from FASTA file."""
         extracted = 0
         with open(fasta_file, "r") as fin, open(output_fasta, "w") as fout:
-            current_id = None
-            current_header = None
-            current_seq = []
+            current_id: Optional[str] = None
+            current_header: Optional[str] = None
+            current_seq: list[str] = []
 
             for line in fin:
                 line = line.strip()
@@ -1163,8 +1163,8 @@ class CeccBuild:
                 else:
                     shutil.rmtree(tmpdir, ignore_errors=True)
         else:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                result_df = _run_last_in_tmp(Path(tmpdir))
+            with tempfile.TemporaryDirectory() as tmpdir_str:
+                result_df = _run_last_in_tmp(Path(tmpdir_str))
 
         # Save output
         output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -1197,7 +1197,7 @@ class CeccBuild:
         result_df.to_csv(output_csv, index=False)
         return result_df
 
-    def _detect_circles_graph(self, df: pd.DataFrame) -> list:
+    def _detect_circles_graph(self, df: pd.DataFrame) -> list[dict[str, Any]]:
         """Graph-based circle detection (V3 fallback)."""
         filtered = self.filter_overlapping_queries(df)
         result_df = self.detect_circles(
@@ -1207,7 +1207,8 @@ class CeccBuild:
         )
         if result_df.empty:
             return []
-        return result_df.to_dict(orient="records")
+        records: list[dict[str, Any]] = result_df.to_dict(orient="records")
+        return records
 
     def run_pipeline(
         self,

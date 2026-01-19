@@ -9,13 +9,15 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from typing import Any
+
 from circleseeker.modules.base import ExternalToolModule, ModuleResult
 
 
 class TideHunterModule(ExternalToolModule):
     """Wrapper for TideHunter tandem repeat detection tool."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any):
         super().__init__(tool_name="TideHunter", **kwargs)
         self.period_range = "50,10000"
         self.consensus_threshold = 0.8
@@ -33,7 +35,7 @@ class TideHunterModule(ExternalToolModule):
         except (OSError, subprocess.SubprocessError):
             return "unknown"
 
-    def validate_inputs(self, **kwargs) -> bool:
+    def validate_inputs(self, **kwargs: Any) -> bool:
         """Validate inputs for TideHunter."""
         if "input_file" not in kwargs:
             raise ValueError("input_file is required")
@@ -44,7 +46,7 @@ class TideHunterModule(ExternalToolModule):
 
         return True
 
-    def execute(self, **kwargs) -> ModuleResult:
+    def execute(self, **kwargs: Any) -> ModuleResult:
         """Run TideHunter on input FASTA file."""
         result = ModuleResult(success=False, module_name=self.name)
 
@@ -110,7 +112,7 @@ class TideHunterModule(ExternalToolModule):
 class CDHitModule(ExternalToolModule):
     """Wrapper for CD-HIT sequence clustering tool."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any):
         super().__init__(tool_name="cd-hit-est", **kwargs)
         self.similarity = 0.99  # 99% similarity threshold
         self.memory = 0  # No memory limit
@@ -131,7 +133,7 @@ class CDHitModule(ExternalToolModule):
         except (OSError, subprocess.SubprocessError):
             return "unknown"
 
-    def validate_inputs(self, **kwargs) -> bool:
+    def validate_inputs(self, **kwargs: Any) -> bool:
         """Validate inputs for CD-HIT."""
         if "input_file" not in kwargs:
             raise ValueError("input_file is required")
@@ -142,7 +144,7 @@ class CDHitModule(ExternalToolModule):
 
         return True
 
-    def execute(self, **kwargs) -> ModuleResult:
+    def execute(self, **kwargs: Any) -> ModuleResult:
         """Run CD-HIT clustering."""
         result = ModuleResult(success=False, module_name=self.name)
 
@@ -209,7 +211,7 @@ class CDHitModule(ExternalToolModule):
 class Minimap2Module(ExternalToolModule):
     """Wrapper for Minimap2 aligner."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any):
         super().__init__(tool_name="minimap2", **kwargs)
 
     def check_tool_availability(self) -> bool:
@@ -224,7 +226,7 @@ class Minimap2Module(ExternalToolModule):
         except (OSError, subprocess.SubprocessError):
             return "unknown"
 
-    def validate_inputs(self, **kwargs) -> bool:
+    def validate_inputs(self, **kwargs: Any) -> bool:
         """Validate inputs for minimap2."""
         required = ["reads_file", "reference_file"]
         for req in required:
@@ -237,7 +239,7 @@ class Minimap2Module(ExternalToolModule):
 
         return True
 
-    def execute(self, **kwargs) -> ModuleResult:
+    def execute(self, **kwargs: Any) -> ModuleResult:
         """Run minimap2 alignment."""
         result = ModuleResult(success=False, module_name=self.name)
 

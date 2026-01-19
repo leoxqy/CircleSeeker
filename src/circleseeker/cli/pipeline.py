@@ -204,11 +204,9 @@ def execute_pipeline(
     elif not cfg.prefix:
         cfg.prefix = "sample"
 
-    # threads: CLI > config > default 8
+    # threads: CLI > config (config already has default 8)
     if opts.threads is not None:
         cfg.threads = opts.threads
-    elif cfg.threads is None:
-        cfg.threads = 8
 
     # keep_tmp: CLI --keep-tmp flag > config file > default False
     # When CLI flag is set, it always takes precedence

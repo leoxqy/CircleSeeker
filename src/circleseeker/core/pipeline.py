@@ -38,6 +38,13 @@ class Pipeline:
     # Canonical step ordering and user-facing metadata.
     STEPS = PIPELINE_STEPS
 
+    # Instance attributes with type annotations
+    state: PipelineState
+    temp_dir: Path
+    final_output_dir: Path
+    _inference_tool: Optional[str]
+    _temp_dir_safe_to_delete: bool
+
     def _set_result(self, key: str, value: Any) -> None:
         """Set a result key (new canonical names only)."""
         self.state.results[key] = value
@@ -367,7 +374,7 @@ class Pipeline:
         self.logger = get_logger(self.__class__.__name__)
 
         # Instance-level inference tool cache (thread-safe)
-        self._inference_tool: Optional[str] = None
+        self._inference_tool = None
 
         # Setup directory structure using configured temp dir
         configured_tmp = config.runtime.tmp_dir if config.runtime.tmp_dir else Path(".tmp_work")
@@ -437,7 +444,6 @@ class Pipeline:
         # Keep checkpoint in final directory for persistence across runs
         self.state_file = self.final_output_dir / f"{config.prefix}.checkpoint"
         self.state = self._load_state()
-        self._inference_tool = None
 
     def _compute_config_hash(self) -> str:
         """Compute hash of current configuration for validation.

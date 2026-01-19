@@ -1957,7 +1957,7 @@ class eccDedup:
         # Assign junction roles
         if "junction_role" not in df.columns:
 
-            def assign_role(row):
+            def assign_role(row: Any) -> str:
                 if row["seg_index"] == 1:
                     return "head"
                 elif row["seg_index"] == row["seg_total"]:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -223,7 +224,7 @@ def ecc_packager(pipeline: Pipeline) -> None:
     if packager_inputs_available:
         self_config = pipeline.config
 
-        class MockArgs:
+        class MockArgs(argparse.Namespace):
             def __init__(self) -> None:
                 self.sample_name = self_config.prefix
                 self.output_dir = str(final_output_root)

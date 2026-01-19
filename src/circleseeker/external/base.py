@@ -35,7 +35,7 @@ class ExternalTool:
         """Check if a tool is available in PATH."""
         return shutil.which(tool_name) is not None
 
-    def run_command(self, cmd: Sequence[str], **kwargs) -> subprocess.CompletedProcess:
+    def run_command(self, cmd: Sequence[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
         """Run a command and return the completed process."""
         return subprocess.run(cmd, **kwargs)
 

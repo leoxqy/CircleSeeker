@@ -315,7 +315,7 @@ class TandemToRing:
         consistency_df = pd.DataFrame(consistency_results)
 
         # Add consistency classification
-        def classify_consistency(row):
+        def classify_consistency(row: Any) -> str:
             if row["cv_percent"] < 1:  # CV < 1%
                 return "highly_consistent"
             elif row["cv_percent"] < 5:  # CV < 5%

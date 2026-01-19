@@ -214,11 +214,10 @@ def cecc_build(pipeline: Pipeline) -> None:
             if not reference_fasta.exists():
                 reference_fasta = None
 
-        fasta_file = pipeline.config.output_dir / "tandem_to_ring.fasta"
-        if not fasta_file.exists():
-            fasta_file = pipeline.config.output_dir / f"{pipeline.config.prefix}_circular.fasta"
-            if not fasta_file.exists():
-                fasta_file = None
+        fasta_candidate = pipeline.config.output_dir / "tandem_to_ring.fasta"
+        if not fasta_candidate.exists():
+            fasta_candidate = pipeline.config.output_dir / f"{pipeline.config.prefix}_circular.fasta"
+        fasta_file: Optional[Path] = fasta_candidate if fasta_candidate.exists() else None
 
         builder.run_pipeline(
             input_csv=input_csv,

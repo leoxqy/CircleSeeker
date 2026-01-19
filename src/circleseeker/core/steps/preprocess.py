@@ -155,8 +155,9 @@ def run_alignment(pipeline: Pipeline) -> None:
     # - Decay: 0.5% per 10kb (longer sequences accumulate more errors)
     # - Floor: 97.0% (never go below this)
     min_identity = float(minimap_cfg.get("min_identity", 99.0))
-    if alignment_cfg.get("min_identity") is not None:
-        min_identity = float(alignment_cfg.get("min_identity"))
+    align_min_identity = alignment_cfg.get("min_identity")
+    if align_min_identity is not None:
+        min_identity = float(align_min_identity)
     identity_decay_per_10kb = float(minimap_cfg.get("identity_decay_per_10kb", 0.5))
     min_identity_floor = float(minimap_cfg.get("min_identity_floor", 97.0))
     # Length-based preset splitting: use different presets for short/long sequences

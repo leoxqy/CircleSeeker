@@ -8,7 +8,7 @@ import shlex
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Any, Iterable, List, Optional
 
 from circleseeker.external.base import ExternalTool
 from circleseeker.exceptions import ExternalToolError
@@ -64,7 +64,7 @@ def _extract_cs_tag(tags: Iterable[str]) -> Optional[str]:
 def paf_to_alignment_tsv(
     paf_path: Path,
     output_path: Path,
-    logger=None,
+    logger: Any = None,
     min_identity: float = 0.0,
     identity_decay_per_10kb: float = 0.0,
     min_identity_floor: float = 97.0,

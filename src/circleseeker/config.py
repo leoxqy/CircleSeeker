@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Optional, Any, cast, Literal
+from typing import Optional, Any, cast, Literal, Union, Callable, TYPE_CHECKING
 import yaml
 from circleseeker.exceptions import ConfigurationError
 
@@ -163,12 +163,12 @@ class ToolConfigMixin:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
-        return asdict(self)
+        return asdict(self)  # type: ignore[call-overload, no-any-return]
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ToolConfigMixin":
         """Create from dictionary, ignoring unknown keys."""
-        valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
+        valid_keys = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
         filtered = {k: v for k, v in data.items() if k in valid_keys}
         return cls(**filtered)
 
@@ -292,17 +292,17 @@ class SamtoolsConfig(ToolConfigMixin):
 
 
 # Type alias for tool config that can be either typed class or dict
-ToolConfigValue = (
-    TideHunterConfig | TandemToRingConfig | UMClassifyConfig | CeccBuildConfig |
-    AlignmentConfig | Minimap2AlignConfig | Minimap2Config | SamtoolsConfig |
+ToolConfigValue = Union[
+    TideHunterConfig, TandemToRingConfig, UMClassifyConfig, CeccBuildConfig,
+    AlignmentConfig, Minimap2AlignConfig, Minimap2Config, SamtoolsConfig,
     dict[str, Any]
-)
+]
 
 
 def _ensure_tool_config(
-    value: ToolConfigValue | None,
+    value: Optional[ToolConfigValue],
     config_class: type,
-    default_factory: callable,
+    default_factory: Callable[[], Any],
 ) -> Any:
     """Convert dict to typed config class, or return default if None."""
     if value is None:
@@ -310,7 +310,7 @@ def _ensure_tool_config(
     if isinstance(value, config_class):
         return value
     if isinstance(value, dict):
-        return config_class.from_dict(value)
+        return config_class.from_dict(value)  # type: ignore[attr-defined]
     return value
 
 
@@ -318,28 +318,28 @@ def _ensure_tool_config(
 class ToolConfig:
     """External tool configuration with typed sub-configs."""
 
-    tidehunter: TideHunterConfig | dict[str, Any] = field(
+    tidehunter: Union[TideHunterConfig, dict[str, Any]] = field(
         default_factory=TideHunterConfig
     )
-    tandem_to_ring: TandemToRingConfig | dict[str, Any] = field(
+    tandem_to_ring: Union[TandemToRingConfig, dict[str, Any]] = field(
         default_factory=TandemToRingConfig
     )
-    um_classify: UMClassifyConfig | dict[str, Any] = field(
+    um_classify: Union[UMClassifyConfig, dict[str, Any]] = field(
         default_factory=UMClassifyConfig
     )
-    cecc_build: CeccBuildConfig | dict[str, Any] = field(
+    cecc_build: Union[CeccBuildConfig, dict[str, Any]] = field(
         default_factory=CeccBuildConfig
     )
-    alignment: AlignmentConfig | dict[str, Any] = field(
+    alignment: Union[AlignmentConfig, dict[str, Any]] = field(
         default_factory=AlignmentConfig
     )
-    minimap2_align: Minimap2AlignConfig | dict[str, Any] = field(
+    minimap2_align: Union[Minimap2AlignConfig, dict[str, Any]] = field(
         default_factory=Minimap2AlignConfig
     )
-    minimap2: Minimap2Config | dict[str, Any] = field(
+    minimap2: Union[Minimap2Config, dict[str, Any]] = field(
         default_factory=Minimap2Config
     )
-    samtools: SamtoolsConfig | dict[str, Any] = field(
+    samtools: Union[SamtoolsConfig, dict[str, Any]] = field(
         default_factory=SamtoolsConfig
     )
 
@@ -469,7 +469,8 @@ class Config:
                 raise ConfigurationError(f"{name} must be non-negative, got {value}")
 
         # Validate UMClassify thresholds (fractions in [0, 1])
-        um = self.tools.um_classify
+        # Note: __post_init__ ensures these are typed configs, not dicts
+        um = cast(UMClassifyConfig, self.tools.um_classify)
         check_range(um.theta_full, "um_classify.theta_full")
         check_range(um.theta_u, "um_classify.theta_u")
         check_range(um.theta_m, "um_classify.theta_m")
@@ -480,7 +481,7 @@ class Config:
         check_positive(um.gap_threshold, "um_classify.gap_threshold")
 
         # Validate CeccBuild thresholds
-        cecc = self.tools.cecc_build
+        cecc = cast(CeccBuildConfig, self.tools.cecc_build)
         check_range(cecc.overlap_threshold, "cecc_build.overlap_threshold")
         check_range(cecc.locus_overlap_threshold, "cecc_build.locus_overlap_threshold")
         check_range(cecc.theta_chain, "cecc_build.theta_chain")
@@ -491,17 +492,17 @@ class Config:
             )
 
         # Validate TandemToRing
-        ttr = self.tools.tandem_to_ring
+        ttr = cast(TandemToRingConfig, self.tools.tandem_to_ring)
         check_range(ttr.min_ave_match, "tandem_to_ring.min_ave_match", 0.0, 100.0)
 
         # Validate Minimap2Align identity thresholds
-        mm2 = self.tools.minimap2_align
+        mm2 = cast(Minimap2AlignConfig, self.tools.minimap2_align)
         check_range(mm2.min_identity, "minimap2_align.min_identity", 0.0, 100.0)
         check_range(mm2.min_identity_floor, "minimap2_align.min_identity_floor", 0.0, 100.0)
         check_positive(mm2.identity_decay_per_10kb, "minimap2_align.identity_decay_per_10kb")
 
         # Validate TideHunter
-        th = self.tools.tidehunter
+        th = cast(TideHunterConfig, self.tools.tidehunter)
         if th.c < 2:
             raise ConfigurationError(
                 f"tidehunter.c (min copy number) must be >= 2, got {th.c}"
