@@ -123,42 +123,13 @@ CircleSeeker implements a 16-step analysis pipeline with two evidence-driven cal
 
 ### Architecture
 
-```mermaid
-flowchart LR
-    subgraph Input[" "]
-        A["HiFi FASTA"]
-    end
+<p align="center">
+  <img src="docs/images/architecture.jpg" width="700" alt="CircleSeeker Architecture">
+</p>
 
-    subgraph Caller1["CtcReads-Caller"]
-        direction TB
-        B1["TideHunter → tandem_to_ring → minimap2"]
-        B2["um_classify → LAST"]
-        B3["Uecc / Mecc / Cecc"]
-        B4["CD-HIT → dedup"]
-        B1 --> B2 --> B3 --> B4
-    end
-
-    subgraph Caller2["SplitReads-Caller"]
-        direction TB
-        C1["Cresil / Cyrcular"]
-    end
-
-    subgraph Output[" "]
-        D["Confirmed + Inferred eccDNA"]
-        E["Final Output"]
-    end
-
-    A -->|CtcReads| Caller1
-    A -->|non-CtcReads| Caller2
-    Caller1 --> D
-    Caller2 --> D
-    D --> E
-```
-
-**Pipeline flow:**
-- **CtcReads-Caller** (Steps 1-10): Detects eccDNA from reads with concatemeric tandem copies (CtcReads)
-- **SplitReads-Caller** (Steps 11-13): Detects eccDNA from split-read evidence (non-CtcReads)
-- **Integration** (Steps 14-16): Merges results and generates final output
+- **CtcReads-Caller** (Steps 1-10): Detects eccDNA from reads with concatemeric tandem copies (CtcReads), producing **Confirmed** U/M/C eccDNA
+- **SplitReads-Caller** (Steps 11-13): Detects eccDNA from split-read evidence (non-CtcReads), producing **Inferred** eccDNA
+- **Integration** (Steps 14-16): Merges results and generates final output (CSV + HTML report)
 
 ### CtcReads-Caller (Steps 1-10)
 
