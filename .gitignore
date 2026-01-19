@@ -35,6 +35,7 @@ demo_pipeline/output/
 # Validation results (large)
 server_validation_results/
 *_validation_results/
+tests/simulation/batch_validation_results/
 
 # Checkpoint backups
 *.checkpoint.bak
