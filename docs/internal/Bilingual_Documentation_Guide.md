@@ -1,6 +1,7 @@
 # CircleSeeker 双语文档维护指南
 
-> 注意：本文档为内部流程参考，创建于 v0.10.0 时期；当前版本为 v1.0.0。
+**版本**: v1.0.0
+**更新日期**: 2026-01-20
 
 本指南定义 CircleSeeker 项目的双语文档维护策略和流程。
 
@@ -17,15 +18,13 @@
 | `Configuration_Reference.md` | `Configuration_Reference_en.md` | ✅ 同步 |
 | `Output_Format_Reference.md` | `Output_Format_Reference_en.md` | ✅ 同步 |
 | `Validation_Methodology.md` | `Validation_Methodology_en.md` | ✅ 同步 |
+| `UMC_Classification_Model.md` | `UMC_Classification_Model_en.md` | ✅ 同步 |
 
 ### 仅单语言文档
 
 | 文档 | 语言 | 说明 |
 |------|------|------|
-| `UMC_Classification_Model.md` | 中文 | 内部技术文档，暂不需翻译 |
 | `Validation_Report.md` | 中文 | 历史验证报告快照 |
-| `Code_Review_Report_v0.10.0.md` | 中文 | 版本审阅报告，内部使用 |
-| `Implementation_Plan.md` | 中文 | 实施计划，内部使用 |
 
 ---
 

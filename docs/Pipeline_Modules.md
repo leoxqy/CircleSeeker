@@ -33,7 +33,7 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 | 1 | check_dependencies | 内部 | 配置/环境 | 依赖检查报告（失败则中止） |
 | 2 | tidehunter | 外部 | HiFi reads FASTA | 重复片段列表、共识序列 |
 | 3 | tandem_to_ring | 内部 | TideHunter 输出 | 环状候选 FASTA/CSV |
-| 4 | run_alignment | 外部（minimap2/LAST） | 候选 FASTA、参考基因组 | alignment TSV |
+| 4 | run_alignment | 外部（minimap2） | 候选 FASTA、参考基因组 | alignment TSV |
 | 5 | um_classify | 内部 | alignment TSV | `um_classify.uecc.csv` / `mecc.csv` |
 | 6 | cecc_build | 内部 | 未分类对齐记录 | `cecc_build.csv` |
 | 7 | umc_process | 内部 | U/M/C CSV | 标准化表格、FASTA |
@@ -44,7 +44,7 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 |12 | ecc_inference | 外部 + 内部 | Cresil/Cyrcular 所需文件 | 推断结果 TSV/FASTA |
 |13 | curate_inferred_ecc | 内部 | 推断结果 | 精炼后的表格与 FASTA（内部调用 `iecc_curator`） |
 |14 | ecc_unify | 内部 | 确认/推断 CSV | 合并表格、重叠统计 |
-|15 | ecc_summary | 内部 | 合并表、原始统计 | HTML 报告、TXT 摘要、all.fasta |
+|15 | ecc_summary | 内部 | 合并表、原始统计 | HTML 报告、TXT 摘要 |
 |16 | ecc_packager | 内部 | 各类目录与单文件 | 最终输出目录树 |
 
 ---
@@ -63,7 +63,7 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
    将重复序列转换为候选环状 DNA。通过图结构分析 overlaps，识别简单读段、复杂读段等类型，输出 FASTA 与候选元数据。
 
 4. **run_alignment**
-   使用 minimap2（默认）或 LAST（`tools.alignment.aligner`）将候选序列比对回参考基因组，输出 BLAST outfmt 6-like 的 TSV，末尾追加 `mapq` 字段供下游解析。minimap2 支持长度补偿的 identity 门控（`min_identity` / `identity_decay_per_10kb` / `min_identity_floor`）。
+   使用 minimap2 将候选序列比对回参考基因组，输出 BLAST outfmt 6-like 的 TSV，末尾追加 `mapq` 字段供下游解析。支持长度补偿的 identity 门控（`min_identity` / `identity_decay_per_10kb` / `min_identity_floor`）。
 
 5. **um_classify**
    对对齐结果进行解析，基于“环坐标覆盖度 + locus 聚类”的模型划分 UeccDNA / MeccDNA；可选通过 `mapq_u_min` 与次级比对 veto 提升 Uecc 可靠性。输出 `um_classify.uecc.csv` / `um_classify.mecc.csv` / `um_classify.unclassified.csv`。判别模型详见 `docs/UMC_Classification_Model.md`。

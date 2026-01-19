@@ -30,6 +30,7 @@ backup/
 # Test data (large files)
 Demo/
 Demo_*/
+demo_pipeline/output/
 
 # Validation results (large)
 server_validation_results/

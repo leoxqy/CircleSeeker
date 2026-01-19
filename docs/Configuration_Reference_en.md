@@ -79,7 +79,7 @@ Notes:
 | `p` | int | `100` | Minimum repeat unit length |
 | `P` | int | `2000000` | Maximum repeat unit length |
 | `e` | float | `0.1` | Maximum error rate |
-| `f` | int | `2` | Minimum repeat count |
+| `f` | int | `2` | Output format (1=single-line, 2=detailed) |
 | `c` | int | `2` | Minimum copy number |
 
 ---
@@ -148,7 +148,7 @@ CeccBuild v4 prefers LAST; it falls back to a graph-based method if LAST or inpu
 | Parameter | Type | Default | Range | Description |
 |-----------|------|---------|-------|-------------|
 | `overlap_threshold` | float | `0.95` | 0-1 | Segment overlap threshold |
-| `min_segments` | int | `2` | >= 2 | Minimum number of segments |
+| `min_segments` | int | `2` | >= 1 | Minimum number of segments |
 | `edge_tolerance` | int | `20` | >= 1 | Query edge tolerance (bp) |
 | `tau_gap` | int | `20` | >= 1 | Gap tolerance (bp) |
 | `position_tolerance` | int | `50` | >= 0 | Position tolerance (bp) |
@@ -164,12 +164,14 @@ CeccBuild v4 prefers LAST; it falls back to a graph-based method if LAST or inpu
 
 Controls the aligner used by `run_alignment`.
 
+> Note: The current version only supports minimap2 for `run_alignment`; LAST is only used for complex eccDNA detection in `cecc_build`.
+
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `aligner` | string | `minimap2` | `minimap2` or `last` |
+| `aligner` | string | `minimap2` | Currently only `minimap2` supported |
 | `min_identity` | float | `99.0` | Minimum identity threshold (percent) |
 | `min_alignment_length` | int | `50` | Minimum alignment length (bp) |
-| `db_prefix` | Path | None | Optional prebuilt LAST DB prefix |
+| `db_prefix` | Path | None | Prebuilt LAST DB prefix (used by cecc_build only) |
 
 ---
 

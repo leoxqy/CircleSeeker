@@ -33,7 +33,7 @@ Intermediates reside in `<output>/.tmp_work/`, and the final artifacts are copie
 | 1 | check_dependencies | Internal | Config/environment | Dependency report (fails fast) |
 | 2 | tidehunter | External | HiFi reads FASTA | Tandem repeat consensus |
 | 3 | tandem_to_ring | Internal | TideHunter output | Candidate FASTA/CSV |
-| 4 | run_alignment | External (minimap2/LAST) | Candidates & reference | Alignment TSV |
+| 4 | run_alignment | External (minimap2) | Candidates & reference | Alignment TSV |
 | 5 | um_classify | Internal | Alignment TSV | `um_classify.uecc.csv`, `um_classify.mecc.csv`, `um_classify.unclassified.csv` |
 | 6 | cecc_build | Internal | Unclassified alignments | `cecc_build.csv` |
 | 7 | umc_process | Internal | U/M/C tables | Harmonized CSV & FASTA |
@@ -44,7 +44,7 @@ Intermediates reside in `<output>/.tmp_work/`, and the final artifacts are copie
 |12 | ecc_inference | External + Internal | Cresil/Cyrcular inputs | Inferred TSV/FASTA |
 |13 | curate_inferred_ecc | Internal | Inferred results | Curated CSV/FASTA |
 |14 | ecc_unify | Internal | Confirmed & inferred CSV | Unified table, overlap stats |
-|15 | ecc_summary | Internal | Unified table, processed CSV | HTML/TXT summary, all-fasta |
+|15 | ecc_summary | Internal | Unified table, processed CSV | HTML/TXT summary |
 |16 | ecc_packager | Internal | Finalized files | End-user directory tree |
 
 ---
@@ -56,7 +56,7 @@ Intermediates reside in `<output>/.tmp_work/`, and the final artifacts are copie
 1. **check_dependencies** - Validate required external tools and at least one inference engine (Cresil or Cyrcular).
 2. **tidehunter** - Identify tandem repeats characteristic of rolling-circle amplification.
 3. **tandem_to_ring** - Convert repeats into circular candidates via overlap graph analysis.
-4. **run_alignment** - Align candidates back to the reference using minimap2 (default) or LAST (`tools.alignment.aligner`). Emits a BLAST outfmt 6-like TSV with an additional trailing `mapq` column and supports length-compensated identity thresholds.
+4. **run_alignment** - Align candidates back to the reference using minimap2. Emits a BLAST outfmt 6-like TSV with an additional trailing `mapq` column and supports length-compensated identity thresholds.
 5. **um_classify** - Categorize alignments into UeccDNA or MeccDNA using a ring-coverage + locus-clustering model with optional U-call MAPQ gating and secondary-mapping veto. Emits `um_classify.uecc.csv`, `um_classify.mecc.csv`, and `um_classify.unclassified.csv` (see `docs/UMC_Classification_Model.md`).
 6. **cecc_build** - Run Cecc detection on `um_classify.unclassified.csv`. LAST is preferred for doubled-sequence repeat detection; if LAST or required inputs are missing, fall back to the graph-based method. Emits `cecc_build.csv`.
 
