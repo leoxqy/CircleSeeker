@@ -38,8 +38,8 @@ class TestRunAlignment:
         with pytest.raises(PipelineError, match="tandem_to_ring\\.fasta"):
             run_alignment(pipeline)
 
-    def test_skips_when_skip_carousel_true(self, tmp_path, monkeypatch):
-        """run_alignment should skip and log when skip_carousel is True."""
+    def test_skip_carousel_requires_t2r_fasta(self, tmp_path, monkeypatch):
+        """run_alignment should raise when skip_carousel is true but t2r output is missing."""
         monkeypatch.chdir(tmp_path)
         input_file = tmp_path / "reads.fa"
         reference = tmp_path / "ref.fa"
@@ -55,8 +55,8 @@ class TestRunAlignment:
         )
         pipeline = Pipeline(config)
 
-        # Should not raise when skip_carousel is True
-        run_alignment(pipeline)
+        with pytest.raises(PipelineError, match="tandem_to_ring\\.fasta"):
+            run_alignment(pipeline)
 
 
 class TestTandemToRing:

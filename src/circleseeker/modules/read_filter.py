@@ -250,6 +250,12 @@ class Sieve:
             True if successful, False otherwise
         """
         try:
+            if not fasta_file.exists():
+                self.logger.warning(f"FASTA file not found: {fasta_file}")
+                return False
+            if fasta_file.stat().st_size == 0:
+                self.logger.info(f"Skipping faidx for empty FASTA: {fasta_file}")
+                return False
             cmd = ["samtools", "faidx", str(fasta_file)]
             subprocess.run(cmd, capture_output=True, text=True, check=True)
 

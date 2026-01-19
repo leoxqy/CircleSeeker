@@ -28,6 +28,10 @@ from circleseeker.core.steps.definitions import PIPELINE_STEPS
 # Step execution lives in `circleseeker.core.steps.*` and is imported lazily by
 # wrapper methods on `Pipeline` to keep imports light.
 
+# DEPRECATED: Backward-compat patch target for tests/downstream monkeypatching.
+# This will be removed in a future release; avoid relying on this alias.
+CeccBuild: Any = None
+
 class Pipeline:
     """Main pipeline orchestrator with complete fixes."""
 

@@ -241,3 +241,24 @@ def test_load_tandem_to_ring_classification_tab_delimited(tmp_path):
 
     assert "read1" in sieve.reads_to_filter
     assert sieve.stats.csv_ctcr_reads == 1
+
+
+def test_generate_faidx_skips_empty_fasta(tmp_path, monkeypatch):
+    """Empty FASTA should skip faidx without calling samtools."""
+    module = _load_read_filter_module()
+    monkeypatch.setattr(module.shutil, "which", lambda _: "/usr/bin/samtools")
+    sieve = module.Sieve()
+
+    empty_fasta = tmp_path / "empty.fasta"
+    empty_fasta.write_text("", encoding="utf-8")
+
+    called = {"value": False}
+
+    def fake_run(*_args, **_kwargs):
+        called["value"] = True
+        raise AssertionError("samtools should not be invoked for empty FASTA")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    assert sieve.generate_faidx_index(empty_fasta) is False
+    assert called["value"] is False

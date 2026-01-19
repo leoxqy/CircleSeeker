@@ -343,17 +343,35 @@ def _segments_match(
     if len(segs_a) != len(segs_b):
         return False
 
-    for seg_a, seg_b in zip(segs_a, segs_b):
-        chr_a, start_a, end_a = seg_a
-        chr_b, start_b, end_b = seg_b
+    if not segs_a:
+        return False
 
-        if chr_a != chr_b:
-            return False
+    def ordered_match(a: list[tuple[str, int, int]], b: list[tuple[str, int, int]]) -> bool:
+        for seg_a, seg_b in zip(a, b):
+            chr_a, start_a, end_a = seg_a
+            chr_b, start_b, end_b = seg_b
 
-        if not reciprocal_overlap_ok(start_a, end_a, start_b, end_b, thr, tol):
-            return False
+            if chr_a != chr_b:
+                return False
 
-    return True
+            if not reciprocal_overlap_ok(start_a, end_a, start_b, end_b, thr, tol):
+                return False
+
+        return True
+
+    if ordered_match(segs_a, segs_b):
+        return True
+
+    seg_count = len(segs_a)
+    if seg_count < 2:
+        return False
+
+    for offset in range(1, seg_count):
+        rotated = segs_b[offset:] + segs_b[:offset]
+        if ordered_match(segs_a, rotated):
+            return True
+
+    return False
 
 
 def prepare_inferred_simple(df: pd.DataFrame, redundant_ids: set[str]) -> pd.DataFrame:

@@ -362,6 +362,28 @@ class TestEccUnify:
 
         assert 'IC1' not in redundant_overlap
 
+    def test_chimeric_rotated_order_matches(self, tmp_path):
+        """Rotated segment order should be treated as redundant."""
+        inferred = pd.DataFrame({
+            'eccDNA_id': ['IC1', 'IC1', 'IC1'],
+            'chr': ['chr1', 'chr2', 'chr3'],
+            'start0': [1000, 3000, 5000],
+            'end0': [2000, 4000, 6000],
+            'seg_index': [0, 1, 2]
+        })
+
+        confirmed = pd.DataFrame({
+            'eccDNA_id': ['CC1'],
+            'Regions': ['chr2:3000-4000;chr3:5000-6000;chr1:1000-2000'],
+            'eccDNA_type': ['CeccDNA']
+        })
+
+        redundant_overlap = find_redundant_chimeric(
+            inferred, confirmed, method='overlap', thr=0.99, tol=10
+        )
+
+        assert 'IC1' in redundant_overlap
+
     def test_chimeric_empty_dataframes(self, tmp_path):
         """Test handling of empty DataFrames."""
         inferred = pd.DataFrame()

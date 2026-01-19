@@ -42,11 +42,22 @@ def tidehunter(pipeline: Pipeline) -> None:
 
     output_file = pipeline.config.output_dir / f"{pipeline.config.prefix}.TH.ecc_candidates.txt"
 
+    tidehunter_cfg = pipeline.config.tools.tidehunter
+    if isinstance(tidehunter_cfg, dict):
+        cfg_dict = tidehunter_cfg
+    elif hasattr(tidehunter_cfg, "to_dict"):
+        cfg_dict = tidehunter_cfg.to_dict()
+    else:
+        raise PipelineError(
+            "Invalid tidehunter config; expected mapping, "
+            f"got {type(tidehunter_cfg).__name__}"
+        )
+
     tidehunter_tool = TideHunter(threads=pipeline.config.threads)
     tidehunter_tool.run_analysis(
         input_file=input_file,
         output_file=output_file,
-        **pipeline.config.tools.tidehunter,
+        **cfg_dict,
     )
 
     pipeline._set_result(ResultKeys.TIDEHUNTER_OUTPUT, str(output_file))
@@ -106,10 +117,10 @@ def run_alignment(pipeline: Pipeline) -> None:
     if t2r_fasta is not None:
         query_file = t2r_fasta
     elif skip_t2r:
-        query_file = Path(default_query)
-        pipeline.logger.warning(
-            "tandem_to_ring output not found; using input reads for alignment. "
-            "Ensure query IDs match 'read|repN|length|copy' for um_classify."
+        raise PipelineError(
+            "tandem_to_ring.fasta not found. When skip_carousel is true, provide a "
+            f"precomputed tandem_to_ring.fasta (or {pipeline.config.prefix}_circular.fasta) "
+            "in the output directory."
         )
     else:
         raise PipelineError(
