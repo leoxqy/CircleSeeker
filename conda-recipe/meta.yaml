@@ -42,6 +42,7 @@ requirements:
     - minimap2
     - samtools
     - cd-hit
+    - last  # High-accuracy CeccDNA detection
     - bcftools
     - varlociraptor
     - cyrcular

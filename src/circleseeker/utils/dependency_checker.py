@@ -152,6 +152,13 @@ TOOLS = [
         purpose="Sequence clustering",
         install_hint="conda install -c bioconda cd-hit",
     ),
+    Tool(
+        name="lastal",
+        required=True,
+        purpose="High-accuracy CeccDNA detection",
+        install_hint="conda install -c bioconda last",
+        alt_names=["lastdb"],  # Check for related LAST tools
+    ),
     # Optional tools for advanced features
     Tool(
         name="bcftools",

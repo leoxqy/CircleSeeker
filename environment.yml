@@ -37,6 +37,7 @@ dependencies:
   - minimap2>=2.24
   - samtools>=1.17
   - bcftools>=1.17
+  - last>=1250  # High-accuracy alignment for CeccDNA detection
 
   # Read processing and filtering
   - tidehunter>=1.4.0

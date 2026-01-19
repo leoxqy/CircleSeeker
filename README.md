@@ -11,6 +11,16 @@
 
 Comprehensive detection and characterization of extrachromosomal circular DNA (eccDNA) from PacBio HiFi sequencing data.
 
+## eccDNA Classification
+
+CircleSeeker identifies and classifies eccDNA into three categories:
+
+| Type | Full Name | Description |
+|------|-----------|-------------|
+| **UeccDNA** | Unique eccDNA | Derived from a single genomic locus |
+| **MeccDNA** | Multiple eccDNA | Derived from multiple distinct genomic loci |
+| **CeccDNA** | Chimeric eccDNA | Formed by fusion of segments from different genomic locations |
+
 ## Installation
 
 ### Quick Install (Recommended)
@@ -49,7 +59,7 @@ conda install -c conda-forge -y \
 # 3. Bioinformatics tools (bioconda)
 conda install -c bioconda -c conda-forge -y \
   minimap2 samtools bcftools \
-  tidehunter cd-hit \
+  tidehunter cd-hit last \
   varlociraptor cyrcular \
   bedtools mappy
 
@@ -60,7 +70,7 @@ pip install -e .
 
 ### Install Cresil (Recommended Inference Engine)
 
-Cresil provides faster inference than Cyrcular. Install from source:
+Cresil provides **higher accuracy** for eccDNA inference compared to Cyrcular. Install from source:
 
 ```bash
 git clone https://github.com/visanuwan/cresil.git
@@ -69,7 +79,7 @@ pip install -e .
 cresil --help   # Verify installation
 ```
 
-> **Note**: CircleSeeker will automatically detect available inference engines (Cresil or Cyrcular) and use the best available option.
+> **Note**: CircleSeeker automatically detects available inference engines (Cresil or Cyrcular) and uses the best option. Cresil is preferred for its higher precision.
 
 ## Quick Start
 
@@ -105,94 +115,114 @@ circleseeker \
 
 ## Pipeline Overview
 
-CircleSeeker implements a 16-step analysis pipeline organized around two evidence-driven callers:
+CircleSeeker implements a 16-step analysis pipeline with two evidence-driven callers:
 
-- **CtcReads**: reads containing **Ctc** (**C**oncatemeric **t**andem **c**opies) signals.
-- **CtcReads-Caller** (Steps 1–10): produces **Confirmed** U/M/C eccDNA from CtcReads evidence.
-- **SplitReads-Caller** (Steps 11–13): produces **Inferred** eccDNA from split-read/junction evidence (Cresil preferred, Cyrcular fallback).
+- **CtcReads**: Reads containing **Ctc** (**C**oncatemeric **t**andem **c**opies) signals
+- **CtcReads-Caller** (Steps 1–10): Produces **Confirmed** U/M/C eccDNA from CtcReads evidence
+- **SplitReads-Caller** (Steps 11–13): Produces **Inferred** eccDNA from split-read/junction evidence
 
 ### Architecture
 
 ```
-                              Input HiFi FASTA
-                                     │
-                                     ▼
-┌────────────────────────────────────────────────────────────────────┐
-│                    CtcReads-Caller (Steps 1-10)                    │
-│                                                                    │
-│  ┌──────────┐    ┌───────────────┐    ┌─────────────┐             │
-│  │TideHunter│───▶│tandem_to_ring │───▶│  minimap2   │             │
-│  │  (Ctc    │    │ (CtcR-perfect │    │  alignment  │             │
-│  │ detect)  │    │  /inversion/  │    │             │             │
-│  └──────────┘    │   hybrid)     │    └──────┬──────┘             │
-│                  └───────────────┘           │                    │
-│                                              ▼                    │
-│                                    ┌─────────────────┐            │
-│                                    │   um_classify   │            │
-│                                    │ (Uecc/Mecc/Cecc)│            │
-│                                    └────────┬────────┘            │
-│                                             │                     │
-│                                             ▼                     │
-│                              ┌──────────────────────────┐         │
-│                              │  CD-HIT → dedup → filter │         │
-│                              └────────────┬─────────────┘         │
-│                                           │                       │
-│                                           ▼                       │
-│                                 Confirmed_eccDNA (U/M/C)          │
-└───────────────────────────────────────────┬────────────────────────┘
-                                            │
-                          ┌─────────────────┴─────────────────┐
-                          │ Filtered reads (exclude CtcReads) │
-                          └─────────────────┬─────────────────┘
-                                            │
-                                            ▼
-┌────────────────────────────────────────────────────────────────────┐
-│                   SplitReads-Caller (Steps 11-13)                  │
-│                                                                    │
-│        ┌────────────────────────────────────────────┐              │
-│        │  Cresil (preferred) / Cyrcular (fallback) │              │
-│        │       Split-read junction detection        │              │
-│        └─────────────────────┬──────────────────────┘              │
-│                              │                                     │
-│                              ▼                                     │
-│                      Inferred_eccDNA                               │
-└──────────────────────────────┬─────────────────────────────────────┘
-                               │
-                               ▼
-┌────────────────────────────────────────────────────────────────────┐
-│                    Integration (Steps 14-16)                       │
-│                                                                    │
-│    ┌─────────┐      ┌─────────────┐      ┌──────────────┐         │
-│    │ ecc_unify│────▶│ ecc_summary │────▶│ ecc_packager │         │
-│    │ (merge) │      │  (report)   │      │  (output)    │         │
-│    └─────────┘      └─────────────┘      └──────────────┘         │
-│                                                                    │
-│                    Final Output: merged_output.csv                 │
-│                                  + HTML report                     │
-└────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            Input HiFi FASTA                                 │
+└─────────────────────────────────┬───────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      CtcReads-Caller (Steps 1-10)                           │
+│                                                                             │
+│  ┌─────────────┐     ┌───────────────┐     ┌─────────────┐                  │
+│  │ TideHunter  │────▶│ tandem_to_ring│────▶│  minimap2   │                  │
+│  │ (Ctc detect)│     │   (double     │     │ (alignment) │                  │
+│  └─────────────┘     │   sequence)   │     └──────┬──────┘                  │
+│                      └───────────────┘            │                         │
+│                                                   ▼                         │
+│                                        ┌──────────────────┐                 │
+│                                        │   um_classify    │                 │
+│                                        │ (Uecc/Mecc/Cecc) │                 │
+│                                        └────────┬─────────┘                 │
+│                                                 │                           │
+│                 ┌───────────────────────────────┼───────────────────────┐   │
+│                 │                               │                       │   │
+│                 ▼                               ▼                       ▼   │
+│        ┌────────────────┐            ┌──────────────────┐    ┌────────────┐ │
+│        │     Uecc       │            │      Mecc        │    │   LAST     │ │
+│        │   (unique)     │            │   (multiple)     │    │ cecc_build │ │
+│        └───────┬────────┘            └────────┬─────────┘    └─────┬──────┘ │
+│                │                              │                    │        │
+│                └──────────────────────────────┴────────────────────┘        │
+│                                               │                             │
+│                                               ▼                             │
+│                              ┌────────────────────────────┐                 │
+│                              │  CD-HIT → dedup → filter   │                 │
+│                              └─────────────┬──────────────┘                 │
+│                                            │                                │
+│                                            ▼                                │
+│                               Confirmed eccDNA (U/M/C)                      │
+└────────────────────────────────────────────┬────────────────────────────────┘
+                                             │
+                          ┌──────────────────┴──────────────────┐
+                          │ Filtered reads (exclude CtcReads)   │
+                          └──────────────────┬──────────────────┘
+                                             │
+                                             ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     SplitReads-Caller (Steps 11-13)                         │
+│                                                                             │
+│         ┌─────────────────────────────────────────────────────┐             │
+│         │   Cresil (preferred, higher accuracy)               │             │
+│         │   Cyrcular (fallback)                               │             │
+│         │          Split-read junction detection              │             │
+│         └──────────────────────┬──────────────────────────────┘             │
+│                                │                                            │
+│                                ▼                                            │
+│                         Inferred eccDNA                                     │
+└────────────────────────────────┬────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                       Integration (Steps 14-16)                             │
+│                                                                             │
+│       ┌───────────┐       ┌───────────────┐       ┌──────────────┐          │
+│       │ ecc_unify │──────▶│  ecc_summary  │──────▶│ ecc_packager │          │
+│       │  (merge)  │       │   (report)    │       │   (output)   │          │
+│       └───────────┘       └───────────────┘       └──────────────┘          │
+│                                                                             │
+│                      Final: merged_output.csv + HTML report                 │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### CtcReads-Caller (Steps 1-10)
-1. **check_dependencies** - Validate required tools and dependencies
-2. **tidehunter** - Detect tandem repeats in HiFi reads
-3. **tandem_to_ring** - Convert tandem repeats to circular candidates
-4. **run_alignment** - Map candidates to reference genome (minimap2)
-5. **um_classify** - Classify eccDNA as Unique (U) or Multiple (M) origin
-6. **cecc_build** - Identify Complex (C) eccDNA
-7. **umc_process** - Process and cluster U/M/C types
-8. **cd_hit** - Remove redundancy (99% identity threshold)
-9. **ecc_dedup** - Deduplicate and standardize coordinates
-10. **read_filter** - Filter confirmed eccDNA reads
+
+| Step | Module | Description |
+|------|--------|-------------|
+| 1 | check_dependencies | Validate required tools and dependencies |
+| 2 | tidehunter | Detect tandem repeats in HiFi reads |
+| 3 | tandem_to_ring | Convert tandem repeats to circular candidates |
+| 4 | run_alignment | Map candidates to reference genome (minimap2) |
+| 5 | um_classify | Classify eccDNA as Unique (U) or Multiple (M) origin |
+| 6 | cecc_build | Identify Chimeric (C) eccDNA using LAST |
+| 7 | umc_process | Process and cluster U/M/C types |
+| 8 | cd_hit | Remove redundancy (99% identity threshold) |
+| 9 | ecc_dedup | Deduplicate and standardize coordinates |
+| 10 | read_filter | Filter confirmed eccDNA reads |
 
 ### SplitReads-Caller (Steps 11-13)
-11. **minimap2** - Prepare reference index (generates BAM only when Cyrcular is used)
-12. **ecc_inference** - Detect eccDNA (Cresil preferred, Cyrcular fallback)
-13. **curate_inferred_ecc** - Curate inferred eccDNA
+
+| Step | Module | Description |
+|------|--------|-------------|
+| 11 | minimap2 | Prepare reference index |
+| 12 | ecc_inference | Detect eccDNA (Cresil preferred, Cyrcular fallback) |
+| 13 | curate_inferred_ecc | Curate inferred eccDNA |
 
 ### Integration (Steps 14-16)
-14. **ecc_unify** - Merge confirmed and inferred results
-15. **ecc_summary** - Generate statistics and summaries
-16. **ecc_packager** - Package final outputs
+
+| Step | Module | Description |
+|------|--------|-------------|
+| 14 | ecc_unify | Merge confirmed and inferred results |
+| 15 | ecc_summary | Generate statistics and summaries |
+| 16 | ecc_packager | Package final outputs |
 
 ## Output Files
 
@@ -208,7 +238,7 @@ output_dir/sample_name/
 │   ├── sample_name_MeccBestSite.bed     # Best hit per eccDNA
 │   └── sample_name_MeccSites.core.csv   # Detailed information table
 ├── sample_name_Confirmed_CeccDNA/
-│   ├── sample_name_CeccDNA_C.fasta      # Confirmed complex eccDNA sequences
+│   ├── sample_name_CeccDNA_C.fasta      # Confirmed chimeric eccDNA sequences
 │   ├── sample_name_CeccSegments.bed     # All segments
 │   ├── sample_name_CeccJunctions.bedpe  # Junction information
 │   └── sample_name_CeccSegments.core.csv # Detailed information table
@@ -216,7 +246,7 @@ output_dir/sample_name/
 │   ├── sample_name_UeccDNA_I.csv        # Inferred simple eccDNA
 │   ├── sample_name_UeccDNA_I.fasta      # Inferred simple sequences
 │   ├── sample_name_chimeric.csv         # Inferred chimeric eccDNA
-│   └── sample_name_CeccDNA_I.fasta      # Inferred complex sequences
+│   └── sample_name_CeccDNA_I.fasta      # Inferred chimeric sequences
 ├── sample_name_merged_output.csv        # All eccDNA combined
 ├── sample_name_report.html              # Interactive HTML report
 └── sample_name_summary.txt              # Summary statistics
@@ -234,9 +264,10 @@ The merged output file (`sample_name_merged_output.csv`) contains:
 | Strand | DNA strand (+/-) |
 | Length | eccDNA size in base pairs |
 | eccDNA_type | Classification (UeccDNA/MeccDNA/CeccDNA) |
-| State | Detection method (Confirmed/Inferred; from CtcReads-Caller/SplitReads-Caller) |
-| Seg_total | Number of segments (for complex eccDNA) |
+| State | Detection method (Confirmed/Inferred) |
+| Seg_total | Number of segments (for chimeric eccDNA) |
 | Hit_count | Number of genomic hits |
+
 > Note: confidence/evidence fields are recorded in the per-type `*.core.csv` files under `Confirmed_*` directories.
 
 ## Configuration
@@ -266,11 +297,6 @@ tools:
     min_identity: 99.0           # Base identity threshold (%)
     identity_decay_per_10kb: 0.5 # Identity decay per 10kb of sequence length (%)
     min_identity_floor: 97.0     # Minimum identity floor (%)
-    # Length-based preset splitting (only useful when preset_short != preset_long)
-    split_by_length: false       # Disabled by default
-    split_length: 5000           # Length threshold (bp)
-    preset_short: "map-hifi"     # Preset for sequences < split_length
-    preset_long: "map-hifi"      # Preset for sequences >= split_length
 
   minimap2:  # For read mapping (Step 11)
     preset: "map-hifi"
@@ -291,9 +317,7 @@ For HiFi data, CircleSeeker uses a length-compensated identity threshold to hand
 
 **Formula**: `threshold = max(min_identity - (length_kb / 10) × decay_per_10kb, floor)`
 
-This prevents misclassification of long Uecc/Cecc sequences as Mecc while maintaining high precision for short sequences.
-
-For a complete list of configuration options, see the [configuration reference](docs/Configuration_Reference.md).
+For a complete list of configuration options, see the [Configuration Reference](docs/Configuration_Reference.md).
 
 ## System Requirements
 
@@ -306,6 +330,7 @@ For a complete list of configuration options, see the [configuration reference](
 ## Dependencies
 
 ### Python Packages
+
 | Package | Version | Description |
 |---------|---------|-------------|
 | pandas | ≥2.0 | Data manipulation |
@@ -318,23 +343,27 @@ For a complete list of configuration options, see the [configuration reference](
 | pyyaml | ≥6.0 | Configuration parsing |
 
 ### External Tools (Required)
+
 | Tool | Version | Description |
 |------|---------|-------------|
 | TideHunter | ≥1.4.0 | Tandem repeat detection |
 | minimap2 | ≥2.24 | Sequence alignment and read mapping |
 | samtools | ≥1.17 | BAM file processing |
 | CD-HIT | ≥4.8.1 | Sequence clustering (cd-hit-est) |
+| LAST | ≥1250 | High-accuracy CeccDNA detection |
 
 ### External Tools (Optional - for Cyrcular inference)
+
 | Tool | Version | Description |
 |------|---------|-------------|
 | bcftools | ≥1.17 | BCF/VCF processing |
 | varlociraptor | ≥5.0.0 | Variant calling |
 
 ### Inference Engines (At least one required)
+
 | Tool | Description |
 |------|-------------|
-| Cresil | **Recommended** - Faster, simpler workflow |
+| Cresil | **Recommended** - Higher accuracy for eccDNA inference |
 | Cyrcular | Fallback option, requires varlociraptor |
 
 ## Troubleshooting
@@ -381,7 +410,7 @@ circleseeker -i input.fa -r ref.fa -t 4
 **Missing Tools**: Install via conda
 ```bash
 conda install -c bioconda -c conda-forge \
-  tidehunter minimap2 samtools bcftools cd-hit varlociraptor
+  tidehunter minimap2 samtools bcftools cd-hit last varlociraptor
 ```
 
 ## Documentation
@@ -398,7 +427,7 @@ If you use CircleSeeker in your research, please cite:
 
 > Zhang Y, You M, Zhou C, et al. (2024). MMC-seq reveals a vast spatiotemporal eccDNA landscape from single cells to tissues. *Manuscript submitted*.
 
-CircleSeeker is the computational pipeline developed as part of the MMC-seq methodology for comprehensive eccDNA detection and characterization
+CircleSeeker is the computational pipeline developed as part of the MMC-seq methodology for comprehensive eccDNA detection and characterization.
 
 ## License
 
@@ -411,4 +440,4 @@ CircleSeeker is dual-licensed: GNU GPL v3.0 (see [LICENSE](LICENSE)) or a commer
 
 ## Acknowledgments
 
-We thank the developers of TideHunter, Cyrcular, and other integrated tools.
+We thank the developers of TideHunter, Cresil, Cyrcular, LAST, and other integrated tools.
