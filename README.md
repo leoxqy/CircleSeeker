@@ -125,34 +125,35 @@ CircleSeeker implements a 16-step analysis pipeline with two evidence-driven cal
 
 ```mermaid
 flowchart TB
-    subgraph Input
-        A[/"HiFi FASTA"/]
-    end
+    A[/"HiFi FASTA"/]
 
-    subgraph CtcReads["CtcReads-Caller (Steps 1-10)"]
-        B1[TideHunter] --> B2[tandem_to_ring] --> B3[minimap2]
+    subgraph CtcReads["CtcReads-Caller"]
+        B1[TideHunter] --> B2[tandem_to_ring]
+        B2 --> B3[minimap2]
         B3 --> B4[um_classify]
         B4 --> B5[Uecc]
         B4 --> B6[Mecc]
-        B4 --> B7["LAST (Cecc)"]
-        B5 & B6 & B7 --> B8[CD-HIT → dedup]
-        B8 --> B9[/"Confirmed eccDNA (U/M/C)"/]
+        B4 --> B7[LAST] --> B7b[Cecc]
+        B5 & B6 & B7b --> B8[CD-HIT]
+        B8 --> B9[dedup]
+        B9 --> B10[/"Confirmed eccDNA"/]
     end
 
-    subgraph SplitReads["SplitReads-Caller (Steps 11-13)"]
-        C1["Cresil (preferred)"] --> C2[/"Inferred eccDNA"/]
-        C3["Cyrcular (fallback)"] -.-> C2
+    subgraph SplitReads["SplitReads-Caller"]
+        C1["Cresil"] --> C2[/"Inferred eccDNA"/]
+        C3["Cyrcular"] -.-> C2
     end
 
-    subgraph Integration["Integration (Steps 14-16)"]
-        D1[ecc_unify] --> D2[ecc_summary] --> D3[ecc_packager]
+    subgraph Integrate["Integration"]
+        D1[ecc_unify] --> D2[ecc_summary]
+        D2 --> D3[ecc_packager]
     end
 
-    A --> CtcReads
-    A -->|"Filtered reads<br/>(exclude CtcReads)"| SplitReads
-    B9 --> Integration
-    C2 --> Integration
-    D3 --> E[/"merged_output.csv<br/>+ HTML report"/]
+    A --> B1
+    B1 -->|non-CtcReads| SplitReads
+    B10 --> D1
+    C2 --> D1
+    D3 --> E[/"Final Output"/]
 ```
 
 ### CtcReads-Caller (Steps 1-10)
