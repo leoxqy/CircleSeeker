@@ -123,73 +123,36 @@ CircleSeeker implements a 16-step analysis pipeline with two evidence-driven cal
 
 ### Architecture
 
-```
-                         ┌──────────────────┐
-                         │ Input HiFi FASTA │
-                         └────────┬─────────┘
-                                  │
-                                  ▼
-╔════════════════════════════════════════════════════════════╗
-║               CtcReads-Caller (Steps 1-10)                 ║
-╠════════════════════════════════════════════════════════════╣
-║                                                            ║
-║  ┌────────────┐   ┌────────────────┐   ┌────────────┐      ║
-║  │ TideHunter │──▶│ tandem_to_ring │──▶│  minimap2  │      ║
-║  └────────────┘   └────────────────┘   └─────┬──────┘      ║
-║                                              │             ║
-║                                              ▼             ║
-║                                      ┌─────────────┐       ║
-║                                      │ um_classify │       ║
-║                                      └──────┬──────┘       ║
-║                          ┌──────────────────┼────────────┐ ║
-║                          ▼                  ▼            ▼ ║
-║                    ┌──────────┐       ┌──────────┐ ┌─────┐ ║
-║                    │   Uecc   │       │   Mecc   │ │LAST │ ║
-║                    └────┬─────┘       └────┬─────┘ └──┬──┘ ║
-║                         └──────────────────┴──────────┘    ║
-║                                        │                   ║
-║                                        ▼                   ║
-║                               ┌─────────────────┐          ║
-║                               │  CD-HIT → dedup │          ║
-║                               └────────┬────────┘          ║
-║                                        │                   ║
-║                                        ▼                   ║
-║                              ┌──────────────────┐          ║
-║                              │ Confirmed eccDNA │          ║
-║                              └────────┬─────────┘          ║
-╚═══════════════════════════════════════╪════════════════════╝
-                                        │
-                         ┌──────────────┴──────────────┐
-                         │ Filtered reads (non-CtcR)   │
-                         └──────────────┬──────────────┘
-                                        │
-                                        ▼
-╔════════════════════════════════════════════════════════════╗
-║              SplitReads-Caller (Steps 11-13)               ║
-╠════════════════════════════════════════════════════════════╣
-║                                                            ║
-║          ┌──────────────────────────────────────┐          ║
-║          │ Cresil (preferred, higher accuracy)  │          ║
-║          │ Cyrcular (fallback)                  │          ║
-║          └──────────────────┬───────────────────┘          ║
-║                             │                              ║
-║                             ▼                              ║
-║                    ┌─────────────────┐                     ║
-║                    │  Inferred eccDNA│                     ║
-║                    └────────┬────────┘                     ║
-╚═════════════════════════════╪══════════════════════════════╝
-                              │
-                              ▼
-╔════════════════════════════════════════════════════════════╗
-║                 Integration (Steps 14-16)                  ║
-╠════════════════════════════════════════════════════════════╣
-║                                                            ║
-║    ┌───────────┐    ┌─────────────┐    ┌─────────────┐     ║
-║    │ ecc_unify │───▶│ ecc_summary │───▶│ ecc_packager│     ║
-║    └───────────┘    └─────────────┘    └─────────────┘     ║
-║                                                            ║
-║           Final: merged_output.csv + HTML report           ║
-╚════════════════════════════════════════════════════════════╝
+```mermaid
+flowchart TB
+    subgraph Input
+        A[/"HiFi FASTA"/]
+    end
+
+    subgraph CtcReads["CtcReads-Caller (Steps 1-10)"]
+        B1[TideHunter] --> B2[tandem_to_ring] --> B3[minimap2]
+        B3 --> B4[um_classify]
+        B4 --> B5[Uecc]
+        B4 --> B6[Mecc]
+        B4 --> B7["LAST (Cecc)"]
+        B5 & B6 & B7 --> B8[CD-HIT → dedup]
+        B8 --> B9[/"Confirmed eccDNA (U/M/C)"/]
+    end
+
+    subgraph SplitReads["SplitReads-Caller (Steps 11-13)"]
+        C1["Cresil (preferred)"] --> C2[/"Inferred eccDNA"/]
+        C3["Cyrcular (fallback)"] -.-> C2
+    end
+
+    subgraph Integration["Integration (Steps 14-16)"]
+        D1[ecc_unify] --> D2[ecc_summary] --> D3[ecc_packager]
+    end
+
+    A --> CtcReads
+    A -->|"Filtered reads<br/>(exclude CtcReads)"| SplitReads
+    B9 --> Integration
+    C2 --> Integration
+    D3 --> E[/"merged_output.csv<br/>+ HTML report"/]
 ```
 
 ### CtcReads-Caller (Steps 1-10)
