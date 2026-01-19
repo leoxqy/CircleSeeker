@@ -11,6 +11,7 @@ from typing import Optional
 import click
 
 from circleseeker.config import Config, load_config, save_config, apply_preset, PRESETS
+from circleseeker.cli.exit_codes import EXIT_ERROR, EXIT_USAGE
 from circleseeker.utils.display import ConsoleFormatter, print_formatted
 from circleseeker.utils.logging import setup_logging
 
@@ -139,7 +140,7 @@ def execute_pipeline(
             apply_preset(cfg, opts.preset)  # type: ignore[arg-type]
         except Exception as exc:
             click.echo(f"Error: {exc}", err=True)
-            sys.exit(1)
+            sys.exit(EXIT_ERROR)
 
     # Reconfigure logging if config specifies different values and CLI didn't override
     # CLI flags (--debug, -n, --log-output) take precedence over config file
@@ -184,7 +185,7 @@ def execute_pipeline(
                 ctx = None
         if ctx is not None:
             click.echo(ctx.get_help())
-        sys.exit(1)
+        sys.exit(EXIT_ERROR)
 
     # Update config with resolved values
     # Priority: CLI arg (if provided) > config file > hardcoded default
@@ -222,7 +223,7 @@ def execute_pipeline(
         cfg.validate()
     except ConfigurationError as exc:
         click.echo(f"Error: {exc}", err=True)
-        sys.exit(1)
+        sys.exit(EXIT_ERROR)
 
     # Save the user-facing output directory before Pipeline modifies it
     # Pipeline.__init__ changes cfg.output_dir to temp_dir for internal use

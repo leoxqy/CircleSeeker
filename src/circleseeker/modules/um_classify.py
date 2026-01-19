@@ -24,11 +24,17 @@ import json
 class UMeccClassifier:
     """Classify eccDNA into Uecc/Mecc buckets."""
 
+    # Import unified constants
+    from circleseeker.constants import (
+        MAPQ_LOW_THRESHOLD as _MAPQ_LOW,
+        IDENTITY_LOW_THRESHOLD as _IDENTITY_LOW,
+    )
+
     # Heuristic thresholds used for evidence flags and score scaling.
     # These do NOT affect classification unless mapq_u_min is explicitly enabled.
     MAPQ_MAX = 60  # minimap2 typically caps MAPQ at ~60
-    MAPQ_LOW_THRESHOLD = 20
-    IDENTITY_LOW_THRESHOLD = 95.0
+    MAPQ_LOW_THRESHOLD = _MAPQ_LOW
+    IDENTITY_LOW_THRESHOLD = _IDENTITY_LOW
 
     # Alignment column names (BLAST outfmt 6 compatible + optional MAPQ)
     ALIGNMENT_COLUMNS = [
@@ -69,7 +75,7 @@ class UMeccClassifier:
         theta_locus: float = 0.95,
         pos_tol_bp: int = 50,
         logger: Optional[logging.Logger] = None,
-    ):
+    ) -> None:
         """
         Initialize U/Mecc classifier
 
@@ -810,14 +816,14 @@ class UMeccClassifier:
                 try:
                     mapq_best_local = int(locus_df_local["mapq"].max())
                     mapq_min_local = int(locus_df_local["mapq"].min())
-                except Exception:
+                except (TypeError, ValueError):
                     mapq_best_local = 0
                     mapq_min_local = 0
 
                 try:
                     id_best_local = float(locus_df_local["identity"].max())
                     id_min_local = float(locus_df_local["identity"].min())
-                except Exception:
+                except (TypeError, ValueError):
                     id_best_local = 0.0
                     id_min_local = 0.0
 
@@ -893,10 +899,14 @@ class UMeccClassifier:
                 for lid in full_loci:
                     idxs = loci[lid]
                     locus_df = group.loc[idxs]
+                    if locus_df.empty:
+                        continue
                     try:
                         best_idx = locus_df["alignment_length"].idxmax()
                         rep_row = locus_df.loc[best_idx]
-                    except Exception:
+                    except (ValueError, KeyError):
+                        if locus_df.empty:
+                            continue
                         rep_row = locus_df.iloc[0]
 
                     row = dict(rep_row.to_dict())
@@ -924,10 +934,13 @@ class UMeccClassifier:
                 # Uecc requires one strong locus explanation and no substantial 2nd locus.
                 lid = best_lid if best_lid is not None else cov_sorted[0][0]
                 locus_df = group.loc[loci[lid]]
+                # Safety check: skip if locus_df is empty
+                if locus_df.empty:
+                    continue
                 # Always compute best locus MAPQ for adaptive thresholds
                 try:
                     best_locus_mapq = int(locus_df["mapq"].max())
-                except Exception:
+                except (TypeError, ValueError):
                     best_locus_mapq = None
                 # Check MAPQ minimum if configured
                 if self.mapq_u_min > 0:
@@ -940,7 +953,7 @@ class UMeccClassifier:
                 try:
                     best_start0 = int(locus_df[ColumnStandard.START0].min())
                     best_end0 = int(locus_df[ColumnStandard.END0].max())
-                except Exception:
+                except (TypeError, ValueError):
                     best_start0 = 0
                     best_end0 = 0
                 all_idx = all_groups.get(query_id)
@@ -959,7 +972,9 @@ class UMeccClassifier:
                 try:
                     best_idx = locus_df["alignment_length"].idxmax()
                     rep_row = locus_df.loc[best_idx]
-                except Exception:
+                except (ValueError, KeyError):
+                    if locus_df.empty:
+                        continue
                     rep_row = locus_df.iloc[0]
 
                 mapq_best, mapq_min, identity_best, identity_min = locus_evidence(lid)

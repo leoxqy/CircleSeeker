@@ -4,7 +4,7 @@
 
 # CircleSeeker
 
-[![Version](https://img.shields.io/badge/version-0.10.6-blue.svg)](https://github.com/leoxqy/CircleSeeker)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/leoxqy/CircleSeeker)
 [![CI](https://github.com/leoxqy/CircleSeeker/actions/workflows/ci.yml/badge.svg)](https://github.com/leoxqy/CircleSeeker/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-≥3.9-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
@@ -99,7 +99,7 @@ circleseeker \
 - `-p, --prefix TEXT` - Output file prefix (default: sample)
 - `-t, --threads INT` - Number of threads (default: 8)
 - `-c, --config PATH` - Configuration file (YAML format)
-- `-n, --noise` - Increase verbosity (-n for INFO, -nn for DEBUG)
+- `-v, --verbose` - Increase verbosity (-v for INFO, -vv for DEBUG)
 - `-h, --help` - Show help message
 - `--keep-tmp` - Keep temporary files
 
@@ -237,15 +237,7 @@ The merged output file (`sample_name_merged_output.csv`) contains:
 | State | Detection method (Confirmed/Inferred; from CtcReads-Caller/SplitReads-Caller) |
 | Seg_total | Number of segments (for complex eccDNA) |
 | Hit_count | Number of genomic hits |
-| confidence_score | Confidence score in [0,1] (higher = stronger evidence) |
-| query_cov_best | Best-locus (or best-chain) ring coverage fraction |
-| query_cov_2nd | 2nd-best locus/chain ring coverage fraction |
-| mapq_best | Best supporting minimap2 MAPQ (0–60) |
-| identity_best | Best supporting alignment identity (%) |
-| low_mapq | Flag: mapq_best < 20 |
-| low_identity | Flag: identity_best < 95 |
-
-> Note: confidence/evidence fields are primarily populated for **Confirmed** U/M/C calls; inferred entries may be empty.
+> Note: confidence/evidence fields are recorded in the per-type `*.core.csv` files under `Confirmed_*` directories.
 
 ## Configuration
 
@@ -267,18 +259,18 @@ tools:
     f: 2
 
   minimap2_align:  # For candidate alignment (Step 4)
-    preset: "sr"
-    max_target_seqs: 200
+    preset: "map-hifi"
+    max_target_seqs: 5
     additional_args: ""
     # Identity filtering with length-based compensation (HiFi optimized)
     min_identity: 99.0           # Base identity threshold (%)
     identity_decay_per_10kb: 0.5 # Identity decay per 10kb of sequence length (%)
     min_identity_floor: 97.0     # Minimum identity floor (%)
     # Length-based preset splitting (only useful when preset_short != preset_long)
-    split_by_length: false       # Disabled since both presets are "sr"
+    split_by_length: false       # Disabled by default
     split_length: 5000           # Length threshold (bp)
-    preset_short: "sr"           # Preset for sequences < split_length
-    preset_long: "sr"            # Preset for sequences >= split_length
+    preset_short: "map-hifi"     # Preset for sequences < split_length
+    preset_long: "map-hifi"      # Preset for sequences >= split_length
 
   minimap2:  # For read mapping (Step 11)
     preset: "map-hifi"
@@ -301,7 +293,7 @@ For HiFi data, CircleSeeker uses a length-compensated identity threshold to hand
 
 This prevents misclassification of long Uecc/Cecc sequences as Mecc while maintaining high precision for short sequences.
 
-For a complete list of configuration options, see the [configuration reference](docs/CLI_Reference.md).
+For a complete list of configuration options, see the [configuration reference](docs/Configuration_Reference.md).
 
 ## System Requirements
 

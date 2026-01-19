@@ -1,203 +1,128 @@
-# U/M/C eccDNA 覆盖度模型（提案）
+# U/M/C eccDNA 覆盖度模型与 CeccBuild 说明
 
-本文件将 CircleSeeker 在 `TideHunter → 双倍化比对 → U/Mecc/Cecc 分类` 这一段的识别思路，整理为一个更明确的“数学判别问题”。目标是替代/弱化纯启发式规则，提高可解释性、可读性，并为参数调优与后续研究（尤其是歧义样本）提供统一的框架。
+本文件描述 CircleSeeker 当前实现中的 U/M 分类覆盖度模型，以及 CeccBuild v4 的检测策略。U/M 判别基于覆盖度与位点聚类；Cecc 默认由 LAST 驱动的重复模式检测完成，图结构链式模型仅作为回退方案。
 
-> 关键前提：`TideHunter` 已经保证输入候选是“环”（来自串联重复/滚环扩增等信号）。因此在本模型里，**不强制要求参考基因组上的共线性/顺序一致**；我们只关心：能否在环序列上构造出合理的覆盖解释。
+> 说明：文档聚焦 um_classify/cecc_build 的实际逻辑；如需完整代码细节，请参阅 `src/circleseeker/modules/um_classify.py` 与 `src/circleseeker/modules/cecc_build.py`。
 
 ---
 
 ## 1. 输入与符号
 
 - `S`：TideHunter 的共识序列（环的一圈），长度 `L`（通常取 `consLen`）。
-- `Q = S + S`：双倍化 query，长度 `2L`。双倍化的目的：解决“环起点未知”导致的环绕问题。
+- `Q = S + S`：双倍化 query，长度 `2L`，用于处理环起点不确定性。
 - 比对输出集合 `A = {a_i}`：每条命中 `a_i` 至少包含：
-  - query 区间 `q_i = [qs_i, qe_i)`（在 `Q` 坐标系，`0 ≤ qs_i < qe_i ≤ 2L`）
-  - 参考位点信息（chr/start/end/strand），记为 `g_i`
-  - 可选质量信息（identity/mapq/aln_len 等），本提案优先使用“覆盖度”作为主 score
+  - query 区间 `q_i = [qs_i, qe_i)`
+  - 参考位点 `g_i`（chr/start/end/strand）
+  - 可选质量信息（identity/mapq/aln_len）
 
 ---
 
-## 2. 环坐标投影与覆盖度（统一的 score）
+## 2. Locus 聚类（同位点合并）
 
-### 2.1 投影到环坐标
+为避免边界抖动导致的错误拆分，需要将相近的基因组命中合并为同一 locus。
 
-对任意命中 `a_i`，将其 query 区间 `q_i=[qs_i,qe_i)` 投影到环坐标 `[0,L)`：
+推荐规则（参数化）：
 
-- 令 `u = qs_i mod L`，`v = qe_i mod L`
-- 若 `u < v`：投影为单段 `[u, v)`
-- 若 `u ≥ v`：说明跨越环边界，拆成两段 `[u, L)` 与 `[0, v)`
+- `chr` 相同且 `strand` 相同
+- 互惠重叠率 `overlap_len / min(len_i, len_j) ≥ θ_locus`
+- 可选边界容差：`|start_i - start_j| ≤ pos_tol_bp` 且 `|end_i - end_j| ≤ pos_tol_bp`
 
-记投影后的区间集合为 `proj(q_i)`（可能是 1 段或 2 段）。
-
-### 2.2 覆盖度定义
-
-对任意一组命中集合 `X ⊆ A`，定义其对环的覆盖度：
-
-`Cov(X) = | ⋃ proj(q_i) (i∈X) | / L`，其中 `|·|` 表示区间并集长度（bp）。
-
-覆盖度 `Cov(·)` 的取值范围为 `[0,1]`，在本提案中作为主 score。
+默认建议：`θ_locus=0.95`，`pos_tol_bp=50`。
 
 ---
 
-## 3. locus（位点）定义：把“同一位点的边界抖动”合并
+## 3. 覆盖度与 U/M 判别
 
-为了避免同一位点因比对边界漂移而被错误拆成多个 locus（会虚增 Mecc 证据、制造 M/C 歧义），需要对 `g_i` 做聚类。
+### 3.1 覆盖度
 
-### 3.1 推荐的 locus 合并规则（可参数化）
+对任意命中集合 `X`，覆盖度定义为：
 
-两个命中 `a_i, a_j` 归为同一 locus 的条件：
+`Cov(X) = | ⋃ proj(q_i) (i∈X) | / L`
 
-1) `chr` 相同且 `strand` 相同
-2) 参考区间满足**互惠重叠率**（reciprocal overlap）阈值：
+其中 `proj(q_i)` 为将 query 区间投影到环坐标 `[0, L)` 后的区间集合。
 
-`overlap_len / min(len_i, len_j) ≥ θ_locus`
-
-并且可选加入边界容差作为补充：
-
-`|start_i - start_j| ≤ pos_tol_bp` 且 `|end_i - end_j| ≤ pos_tol_bp`
-
-### 3.2 参数建议
-
-- `θ_locus`：建议默认 `0.95`（不建议用 `1.0`，会把边界微小漂移拆成不同 locus）
-- `pos_tol_bp`：建议默认 `50bp`（用于吸收 HiFi/局部剪切导致的边界抖动）
-
----
-
-## 4. 三类 eccDNA 的判别（U / Mecc / Cecc）
-
-本节给出“在 TideHunter 已保证为环”的前提下，基于覆盖度的判别条件。
-
-### 4.1 Uecc（单一位点可解释整圈）
-
-对每个 locus `ℓ`，收集其命中集合 `A_ℓ`，计算：
-
-`Cov(ℓ) = Cov(A_ℓ)`
-
-定义：
+### 3.2 Uecc 判别
 
 - `U_cov = max_ℓ Cov(ℓ)`
-- `U_cov_2nd`：所有 locus 覆盖度按降序排列后的第二大值（若只有一个 locus，则为 `0`）
+- `U_cov_2nd`：第二高 locus 覆盖度
 
 判定条件：
 
 - `U_cov ≥ θ_U`
-- 且“第二 locus 覆盖必须很低”：`U_cov_2nd ≤ θ_U2_max`
+- `U_cov_2nd ≤ θ_U2_max`
 
-其中：
+附加约束（可选）：
 
-- `θ_U` 为 “Uecc 的近似整圈匹配”阈值（默认建议 `0.95`，并暴露为参数）
-- `θ_U2_max` 为 “第二 locus 覆盖上限”阈值（默认建议先禁用或设很小，例如 `0.05`；并暴露为参数）
+- `mapq_u_min`：要求最佳 locus MAPQ ≥ 阈值
+- 次级比对 veto（防止多染色体/非连续映射）：
+  - `u_secondary_min_frac` / `u_secondary_min_bp`
+  - `u_contig_gap_bp`
+  - `u_secondary_max_ratio`
+  - `u_high_coverage_threshold` / `u_high_mapq_threshold`
 
-### 4.2 Mecc（多重匹配整圈：全序列在基因组上存在多重 full-length 解释）
-
-定义：
+### 3.3 Mecc 判别
 
 - `M_count = #{ℓ | Cov(ℓ) ≥ θ_M}`
+- 判定：`M_count ≥ 2`
 
-判定条件（符合“1000bp 在 chr1 有 1000bp 匹配、chr2 有 999bp 匹配即为 Mecc”的直觉）：
+可选过滤（默认关闭）：
 
-- `M_count ≥ 2`
-
-说明：`θ_M` 可以与 `θ_U` 不同。实践中常见需求是：保持 `θ_U` 较高（保证 U 的唯一性），同时适当降低 `θ_M` 提升 Mecc 召回。
-
-### 4.3 Cecc（多位点拼链可解释整圈）
-
-当单一位点无法解释整圈时，尝试用多个位点的命中在 query 上拼出覆盖一圈的“链”。
-
-定义“链” `P = (a_{i1}, …, a_{ik})` 的约束：
-
-- query 顺序：`qs_{t+1} ≥ qs_t`
-- 相邻 gap 受限：`qs_{t+1} - qe_t ≤ τ_gap`
-  - 允许小重叠（gap < 0）与小空隙（gap > 0），但绝对值受限
-- 位点数要求：链涉及的 locus 集合满足 `|{locus(a_{it})}| ≥ 2`
-
-链的覆盖度定义为：
-
-`C_cov(P) = Cov({a_{it}})`
-
-取最优链：
-
-- `C_cov_best = max_{valid chain P} C_cov(P)`
-
-判定条件：
-
-- `C_cov_best ≥ θ_chain`
-
-其中 `θ_chain` 默认建议 `0.95`，`τ_gap` 默认建议 `20bp`，均暴露为参数。
+- `mapq_m_ambiguous_threshold`：若所有 locus MAPQ 低于阈值，则拒绝 Mecc
+- `mecc_identity_gap_threshold`：若最高与次高 identity 差超过阈值，则拒绝 Mecc
 
 ---
 
-## 5. 两类“歧义样本”拦截（进入菜单/日志，但不影响主流程）
+## 4. Cecc 检测
 
-在少数样本中，可能存在两类关键歧义：
+### 4.1 CeccBuild v4（LAST 优先）
 
-1) **U/C ambiguous**：单一位点几乎可以解释整圈，同时也存在 ≥2 位点链几乎解释整圈。
-2) **M/C ambiguous（定义 B）**：Cecc 的解释“不是唯一的”，存在多条几乎同样好的链（常见于重复丰富区域导致多解）。
+CeccBuild v4 使用 LAST 对双倍化序列进行高精度比对，寻找“第一半与第二半对齐到同一基因组位置”的重复模式，以识别复杂环。
 
-这些样本对下游自动化流程有污染风险，但对研究非常有价值；因此建议：**拦截并记录（log + 单独 CSV），但不改变正常 U/M/C 的主输出与后续流程。**
+关键输入：
+- `reference_fasta`
+- `tandem_to_ring.fasta`（双倍化序列）
 
-### 5.1 U/C ambiguous（用覆盖度差判歧义）
+关键参数：
+- `min_match_degree`（或 `theta_chain`）
+- `overlap_threshold`
+- `min_segments`
+- `half_query_buffer`
 
-触发条件：
+### 4.2 图结构回退（LAST 不可用时）
 
-- `U_cov ≥ θ_U`
-- `C_cov_best ≥ θ_chain`
-- 且覆盖度差距小：`|C_cov_best - U_cov| ≤ δ_UC`
+当 LAST 缺失或关键输入不可用时，回退到链式覆盖模型：
 
-其中 `δ_UC` 默认建议 `0.05`（5% 环长度），并暴露为参数。
-
-### 5.2 M/C ambiguous（定义 B：多链近似最优）
-
-定义次优链覆盖度：
-
-- `C_cov_2nd`：与最优链在 locus 组成上“确实不同”的次优链（至少一个 segment locus 不同）
-
-触发条件：
-
-- `C_cov_best ≥ θ_chain`
-- `C_cov_2nd ≥ C_cov_best - ε_MC`
-
-其中 `ε_MC` 默认建议 `0.05`，并暴露为参数。
+- 基于 alignment segments 构建候选链
+- 通过 `tau_gap` 控制相邻 gap
+- 通过 `min_match_degree` 保证覆盖度
+- 至少 `min_segments` 个不同 locus
 
 ---
 
-## 6. 参数清单（建议默认值）
+## 5. 参数清单（默认值）
 
-| 参数 | 含义 | 建议默认 |
-|------|------|----------|
-| `θ_U` | Uecc：单 locus 近似整圈阈值 | `0.95` |
-| `θ_M` | Mecc：locus 计数用的近似整圈阈值 | `0.95` |
-| `θ_U2_max` | Uecc：第二 locus 覆盖上限（越小越严格） | `0.05`（推荐）；`1.0`（禁用） |
-| `θ_chain` | 多 locus 链近似整圈阈值（Cecc 的核心） | `0.95` |
-| `τ_gap` | 链相邻命中允许 gap（bp） | `20` |
-| `δ_UC` | U/C ambiguous 覆盖差阈值 | `0.05` |
-| `ε_MC` | M/C ambiguous（多链近似最优）覆盖差阈值 | `0.05` |
-| `θ_locus` | locus 聚类互惠重叠阈值 | `0.95` |
-| `pos_tol_bp` | locus 聚类边界容差（bp） | `50` |
-
----
-
-## 7. 输出建议（用于可读性与后续研究）
-
-对于被拦截的歧义样本，建议输出最少包含：
-
-- `read_id / query_id`
-- `L`
-- `U_cov`
-- `M_count`
-- `C_cov_best`, `C_cov_2nd`
-- `num_loci_in_best_chain`
-- `best_chain_loci_signature`（例如 locus 列表/哈希）
-
-并在日志中打印摘要（数量 + Top N read_id + 参数配置），作为“菜单”供后续深入研究。
+| 参数 | 含义 | 默认 |
+|------|------|------|
+| `theta_u` / `theta_m` / `theta_full` | U/M 覆盖度阈值 | 0.95 |
+| `theta_u2_max` | U 第二位点覆盖上限 | 0.05 |
+| `theta_locus` | locus 互惠重叠阈值 | 0.95 |
+| `pos_tol_bp` | locus 边界容差 | 50 |
+| `mapq_u_min` | U 的 MAPQ 下限 | 0 |
+| `u_secondary_min_frac` / `u_secondary_min_bp` | 次级比对阈值 | 0.01 / 50 |
+| `u_contig_gap_bp` | U 连续性阈值 | 1000 |
+| `u_secondary_max_ratio` | 次级/主位点覆盖比 | 0.05 |
+| `u_high_coverage_threshold` | 高覆盖放宽阈值 | 0.98 |
+| `u_high_mapq_threshold` | 高 MAPQ 放宽阈值 | 50 |
+| `mapq_m_ambiguous_threshold` | Mecc MAPQ 过滤 | 0 (禁用) |
+| `mecc_identity_gap_threshold` | Mecc identity 差过滤 | 0 (禁用) |
+| `overlap_threshold` | Cecc 互惠重叠阈值 | 0.95 |
+| `min_segments` | Cecc 最少片段数 | 2 |
+| `tau_gap` / `edge_tolerance` | 链 gap 容差 | 20 |
+| `min_match_degree` | Cecc 匹配度阈值 | 95.0 |
+| `half_query_buffer` | 双倍序列中点缓冲 | 50 |
 
 ---
 
-## 8. 备注：为什么不要求参考上的顺序关系
+## 6. 备注
 
-本提案刻意不把“参考位点共线性/顺序一致”作为 Cecc 的必要条件，原因是：
-
-- TideHunter 已对“环”给出强先验（环是否存在无需在此步骤再次证明）
-- Cecc 的错位/倒位/跨染色体等结构可能是重要的生物学特征，不应在“是否为 Cecc”这一步被强规则过滤掉
-
-如果未来需要进一步细分 Cecc 子类型，可在 `Cecc` 确认后再做结构注释/分类，而不是在确认阶段引入强先验导致召回下降。
+- `delta_uc` / `epsilon_mc` 等歧义参数在当前实现中保留但未单独输出文件；可用于后续扩展或研究用途。

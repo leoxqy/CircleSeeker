@@ -1,9 +1,47 @@
 # CircleSeeker Batch Validation Report
 
 **Test Date**: 2026-01-14 ~ 2026-01-15
-**Version**: v0.10.3
+**Version**: v1.0.0
 **Test Environment**: Linux (fat1 server), Python 3.12.11, 32 threads
 **minimap2**: v2.30-r1287
+
+> 注意：本报告为历史批量验证快照，基于当时的模拟数据与参数。算法/默认参数更新后，结果可能不同。
+> 如需当前版本的验证结果，请使用 `tests/simulation/` 重新运行并生成报告。
+
+---
+
+## 0. Supplement: CtcReads-Caller Core Validation (Simulation)
+
+**Test Date**: 2026-01-19  
+**Script**: `scripts/run_ctcreads_core_validation.py` (wraps `tests/simulation/batch_validation.py`)  
+**Scales**: 100, 500, 1,000, 3,000  
+**Runs per scale**: 3  
+**Threads**: 8  
+**minimap2 preset**: `sr`  
+**Output**: `server_validation_results/ctcreads_core_validation_20260119_190214/`
+
+### Summary (U/M/C aggregated)
+
+| Metric | Value |
+|--------|-------|
+| Runs | 12 |
+| Total ground truth | 13,800 |
+| Total predictions | 13,800 |
+| True Positives | 13,800 |
+| False Positives | 0 |
+| False Negatives | 0 |
+| Recall | 100.00% |
+| Precision | 100.00% |
+| F1 Score | 100.00% |
+| Accuracy (TP/(TP+FP+FN)) | 100.00% |
+
+### By type (aggregated across all runs)
+
+| Type | GT | Pred | TP | FP | FN | Recall | Precision | F1 |
+|------|----|------|----|----|----|--------|-----------|----|
+| Uecc | 9,660 | 9,660 | 9,660 | 0 | 0 | 100.00% | 100.00% | 100.00% |
+| Mecc | 2,070 | 2,070 | 2,070 | 0 | 0 | 100.00% | 100.00% | 100.00% |
+| Cecc | 2,070 | 2,070 | 2,070 | 0 | 0 | 100.00% | 100.00% | 100.00% |
 
 ---
 
@@ -128,9 +166,9 @@ Performance visualization figures are available in `images/`:
 
 ### 7.2 Recommendations
 
-1. **Production use**: CircleSeeker v0.10.3 is suitable for production environments
-2. **Large-scale analysis**: No degradation observed up to 100,000 eccDNAs
-3. **MeccDNA attention**: For critical applications, verify Multimap classifications manually
+1. **Re-run for current versions**: Use `tests/simulation/batch_validation.py` to regenerate metrics for the current codebase.
+2. **Large-scale analysis**: Use multiple seeds and report mean ± std to avoid single-run bias.
+3. **MeccDNA attention**: For critical applications, verify Multimap classifications manually.
 
 ---
 
@@ -140,7 +178,7 @@ Performance visualization figures are available in `images/`:
 |-----------|----------------------|
 | Server | fat1 (Linux 3.10.0-693.el7.x86_64) |
 | Python | 3.12.11 (conda-forge) |
-| CircleSeeker | 0.10.3 |
+| CircleSeeker | 1.0.0 |
 | minimap2 | 2.30-r1287 |
 | Threads | 32 |
 | minimap2 timeout | 7200s |

@@ -44,8 +44,7 @@ def test_mecc_simulation_uses_multiple_loci():
         assert len(loci) == record.num_segments
         assert len(loci) >= 2
 
-        # MeccDNA is now a tandem repeat - verify the sequence structure
-        # The sequence should be the source region repeated copy_number times
+        # MeccDNA sequence is a single repeat unit that maps to multiple loci
         source_region = record.regions[0]
         unit_seq = (
             genome[source_region.chrom][source_region.start : source_region.end]
@@ -56,13 +55,9 @@ def test_mecc_simulation_uses_multiple_loci():
         )
         unit_length = source_region.length
 
-        # Verify tandem repeat structure
-        full_copies = int(record.copy_number)
-        partial_len = record.length - (full_copies * unit_length)
-        expected_sequence = unit_seq * full_copies + unit_seq[:partial_len]
-
         assert record.length == len(record.sequence)
-        assert record.sequence == expected_sequence
+        assert record.length == unit_length
+        assert record.sequence == unit_seq
 
 
 def test_uecc_simulation_avoids_mecc_repeat_intervals():

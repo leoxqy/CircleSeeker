@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "circleseeker"
-version = "0.13.2"
+version = "1.0.0"
 description = "Comprehensive eccDNA detection from PacBio HiFi sequencing data"
 readme = "README.md"
 authors = [
@@ -38,7 +38,6 @@ dependencies = [
     "networkx>=3.0",
     "packaging>=23.0",
     "intervaltree>=3.1.0",
-    "scikit-learn>=1.0.0,<1.6.0",
 ]
 
 [project.optional-dependencies]
@@ -81,10 +80,7 @@ exclude = ["tests*"]
 circleseeker = [
     "templates/*.html",
     "templates/*.css",
-    "resources/*.yaml",
-    "resources/*.json",
-    "models/*.pkl",
-    "models/*.json",
+    "py.typed",
 ]
 
 [tool.black]

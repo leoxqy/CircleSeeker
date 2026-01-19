@@ -68,9 +68,12 @@ LEGACY_TO_SNAKE_CASE = {
 STRAND_POSITIVE = {"+", "plus", "positive", "forward", "f", "pos"}
 STRAND_NEGATIVE = {"-", "minus", "negative", "reverse", "rev", "r", "neg"}
 
-# Confidence/evidence heuristics (used for flags only; does not gate calls).
-CONF_MAPQ_LOW_THRESHOLD = 20
-CONF_IDENTITY_LOW_THRESHOLD = 95.0
+# Import unified constants for confidence thresholds
+from circleseeker.constants import MAPQ_LOW_THRESHOLD, IDENTITY_LOW_THRESHOLD
+
+# Aliases for backward compatibility within this module
+CONF_MAPQ_LOW_THRESHOLD = MAPQ_LOW_THRESHOLD
+CONF_IDENTITY_LOW_THRESHOLD = IDENTITY_LOW_THRESHOLD
 
 
 def _normalize_strand(value: object) -> Optional[str]:
@@ -91,21 +94,21 @@ def _normalize_strand(value: object) -> Optional[str]:
 
 
 # ================== Helper Functions ==================
-def to_numeric_safe(series, default=0):
+def to_numeric_safe(series: pd.Series, default: float = 0) -> pd.Series:
     """Safely convert series to numeric, filling NaN with default."""
     try:
         return pd.to_numeric(series, errors="coerce").fillna(default)
-    except Exception:
+    except (TypeError, ValueError):
         return pd.Series([default] * len(series))
 
 
-def format_two_decimals(value) -> str:
+def format_two_decimals(value: float | int | str | None) -> str:
     """Format value to 2 decimal places."""
     try:
         if pd.isna(value):
             return ""
         return f"{float(value):.2f}"
-    except Exception:
+    except (TypeError, ValueError):
         return ""
 
 
@@ -188,7 +191,7 @@ def ensure_int64_column(df: pd.DataFrame, col: str) -> None:
     else:
         try:
             df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
-        except Exception:
+        except (TypeError, ValueError):
             df[col] = pd.Series([pd.NA] * len(df), dtype="Int64")
 
 
@@ -212,7 +215,7 @@ def read_csv_auto(path: str | Path, sep: str | None = None) -> pd.DataFrame:
             if len(df.columns) == 1 and "\t" in str(df.columns[0]):
                 df = pd.read_csv(path, sep="\t")
             return df
-        except Exception:
+        except (pd.errors.ParserError, pd.errors.EmptyDataError, ValueError):
             return pd.read_csv(path, sep="\t")
     else:
         return pd.read_csv(path, sep=sep)
@@ -726,7 +729,7 @@ def organize_umc_files(
                 try:
                     shutil.move(str(file_path), str(dest))
                     moved_files.append(file_path.name)
-                except Exception as exc:
+                except OSError as exc:
                     organizer_logger.warning(f"Could not move {file_path.name}: {exc}")
 
         if moved_files:
@@ -867,7 +870,7 @@ class CDHitClusters:
 class eccDedup:
     """eccDNA cluster deduplication processor with confirmed tables generation."""
 
-    def __init__(self, logger: Optional[logging.Logger] = None):
+    def __init__(self, logger: Optional[logging.Logger] = None) -> None:
         """Initialize eccDedup."""
         self.logger = logger or get_logger(self.__class__.__name__)
 
@@ -1939,7 +1942,7 @@ class eccDedup:
                 df["seg_index"] = pd.to_numeric(df["segment_order"], errors="coerce").astype(
                     "Int64"
                 )
-            except Exception:
+            except (TypeError, ValueError):
                 df["seg_index"] = (
                     df.groupby("eccDNA_id")[ColumnStandard.START0].rank(method="first").astype(int)
                 )

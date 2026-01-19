@@ -104,6 +104,25 @@ class TestTideHunterModule:
         assert result.success is True
         assert "ecc_candidates" in result.output_files
 
+    def test_execute_success_missing_output_file(self, module, tmp_path):
+        """execute should not error when output file is missing."""
+        input_file = tmp_path / "test.fa"
+        input_file.write_text(">seq1\nACGT\n")
+        output_file = tmp_path / "missing.txt"
+
+        with patch.object(module, "check_tool_availability", return_value=True), \
+             patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+
+            result = module.execute(
+                input_file=input_file,
+                output_file=output_file,
+                threads=4
+            )
+
+        assert result.success is True
+        assert result.metrics.get("num_candidates") == 0
+
     def test_execute_builds_correct_command(self, module, tmp_path):
         """execute should build correct TideHunter command."""
         input_file = tmp_path / "test.fa"

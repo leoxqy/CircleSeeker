@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from circleseeker.core.pipeline_types import ResultKeys
+from circleseeker.exceptions import PipelineError
 
 if TYPE_CHECKING:
     from circleseeker.core.pipeline import Pipeline
@@ -28,13 +29,14 @@ def ecc_unify(pipeline: Pipeline) -> None:
         pipeline.logger.info("No confirmed eccDNA file found, skipping ecc_unify step")
         return
 
-    pipeline.state.results[ResultKeys.CONFIRMED_CSV] = pipeline._serialize_path_for_state(
-        confirmed_csv_path
+    pipeline._set_result(
+        ResultKeys.CONFIRMED_CSV,
+        pipeline._serialize_path_for_state(confirmed_csv_path),
     )
 
     inference_disabled = bool(
-        pipeline.state.results.get(ResultKeys.INFERENCE_INPUT_EMPTY)
-        or pipeline.state.results.get(ResultKeys.INFERENCE_FAILED)
+        pipeline._get_result(ResultKeys.INFERENCE_INPUT_EMPTY)
+        or pipeline._get_result(ResultKeys.INFERENCE_FAILED)
     )
 
     simple_csv_path = None
@@ -74,14 +76,14 @@ def ecc_unify(pipeline: Pipeline) -> None:
         pipeline.logger.info(f"Unified {len(merged_df)} eccDNA entries")
     except Exception as e:
         pipeline.logger.error(f"ecc_unify failed: {e}")
-        return
+        raise PipelineError(f"ecc_unify failed: {e}") from e
 
     if unified_csv.exists():
-        pipeline.state.results[ResultKeys.UNIFIED_CSV] = pipeline._serialize_path_for_state(unified_csv)
+        pipeline._set_result(ResultKeys.UNIFIED_CSV, pipeline._serialize_path_for_state(unified_csv))
     if overlap_report.exists():
-        pipeline.state.results[ResultKeys.OVERLAP_REPORT] = pipeline._serialize_path_for_state(overlap_report)
+        pipeline._set_result(ResultKeys.OVERLAP_REPORT, pipeline._serialize_path_for_state(overlap_report))
     if overlap_stats.exists():
-        pipeline.state.results[ResultKeys.OVERLAP_STATS] = pipeline._serialize_path_for_state(overlap_stats)
+        pipeline._set_result(ResultKeys.OVERLAP_STATS, pipeline._serialize_path_for_state(overlap_stats))
 
 
 def ecc_summary(pipeline: Pipeline) -> None:
@@ -148,7 +150,7 @@ def ecc_summary(pipeline: Pipeline) -> None:
     summary.generate_html_report()
     summary.generate_text_summary()
 
-    pipeline.state.results[ResultKeys.SUMMARY_DIR] = str(output_dir)
+    pipeline._set_result(ResultKeys.SUMMARY_DIR, str(output_dir))
 
 
 def ecc_packager(pipeline: Pipeline) -> None:
@@ -171,8 +173,8 @@ def ecc_packager(pipeline: Pipeline) -> None:
     cecc_dir = resolve_dir("ecc_dedup_cecc_dir", f"{pipeline.config.prefix}_Cecc_C")
 
     inference_disabled = bool(
-        pipeline.state.results.get(ResultKeys.INFERENCE_INPUT_EMPTY)
-        or pipeline.state.results.get(ResultKeys.INFERENCE_FAILED)
+        pipeline._get_result(ResultKeys.INFERENCE_INPUT_EMPTY)
+        or pipeline._get_result(ResultKeys.INFERENCE_FAILED)
     )
     inferred_dir = None
     if not inference_disabled:
@@ -296,35 +298,5 @@ def ecc_packager(pipeline: Pipeline) -> None:
             text_summary=text_summary,
         )
 
-    pipeline.state.results[ResultKeys.FINAL_RESULTS] = str(final_output_root)
+    pipeline._set_result(ResultKeys.FINAL_RESULTS, str(final_output_root))
 
-    # NOTE: XeccDNA files are no longer copied to final output.
-    # XeccDNA source reads are now included in the inference input (minimap2 step),
-    # so they will be detected as Inferred eccDNA if valid. The XeccDNA.fasta
-    # intermediate file is retained in temp directory for debugging purposes only.
-
-
-def merge_eccdna_deprecated(pipeline: Pipeline) -> list[str] | None:
-    """Deprecated merge step retained for backwards compatibility."""
-    pipeline.logger.info("Merge eccDNA step skipped - replaced by ecc_unify")
-
-    u_core = pipeline.config.output_dir / f"{pipeline.config.prefix}_UeccDNA.core.csv"
-    m_core = pipeline.config.output_dir / f"{pipeline.config.prefix}_MeccSites.core.csv"
-    c_core = pipeline.config.output_dir / f"{pipeline.config.prefix}_CeccSegments.core.csv"
-
-    available_cores: list[str] = []
-    if u_core.exists():
-        pipeline.state.results[ResultKeys.UECC_CORE_CSV] = str(u_core)
-        available_cores.append(str(u_core))
-    if m_core.exists():
-        pipeline.state.results[ResultKeys.MECC_CORE_CSV] = str(m_core)
-        available_cores.append(str(m_core))
-    if c_core.exists():
-        pipeline.state.results[ResultKeys.CECC_CORE_CSV] = str(c_core)
-        available_cores.append(str(c_core))
-
-    if available_cores:
-        pipeline.logger.info(f"Core CSV files available: {len(available_cores)} files")
-        return available_cores
-
-    return None

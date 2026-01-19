@@ -60,7 +60,7 @@ class Sieve:
     # Default CtcR classes to filter out
     DEFAULT_CTCR_CLASSES = {"CtcR-perfect", "CtcR-inversion", "CtcR-hybrid"}
 
-    def __init__(self, logger: Optional[logging.Logger] = None):
+    def __init__(self, logger: Optional[logging.Logger] = None) -> None:
         """Initialize Sieve filter."""
         self.logger = logger or get_logger(self.__class__.__name__)
 
@@ -75,7 +75,7 @@ class Sieve:
         if not self.has_samtools:
             self.logger.warning("samtools not found - faidx index will not be generated")
 
-    def load_carousel_classification(
+    def load_tandem_to_ring_classification(
         self, csv_file: Path, ctcr_classes: Optional[set[str]] = None
     ) -> None:
         """
@@ -270,7 +270,7 @@ class Sieve:
 
     def run_sieve(
         self,
-        carousel_csv: Path,
+        tandem_to_ring_csv: Path,
         input_fastas: list[Path],
         output_fasta: Path,
         ctcr_classes: Optional[set[str]] = None,
@@ -279,7 +279,7 @@ class Sieve:
         Run complete sieve filtering pipeline.
 
         Args:
-            carousel_csv: Path to TandemToRing classification CSV (tandem_to_ring.csv)
+            tandem_to_ring_csv: Path to TandemToRing classification CSV (tandem_to_ring.csv)
             input_fastas: List of FASTA files to filter (from previous steps)
             output_fasta: Path for output filtered FASTA
             ctcr_classes: Optional set of classes to filter (default: CtcR variants)
@@ -293,7 +293,7 @@ class Sieve:
 
         try:
             # Step 1: Load classifications
-            self.load_carousel_classification(carousel_csv, ctcr_classes)
+            self.load_tandem_to_ring_classification(tandem_to_ring_csv, ctcr_classes)
 
             # Step 2: Filter FASTA files
             stats = self.filter_fasta_files(input_fastas, output_fasta)

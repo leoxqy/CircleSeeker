@@ -107,26 +107,49 @@ class ExternalTool:
         return None
 
     def check_minimum_version(self, current_version: str, required_version: str) -> bool:
-        """Check if current version meets minimum requirement."""
+        """Check if current version meets minimum requirement.
+
+        Returns:
+            True if version check passes, False if version is insufficient.
+            On parse errors, logs a warning and returns True (assumes OK) to avoid
+            blocking tool usage due to non-standard version formats.
+        """
         try:
             # Extract version numbers using regex
             current_match = re.search(r"(\d+\.\d+(?:\.\d+)*)", current_version)
             required_match = re.search(r"(\d+\.\d+(?:\.\d+)*)", required_version)
 
-            if not current_match or not required_match:
+            if not current_match:
                 self.logger.warning(
-                    f"Could not parse versions: {current_version} vs {required_version}"
+                    f"Could not parse current version string: '{current_version}'. "
+                    "Proceeding with caution - please verify tool version manually."
                 )
-                return True  # Assume OK if we can't parse
+                return True  # Allow usage but warn user
+
+            if not required_match:
+                self.logger.warning(
+                    f"Could not parse required version string: '{required_version}'. "
+                    "This is a configuration issue - please check required_version setting."
+                )
+                return True  # Config issue, don't block user
 
             current_ver = version.parse(current_match.group(1))
             required_ver = version.parse(required_match.group(1))
 
-            return current_ver >= required_ver
+            if current_ver < required_ver:
+                self.logger.warning(
+                    f"Version {current_version} is below minimum required {required_version}"
+                )
+                return False
+
+            return True
 
         except Exception as e:
-            self.logger.debug(f"Version comparison failed: {e}")
-            return True  # Assume OK on error
+            self.logger.warning(
+                f"Version comparison failed ({e}). "
+                "Proceeding with caution - please verify tool version manually."
+            )
+            return True  # Don't block on unexpected errors but warn clearly
 
     def get_tool_info(self) -> dict[str, Any]:
         """Get comprehensive tool information."""

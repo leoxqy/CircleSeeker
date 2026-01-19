@@ -1,6 +1,6 @@
 # CircleSeeker Validation Methodology
 
-**Version**: v0.10.3
+**Version**: v1.0.0
 **Last Updated**: 2026-01-15
 
 This document describes the simulation-based validation methodology used to evaluate CircleSeeker's eccDNA detection performance.
@@ -13,7 +13,7 @@ CircleSeeker validation uses a **synthetic data approach** that:
 
 1. Generates a simulated reference genome
 2. Creates three types of synthetic eccDNA reads with known ground truth
-3. Runs the full CircleSeeker pipeline
+3. Runs the minimal validation chain (minimap2 alignment → um_classify → cecc_build)
 4. Compares predictions against ground truth to calculate performance metrics
 
 This methodology allows precise measurement of recall, precision, and F1 scores because the true eccDNA locations are known exactly.
@@ -106,11 +106,10 @@ Simulated reads mimic PacBio HiFi characteristics:
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Detection Phase                               │
 ├─────────────────────────────────────────────────────────────────┤
-│  1. Run CircleSeeker pipeline                                   │
-│     - TideHunter → tandem detection                             │
+│  1. Run the minimal validation chain                            │
 │     - minimap2 → alignment                                      │
 │     - U/M classification                                        │
-│     - CeccDNA detection                                         │
+│     - CeccDNA detection (LAST preferred; graph fallback)        │
 │  2. Output: uecc.csv, mecc.csv, cecc.csv                        │
 └─────────────────────────────────────────────────────────────────┘
                               │

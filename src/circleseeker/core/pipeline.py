@@ -28,18 +28,11 @@ from circleseeker.core.steps.definitions import PIPELINE_STEPS
 # Step execution lives in `circleseeker.core.steps.*` and is imported lazily by
 # wrapper methods on `Pipeline` to keep imports light.
 
-# DEPRECATED: Backward-compat patch target for tests/downstream monkeypatching.
-# This will be removed in v0.12.0. Please update your code to use the new module
-# import path: from circleseeker.modules.cecc_build import CeccBuild
-CeccBuild: Any = None
-
-
 class Pipeline:
     """Main pipeline orchestrator with complete fixes."""
 
     # Canonical step ordering and user-facing metadata.
     STEPS = PIPELINE_STEPS
-    _inference_tool: Optional[str] = None
 
     def _set_result(self, key: str, value: Any) -> None:
         """Set a result key (new canonical names only)."""
@@ -50,7 +43,7 @@ class Pipeline:
         candidate = Path(path)
         try:
             resolved = candidate.resolve(strict=False)
-        except Exception:
+        except OSError:
             resolved = candidate
 
         base_candidates: list[tuple[str, Optional[Path]]] = [
@@ -64,7 +57,7 @@ class Pipeline:
             base_path = Path(base)
             try:
                 base_resolved = base_path.resolve(strict=False)
-            except Exception:
+            except OSError:
                 base_resolved = base_path
             try:
                 rel = resolved.relative_to(base_resolved)
@@ -124,7 +117,7 @@ class Pipeline:
         for candidate in candidates:
             try:
                 resolved = candidate.resolve(strict=False)
-            except Exception:
+            except OSError:
                 resolved = candidate
             if resolved.exists():
                 return resolved
@@ -134,6 +127,10 @@ class Pipeline:
     def _get_result(self, key: str, default: Any = None) -> Any:
         """Get a result by canonical key only."""
         return self.state.results.get(key, default)
+
+    def _del_result(self, key: str) -> None:
+        """Delete a result by key if it exists."""
+        self.state.results.pop(key, None)
 
     def _select_inference_tool(self) -> str:
         """Determine which inference tool to use (Cresil preferred)."""
@@ -364,6 +361,9 @@ class Pipeline:
     def __init__(self, config: Config):
         self.config = config
         self.logger = get_logger(self.__class__.__name__)
+
+        # Instance-level inference tool cache (thread-safe)
+        self._inference_tool: Optional[str] = None
 
         # Setup directory structure using configured temp dir
         configured_tmp = config.runtime.tmp_dir if config.runtime.tmp_dir else Path(".tmp_work")
@@ -957,20 +957,6 @@ class Pipeline:
 
         ecc_inference(self)
 
-    def _step_cyrcular_calling(self) -> None:
-        """DEPRECATED: Backward compatibility alias for legacy step name.
-
-        This method will be removed in v0.12.0. The step has been renamed to
-        'ecc_inference' to reflect support for multiple inference engines
-        (Cresil preferred, Cyrcular as fallback).
-
-        If you have code or checkpoints referencing 'cyrcular_calling', they
-        will continue to work until v0.12.0, but you should update to use
-        'ecc_inference' instead.
-        """
-        self.logger.debug("Legacy step alias invoked: cyrcular_calling -> ecc_inference")
-        self._step_ecc_inference()
-
     def _run_cresil_inference(self) -> None:
         """Run Cresil inference pipeline (replaces Steps 10-11 when available)."""
         from circleseeker.core.steps.inference import run_cresil_inference
@@ -1006,14 +992,3 @@ class Pipeline:
         from circleseeker.core.steps.postprocess import ecc_packager
 
         ecc_packager(self)
-
-    def _step_merge_eccdna(self) -> list[str] | None:
-        """Step 14 (deprecated): Merge confirmed with inferred eccDNA.
-
-        Functionality moved to ecc_unify.
-        """
-        from circleseeker.core.steps.postprocess import merge_eccdna_deprecated
-
-        return merge_eccdna_deprecated(self)
-
-    # playbill/propmaster steps removed

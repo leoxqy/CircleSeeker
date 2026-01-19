@@ -3,11 +3,27 @@
 from __future__ import annotations
 
 import logging
+import signal
 import sys
 from pathlib import Path
 from typing import Optional, cast
 
 import click
+
+from circleseeker.cli.exit_codes import (
+    EXIT_SUCCESS,
+    EXIT_ERROR,
+    EXIT_USAGE,
+    EXIT_SIGINT,
+    EXIT_SIGTERM,
+)
+
+def _handle_signal(signum: int, frame) -> None:
+    """Handle interrupt signals for graceful shutdown."""
+    sig_name = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
+    click.echo(f"\n{sig_name} received, initiating graceful shutdown...", err=True)
+    # Raise KeyboardInterrupt to propagate through the call stack
+    raise KeyboardInterrupt(f"{sig_name} received")
 
 from circleseeker import __version__
 from circleseeker.exceptions import CircleSeekerError
@@ -203,7 +219,7 @@ def cli(
             opt_names = ", ".join(sorted(set(advanced_used)))
             click.echo(f"Error: The following options require --debug: {opt_names}", err=True)
             click.echo("Tip: Use --help-advanced to see all advanced options.", err=True)
-            sys.exit(2)
+            sys.exit(EXIT_USAGE)
 
     # Hide or reveal advanced commands in help based on --debug
     advanced_cmds = {"init-config", "show-checkpoint", "validate", "benchmark", "run"}
@@ -262,12 +278,15 @@ def cli(
         )
         execute_pipeline(opts, logger)
 
+    except KeyboardInterrupt:
+        logger.info("Pipeline interrupted by user")
+        sys.exit(EXIT_SIGINT)
     except CircleSeekerError as exc:
         logger.error(f"Pipeline error: {exc}")
-        sys.exit(1)
+        sys.exit(EXIT_ERROR)
     except Exception as exc:
         logger.exception(f"Unexpected error: {exc}")
-        sys.exit(2)
+        sys.exit(EXIT_ERROR)
 
 
 cli.add_command(run)
@@ -277,13 +296,22 @@ cli.add_command(validate)
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Main entry point."""
+    """Main entry point with signal handling."""
+    # Set up signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
+
     try:
         cli(argv)
-        return 0
+        return EXIT_SUCCESS
+    except KeyboardInterrupt:
+        return EXIT_SIGINT
+    except SystemExit as exc:
+        # Preserve explicit exit codes from cli()
+        return exc.code if isinstance(exc.code, int) else EXIT_ERROR
     except Exception as exc:
         click.echo(f"Error: {exc}", err=True)
-        return 1
+        return EXIT_ERROR
 
 
 if __name__ == "__main__":

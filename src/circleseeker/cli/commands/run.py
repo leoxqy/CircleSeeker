@@ -9,6 +9,7 @@ from typing import Optional
 
 import click
 
+from circleseeker.cli.exit_codes import EXIT_ERROR
 from circleseeker.exceptions import CircleSeekerError
 from circleseeker.utils.logging import get_logger, setup_logging
 
@@ -87,7 +88,7 @@ def run(
 
     except CircleSeekerError as exc:
         logger.error(f"Pipeline error: {exc}")
-        sys.exit(1)
+        sys.exit(EXIT_ERROR)
     except Exception as exc:
         logger.exception(f"Unexpected error: {exc}")
-        sys.exit(2)
+        sys.exit(EXIT_ERROR)

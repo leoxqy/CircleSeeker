@@ -26,13 +26,14 @@ def um_classify(pipeline: Pipeline) -> None:
         raise PipelineError(
             "Alignment output not found; run the alignment step before um_classify."
         )
-    pipeline.state.results[ResultKeys.ALIGNMENT_OUTPUT] = pipeline._serialize_path_for_state(
-        alignment_output
+    pipeline._set_result(
+        ResultKeys.ALIGNMENT_OUTPUT,
+        pipeline._serialize_path_for_state(alignment_output)
     )
     output_prefix = pipeline.config.output_dir / "um_classify"
 
     um_cfg = pipeline.config.tools.um_classify if hasattr(pipeline.config.tools, "um_classify") else {}
-    if not isinstance(um_cfg, dict):
+    if not isinstance(um_cfg, dict) and not hasattr(um_cfg, 'get'):
         raise PipelineError(
             "Invalid um_classify config; expected mapping, "
             f"got {type(um_cfg).__name__}"
@@ -50,6 +51,9 @@ def um_classify(pipeline: Pipeline) -> None:
         theta_m=um_cfg.get("theta_m"),
         theta_u2_max=um_cfg.get("theta_u2_max"),
         mapq_u_min=um_cfg.get("mapq_u_min", 0),
+        # Additional filters for ambiguous classifications
+        mapq_m_ambiguous_threshold=um_cfg.get("mapq_m_ambiguous_threshold", 0),
+        mecc_identity_gap_threshold=um_cfg.get("mecc_identity_gap_threshold", 0),
         u_secondary_min_frac=um_cfg.get("u_secondary_min_frac", 0.01),
         u_secondary_min_bp=um_cfg.get("u_secondary_min_bp", 50),
         u_contig_gap_bp=um_cfg.get("u_contig_gap_bp", 1000),
@@ -68,8 +72,8 @@ def um_classify(pipeline: Pipeline) -> None:
             "Alignment output is empty - no alignments found. "
             "This may occur when reads have no similarity to the reference."
         )
-        pipeline.state.results[ResultKeys.UECC_COUNT] = 0
-        pipeline.state.results[ResultKeys.MECC_COUNT] = 0
+        pipeline._set_result(ResultKeys.UECC_COUNT, 0)
+        pipeline._set_result(ResultKeys.MECC_COUNT, 0)
         return
 
     alignment_df = pd.read_csv(alignment_output, sep="\t", header=None)
@@ -82,23 +86,13 @@ def um_classify(pipeline: Pipeline) -> None:
         raise PipelineError("Alignment query_id validation failed") from exc
 
     if not valid_mask.any():
-        pipeline.logger.error(
+        message = (
             "Alignment query_id format is invalid for um_classify. "
-            "Expected 'read|repN|length|copy' (at least 4 '|' fields). "
-            "Skipping classification."
+            "Expected 'read|repN|length|copy' from tandem_to_ring output. "
+            "Check that tandem_to_ring.fasta was generated and used for alignment."
         )
-        uecc_output = pipeline.config.output_dir / "um_classify.uecc.csv"
-        mecc_output = pipeline.config.output_dir / "um_classify.mecc.csv"
-        unclass_output = pipeline.config.output_dir / "um_classify.unclassified.csv"
-        pd.DataFrame().to_csv(uecc_output, index=False)
-        pd.DataFrame().to_csv(mecc_output, index=False)
-        pd.DataFrame().to_csv(unclass_output, index=False)
-        pipeline.state.results[ResultKeys.UECC_CSV] = str(uecc_output)
-        pipeline.state.results[ResultKeys.MECC_CSV] = str(mecc_output)
-        pipeline.state.results[ResultKeys.UNCLASSIFIED_CSV] = str(unclass_output)
-        pipeline.state.results[ResultKeys.UECC_COUNT] = 0
-        pipeline.state.results[ResultKeys.MECC_COUNT] = 0
-        return
+        pipeline.logger.error(message)
+        raise PipelineError(message)
     if not valid_mask.all():
         pipeline.logger.warning(
             "Some alignment query IDs lack the expected 'read|repN|length|copy' format; "
@@ -113,17 +107,23 @@ def um_classify(pipeline: Pipeline) -> None:
     unclass_output = pipeline.config.output_dir / "um_classify.unclassified.csv"
 
     if uecc_output.exists():
-        uecc_df = pd.read_csv(uecc_output)
-        pipeline.state.results[ResultKeys.UECC_CSV] = str(uecc_output)
-        pipeline.state.results[ResultKeys.UECC_COUNT] = len(uecc_df)
+        try:
+            uecc_df = pd.read_csv(uecc_output)
+        except pd.errors.EmptyDataError:
+            uecc_df = pd.DataFrame()
+        pipeline._set_result(ResultKeys.UECC_CSV, str(uecc_output))
+        pipeline._set_result(ResultKeys.UECC_COUNT, len(uecc_df))
 
     if mecc_output.exists():
-        mecc_df = pd.read_csv(mecc_output)
-        pipeline.state.results[ResultKeys.MECC_CSV] = str(mecc_output)
-        pipeline.state.results[ResultKeys.MECC_COUNT] = len(mecc_df)
+        try:
+            mecc_df = pd.read_csv(mecc_output)
+        except pd.errors.EmptyDataError:
+            mecc_df = pd.DataFrame()
+        pipeline._set_result(ResultKeys.MECC_CSV, str(mecc_output))
+        pipeline._set_result(ResultKeys.MECC_COUNT, len(mecc_df))
 
     if unclass_output.exists():
-        pipeline.state.results[ResultKeys.UNCLASSIFIED_CSV] = str(unclass_output)
+        pipeline._set_result(ResultKeys.UNCLASSIFIED_CSV, str(unclass_output))
 
 
 def cecc_build(pipeline: Pipeline) -> None:
@@ -167,17 +167,35 @@ def cecc_build(pipeline: Pipeline) -> None:
         builder_cls = DefaultCeccBuild
 
     builder = cast(type[Any], builder_cls)(logger=pipeline.logger.getChild("cecc_build"))
+    if hasattr(builder, "tmp_dir"):
+        builder.tmp_dir = pipeline.config.output_dir / "cecc_last_tmp"
+    if hasattr(builder, "keep_tmp"):
+        builder.keep_tmp = pipeline.config.keep_tmp
 
     pipeline.logger.info("Running cecc_build module")
     try:
         cecc_cfg = getattr(pipeline.config.tools, "cecc_build", {}) or {}
-        if not isinstance(cecc_cfg, dict):
+        if not isinstance(cecc_cfg, dict) and not hasattr(cecc_cfg, 'get'):
             raise PipelineError(
                 "Invalid cecc_build config; expected mapping, "
                 f"got {type(cecc_cfg).__name__}"
             )
 
-        tau_gap = cecc_cfg.get("tau_gap") or cecc_cfg.get("edge_tolerance") or 20
+        raw_tau_gap = cecc_cfg.get("tau_gap")
+        if raw_tau_gap is None:
+            raw_tau_gap = cecc_cfg.get("edge_tolerance")
+        if raw_tau_gap is None:
+            raw_tau_gap = 20
+        try:
+            tau_gap = int(raw_tau_gap)
+        except (TypeError, ValueError):
+            tau_gap = 20
+        if tau_gap < 1:
+            pipeline.logger.warning(
+                "cecc_build tau_gap must be >= 1; using 1 instead of %s",
+                tau_gap,
+            )
+            tau_gap = 1
         min_match_degree = cecc_cfg.get("min_match_degree", 95.0)
         theta_chain = cecc_cfg.get("theta_chain")
         if theta_chain is not None:
@@ -261,7 +279,7 @@ def cecc_build(pipeline: Pipeline) -> None:
 
 def umc_process(pipeline: Pipeline) -> None:
     """Step 6: Generate FASTA files using umc_process module."""
-    from circleseeker.modules.umc_process import UMCProcess
+    from circleseeker.modules.umc_process import UMCProcess, UMCProcessConfig
 
     circular_fasta = pipeline.config.output_dir / "tandem_to_ring.fasta"
     if not circular_fasta.exists():
@@ -274,7 +292,8 @@ def umc_process(pipeline: Pipeline) -> None:
     mecc_csv = pipeline.config.output_dir / "um_classify.mecc.csv"
     cecc_csv = pipeline.config.output_dir / "cecc_build.csv"
 
-    processor = UMCProcess(logger=pipeline.logger.getChild("umc_process"))
+    umc_cfg = UMCProcessConfig(process_xecc=bool(pipeline.config.enable_xecc))
+    processor = UMCProcess(config=umc_cfg, logger=pipeline.logger.getChild("umc_process"))
 
     pipeline.logger.info("Running umc_process module")
     processor.run(
@@ -293,7 +312,7 @@ def umc_process(pipeline: Pipeline) -> None:
         if not fasta_file.exists():
             continue
 
-        pipeline.state.results[f"{ecc_type}_fasta"] = str(fasta_file)
+        pipeline._set_result(f"{ecc_type}_fasta", str(fasta_file))
 
         processed_csv = pipeline.config.output_dir / f"{pipeline.config.prefix}_{ecc_name}DNA_processed.csv"
         if not processed_csv.exists():
@@ -301,7 +320,7 @@ def umc_process(pipeline: Pipeline) -> None:
             processed_csv = fallback_csv if fallback_csv.exists() else processed_csv
 
         if processed_csv.exists():
-            pipeline.state.results[f"{ecc_type}_processed"] = str(processed_csv)
+            pipeline._set_result(f"{ecc_type}_processed", str(processed_csv))
 
         pipeline.logger.debug(
             "Found %s outputs: fasta=%s csv=%s",
@@ -346,9 +365,9 @@ def cd_hit(pipeline: Pipeline) -> None:
         )
 
         if output_fasta is not None:
-            pipeline.state.results[f"{ecc_type}_nr99"] = str(output_fasta)
+            pipeline._set_result(f"{ecc_type}_nr99", str(output_fasta))
         if cluster_file and Path(cluster_file).exists():
-            pipeline.state.results[f"{ecc_type}_clusters"] = str(cluster_file)
+            pipeline._set_result(f"{ecc_type}_clusters", str(cluster_file))
 
 
 def _get_path_from_results(pipeline: Pipeline, key: str) -> Optional[Path]:
@@ -482,7 +501,7 @@ def ecc_dedup(pipeline: Pipeline) -> None:
             for key, directory in umc_dirs.items():
                 mapped = dir_key_map.get(key.upper())
                 if mapped and directory.exists():
-                    pipeline.state.results[f"ecc_dedup_{mapped}_dir"] = str(directory)
+                    pipeline._set_result(f"ecc_dedup_{mapped}_dir", str(directory))
         except Exception as exc:
             pipeline.logger.warning(f"Failed to organize eccDedup outputs: {exc}")
             umc_dirs = {}
@@ -527,7 +546,7 @@ def ecc_dedup(pipeline: Pipeline) -> None:
                 "Mecc": ResultKeys.MECC_HARMONIZED,
                 "Cecc": ResultKeys.CECC_HARMONIZED,
             }[ecc_type]
-            pipeline.state.results[key] = str(harmonized_csv)
+            pipeline._set_result(key, str(harmonized_csv))
 
     additional_files = {
         "uecc": [
@@ -550,11 +569,12 @@ def ecc_dedup(pipeline: Pipeline) -> None:
         for filename, key in file_specs:
             file_path = _locate_output(filename, folder_key_map.get(ecc_type))
             if file_path:
-                pipeline.state.results[key] = str(file_path)
+                pipeline._set_result(key, str(file_path))
                 pipeline.logger.debug(f"Found {key}: {file_path}")
 
     confirmed_file = pipeline.config.output_dir / f"{pipeline.config.prefix}_eccDNA_Confirmed.csv"
     if confirmed_file.exists():
-        pipeline.state.results[ResultKeys.CONFIRMED_CSV] = pipeline._serialize_path_for_state(
-            confirmed_file
+        pipeline._set_result(
+            ResultKeys.CONFIRMED_CSV,
+            pipeline._serialize_path_for_state(confirmed_file),
         )

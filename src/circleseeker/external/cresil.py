@@ -211,7 +211,7 @@ class Cresil(ExternalTool):
                 try:
                     if link_candidate.exists() and link_candidate.resolve() != reference_fasta.resolve():
                         link_candidate = output_dir / f"{reference_fasta.stem}.circleseeker{reference_fasta.suffix}"
-                except Exception:
+                except OSError:
                     link_candidate = output_dir / f"{reference_fasta.stem}.circleseeker{reference_fasta.suffix}"
 
                 if not link_candidate.exists():

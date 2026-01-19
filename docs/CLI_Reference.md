@@ -1,6 +1,6 @@
-# CircleSeeker CLI 使用手册（v0.10.3）
+# CircleSeeker CLI 使用手册（v1.0.0）
 
-本手册针对 CircleSeeker 0.10.3 的命令行界面，涵盖常用参数、调试选项、运行时行为与输出结构。默认安装后可通过 `circleseeker` 或 `CircleSeeker` 两个入口调用。
+本手册针对 CircleSeeker 1.0.0 的命令行界面，涵盖常用参数、调试选项、运行时行为与输出结构。默认安装后可通过 `circleseeker` 或 `CircleSeeker` 两个入口调用。
 
 ---
 
@@ -27,10 +27,11 @@ circleseeker -i reads.fasta -r reference.fa -o results/
 
 ## 2. 日志与调试
 
-- `-n, --noise` 提升日志级别；一次为 INFO，两次为 DEBUG
+- `-v, --verbose` 提升日志级别；一次为 INFO，两次为 DEBUG
 - `--debug` 开启调试模式，同时解锁高级参数与隐藏子命令
+- `--help-advanced` 显示高级/调试选项说明并退出
 - `-h, --help` 显示帮助并退出
-- `-v, --version` 打印版本信息
+- `-V, --version` 打印版本信息
 
 ---
 
@@ -45,7 +46,8 @@ circleseeker -i reads.fasta -r reference.fa -o results/
 - `--generate-config` 输出默认配置 YAML 并退出
 - `--show-steps` 查看 16 个步骤（按 CtcReads-Caller / SplitReads-Caller / Integration 归类）及状态
 - `--dry-run` 仅展示计划执行的操作，不实际运行
-- `--log-output PATH` 额外写入日志文件
+- `--log-file PATH` 额外写入日志文件
+- `--preset CHOICE` 灵敏度预设（`relaxed` / `balanced` / `strict`）
 
 ---
 
@@ -56,7 +58,7 @@ circleseeker -i reads.fasta -r reference.fa -o results/
 | `run` | 与顶级命令等价的兼容入口，保留旧参数别名 |
 | `init-config` | 将默认配置写入指定路径 |
 | `show-checkpoint` | 查看现有运行的检查点信息 |
-| `validate` | 检查安装与依赖环境 |
+| `validate` | 检查安装与依赖环境（`--full` 可启用更完整检查） |
 
 调用示例：
 
@@ -97,15 +99,15 @@ circleseeker --debug show-checkpoint -o results/ -p sample
 | 1 | `check_dependencies` | 检查外部工具与推断引擎可用性 |
 | 2 | `tidehunter` | 检测 HiFi reads 中的串联重复 |
 | 3 | `tandem_to_ring` | 将重复结构转换为候选环状序列 |
-| 4 | `run_alignment` | 使用 minimap2 将候选片段比对至参考基因组 |
-| 5 | `um_classify` | 区分 UeccDNA 与 MeccDNA |
-| 6 | `cecc_build` | 识别复杂类型（CeccDNA） |
+| 4 | `run_alignment` | 使用 minimap2（或 LAST）将候选片段比对至参考基因组 |
+| 5 | `um_classify` | 基于覆盖度与位点聚类区分 UeccDNA / MeccDNA |
+| 6 | `cecc_build` | LAST 优先的复杂 eccDNA 检测（不可用时回退图方法） |
 | 7 | `umc_process` | 生成 U/M/C FASTA 及汇总 |
 | 8 | `cd_hit` | 去除冗余序列 |
 | 9 | `ecc_dedup` | 合并并标准化坐标 |
-|10 | `read_filter` | 过滤确认的 eccDNA reads |
-|11 | `minimap2` | 构建参考索引 / 生成推断所需比对 |
-|12 | `ecc_inference` | Cresil 优先的推断流程（Cyrcular 备用） |
+|10 | `read_filter` | 过滤 CtcR reads，生成推断输入 FASTA |
+|11 | `minimap2` | 构建参考索引；Cresil 时可跳过比对 |
+|12 | `ecc_inference` | Cresil 优先的推断流程（失败时回退 Cyrcular） |
 |13 | `curate_inferred_ecc` | 整理推断结果（内部调用 `iecc_curator`） |
 |14 | `ecc_unify` | 合并确认与推断数据，使用片段重叠算法检测冗余嵌合体 eccDNA |
 |15 | `ecc_summary` | 统计并生成 HTML/TXT 报告（含合并 FASTA） |

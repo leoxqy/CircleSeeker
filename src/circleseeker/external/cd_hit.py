@@ -271,7 +271,7 @@ class CDHitEst(ExternalTool):
                     # Parse cluster id
                     try:
                         current_cluster = str(int(line.split()[1]))
-                    except Exception:
+                    except (ValueError, IndexError):
                         # Fallback: use suffix as ID
                         current_cluster = line.replace(">Cluster", "").strip()
                     current_members = []

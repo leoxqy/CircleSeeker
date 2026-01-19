@@ -231,9 +231,12 @@ class Minimap2(ExternalTool):
             return output_file
 
         finally:
-            # Clean up temporary directory
+            # Clean up temporary directory with error logging
             if temp_dir.exists():
-                shutil.rmtree(temp_dir, ignore_errors=True)
+                try:
+                    shutil.rmtree(temp_dir)
+                except OSError as e:
+                    self.logger.warning(f"Failed to clean up temp directory {temp_dir}: {e}")
 
     def _run_alignment_safe(
         self, reference: Path, reads: Path, output_bam: Path, temp_dir: Path
@@ -366,7 +369,7 @@ class Minimap2(ExternalTool):
             command.extend(["--secondary", "no"])
 
         if self.config.additional_args:
-            command.extend(self.config.additional_args.split())
+            command.extend(shlex.split(self.config.additional_args))
 
         command.extend([str(reference), str(reads), "-o", str(output_file)])
 
@@ -392,7 +395,7 @@ class Minimap2(ExternalTool):
             minimap2_cmd.extend(["--secondary", "no"])
 
         if self.config.additional_args:
-            minimap2_cmd.extend(self.config.additional_args.split())
+            minimap2_cmd.extend(shlex.split(self.config.additional_args))
 
         minimap2_cmd.extend([str(reference), str(reads), "-o", str(temp_sam)])
 

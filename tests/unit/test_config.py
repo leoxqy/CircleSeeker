@@ -33,8 +33,10 @@ class TestRuntimeConfig:
 
     def test_runtime_config_custom_values(self):
         """Test RuntimeConfig with custom values."""
-        log_file = Path("/tmp/test.log")
-        tmp_dir = Path("/tmp/custom")
+        # Use tempfile.gettempdir() for cross-platform compatibility
+        temp_base = Path(tempfile.gettempdir())
+        log_file = temp_base / "test.log"
+        tmp_dir = temp_base / "custom"
 
         config = RuntimeConfig(
             log_level="DEBUG",
@@ -92,25 +94,26 @@ class TestToolConfig:
         assert config.minimap2["preset"] == "map-hifi"
         assert config.minimap2["additional_args"] == ""
 
-        # Check samtools defaults (empty dict)
-        assert config.samtools == {}
+        # Check samtools defaults (now a typed config with to_dict())
+        assert config.samtools.to_dict() == {}
 
     def test_tool_config_custom_values(self):
-        """Test ToolConfig with custom values."""
+        """Test ToolConfig with custom values (dicts are converted to typed configs)."""
         config = ToolConfig(
             tidehunter={"k": 20, "w": 2},
             minimap2_align={"preset": "sr", "max_target_seqs": 100, "additional_args": "--secondary=no"},
             minimap2={"preset": "map-ont", "additional_args": "-k 15"},
-            samtools={"sort_memory": "4G"}
         )
 
+        # Dict-like access still works via __getitem__
         assert config.tidehunter["k"] == 20
         assert config.tidehunter["w"] == 2
         assert config.minimap2_align["preset"] == "sr"
         assert config.minimap2_align["additional_args"] == "--secondary=no"
         assert config.minimap2["preset"] == "map-ont"
         assert config.minimap2["additional_args"] == "-k 15"
-        assert config.samtools["sort_memory"] == "4G"
+        # Samtools has no custom fields, so uses defaults
+        assert config.samtools.to_dict() == {}
 
 
 class TestConfig:
@@ -295,14 +298,16 @@ class TestConfig:
 
     def test_config_to_dict_nested_paths(self):
         """Test config to_dict with nested Path objects."""
+        # Use tempfile.gettempdir() for cross-platform compatibility
+        temp_base = Path(tempfile.gettempdir())
         config = Config()
-        config.runtime.log_file = Path("/tmp/test.log")
-        config.runtime.tmp_dir = Path("/tmp/custom")
+        config.runtime.log_file = temp_base / "test.log"
+        config.runtime.tmp_dir = temp_base / "custom"
 
         config_dict = config.to_dict()
 
-        assert config_dict["runtime"]["log_file"] == "/tmp/test.log"
-        assert config_dict["runtime"]["tmp_dir"] == "/tmp/custom"
+        assert config_dict["runtime"]["log_file"] == str(temp_base / "test.log")
+        assert config_dict["runtime"]["tmp_dir"] == str(temp_base / "custom")
 
 
 class TestLoadConfig:
@@ -378,6 +383,8 @@ class TestLoadConfig:
 
     def test_load_config_ignores_null_tool_config(self):
         """Test that null tool configs do not override defaults."""
+        from circleseeker.config import Minimap2AlignConfig
+
         config_data = {
             "tools": {
                 "minimap2_align": None,
@@ -390,7 +397,8 @@ class TestLoadConfig:
 
         try:
             config = load_config(config_path)
-            assert isinstance(config.tools.minimap2_align, dict)
+            # Now returns typed config class instead of dict
+            assert isinstance(config.tools.minimap2_align, Minimap2AlignConfig)
             assert config.tools.minimap2_align["preset"] == "map-hifi"
         finally:
             config_path.unlink()
@@ -446,6 +454,24 @@ class TestLoadConfig:
         }
 
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(config_data, f)
+            config_path = Path(f.name)
+
+        try:
+            with pytest.raises(ConfigurationError):
+                load_config(config_path)
+        finally:
+            config_path.unlink()
+
+    def test_load_config_rejects_skip_tandem_to_ring(self):
+        """skip_tandem_to_ring is not accepted in YAML config."""
+        config_data = {
+            "input_file": "test.fasta",
+            "reference": "ref.fa",
+            "skip_tandem_to_ring": True,
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             yaml.dump(config_data, f)
             config_path = Path(f.name)
 

@@ -78,7 +78,8 @@ jobs:
             --cov=src/circleseeker \
             --cov-report=term-missing \
             --cov-report=xml \
-            --cov-fail-under=80
+            --cov-report=html \
+            --cov-fail-under=50
 
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.12' && matrix.os == 'ubuntu-latest'

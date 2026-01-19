@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Server-side gradient validation runner for CircleSeeker simulation tests.
+Server-side CtcReads-Caller core validation runner for CircleSeeker simulation tests.
 
 Runs the existing batch validator with server-friendly defaults:
   - runs per scale: 10
@@ -9,8 +9,13 @@ Runs the existing batch validator with server-friendly defaults:
   - captures full stdout/stderr to a log file
   - optionally archives results to a .tar.gz for transfer
 
+Scope note:
+  This validates the CtcReads-Caller *core* logic (minimap2 alignment -> U/M classification
+  -> Cecc build) and intentionally skips external CtcReads detection tools
+  (TideHunter + tandem_to_ring).
+
 Usage (from repo root or unpacked sdist):
-  python scripts/run_server_gradient_validation.py --threads 16
+  python scripts/run_ctcreads_core_validation.py --threads 16
 """
 
 from __future__ import annotations
@@ -65,7 +70,9 @@ def _archive_directory(src_dir: Path, archive_path: Path) -> Path:
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[1]
 
-    parser = argparse.ArgumentParser(description="Run CircleSeeker gradient simulation validation on a server")
+    parser = argparse.ArgumentParser(
+        description="Run CircleSeeker CtcReads-Caller core validation on a server"
+    )
     parser.add_argument("--threads", type=int, default=os.cpu_count() or 8, help="Threads for minimap2")
     parser.add_argument("--runs", type=int, default=10, help="Runs per scale (default: 10)")
     parser.add_argument("--base-seed", type=int, default=42, help="Base random seed (default: 42)")
@@ -113,7 +120,7 @@ def main() -> int:
     args = parser.parse_args()
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = args.output_dir or (args.output_root / f"gradient_validation_{ts}")
+    output_dir = args.output_dir or (args.output_root / f"ctcreads_core_validation_{ts}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     meta: Dict[str, Any] = {
@@ -138,7 +145,7 @@ def main() -> int:
     meta_path = output_dir / f"run_metadata_{ts}.json"
     meta_path.write_text(json.dumps(meta, indent=2) + "\n")
 
-    log_path = output_dir / f"batch_validation_{ts}.log"
+    log_path = output_dir / f"ctcreads_core_validation_{ts}.log"
     batch_cmd = [
         sys.executable,
         "-u",

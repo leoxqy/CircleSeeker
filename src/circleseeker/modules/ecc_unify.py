@@ -98,6 +98,8 @@ def build_chr_index(
 ) -> dict[str, list[tuple[int, int, int]]]:
     """Build chromosome-indexed structure for efficient overlap queries.
 
+    Uses vectorized string operations for better performance with large DataFrames.
+
     Args:
         df: DataFrame with 'Regions' column
         type_filter: Optional eccDNA_type to filter for (e.g., 'UeccDNA')
@@ -108,16 +110,35 @@ def build_chr_index(
     if type_filter and "eccDNA_type" in df.columns:
         df = df[df["eccDNA_type"] == type_filter]
 
-    for i, row in df.iterrows():
-        reg = row.get("Regions", row.get("regions", ""))
-        if not reg or pd.isna(reg):
-            continue
+    if df.empty:
+        return idx
 
-        try:
-            ch, s, e = parse_region(reg)
-            idx.setdefault(ch, []).append((s, e, i))
-        except Exception:
-            continue
+    # Get regions column (try both cases)
+    regions_col = "Regions" if "Regions" in df.columns else "regions"
+    if regions_col not in df.columns:
+        return idx
+
+    # Reset index to ensure contiguous integer index for proper mapping
+    df = df.reset_index(drop=True)
+
+    # Get regions and handle chimeric (take first segment)
+    regions = df[regions_col].astype(str).str.split(";").str[0]
+
+    # Vectorized regex extraction: chr:start-end
+    pattern = r"([^:]+):(\d+)-(\d+)"
+    extracted = regions.str.extract(pattern)
+    extracted.columns = ["chr", "start", "end"]
+
+    # Filter valid rows (all three columns present)
+    valid_mask = extracted.notna().all(axis=1)
+    valid_df = extracted[valid_mask].copy()
+    valid_df["start"] = pd.to_numeric(valid_df["start"], errors="coerce").astype("Int64")
+    valid_df["end"] = pd.to_numeric(valid_df["end"], errors="coerce").astype("Int64")
+
+    # Build index from valid entries
+    for i, (chr_val, start, end) in valid_df.iterrows():
+        if pd.notna(chr_val) and pd.notna(start) and pd.notna(end):
+            idx.setdefault(chr_val, []).append((int(start), int(end), i))
 
     # Sort by start position for each chromosome
     for ch in idx:

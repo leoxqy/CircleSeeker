@@ -27,14 +27,17 @@ pysam: ModuleType | None = pysam_module
 
 
 def select_best_duplicate(group: pd.DataFrame) -> pd.DataFrame:
+    """Select the best duplicate entry from a group based on scoring.
+
+    Scoring considers probability, split reads, and artifact likelihood.
+    """
     group = group.copy()
 
+    prob_col: str | None = None
     if "prob_present" in group.columns:
         prob_col = "prob_present"
     elif "prob_joint_event" in group.columns:
         prob_col = "prob_joint_event"
-    else:
-        prob_col = None
 
     if prob_col:
         max_splits = group["num_split_reads"].max()

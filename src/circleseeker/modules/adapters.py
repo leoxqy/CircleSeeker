@@ -18,7 +18,7 @@ class CLIModuleAdapter(ModuleBase):
     This allows us to use existing modules without modification.
     """
 
-    def __init__(self, module_path: str, **kwargs):
+    def __init__(self, module_path: str, **kwargs) -> None:
         """
         Initialize CLI module adapter.
 

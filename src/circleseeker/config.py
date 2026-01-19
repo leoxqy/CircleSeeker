@@ -116,9 +116,15 @@ def apply_preset(cfg: "Config", preset: PresetName) -> None:
     # Apply each tool's preset values
     for tool_name, params in preset_values.items():
         if hasattr(cfg.tools, tool_name):
-            tool_dict = getattr(cfg.tools, tool_name)
-            if isinstance(tool_dict, dict):
-                tool_dict.update(params)
+            tool_config = getattr(cfg.tools, tool_name)
+            # Support both typed config classes and dicts
+            if isinstance(tool_config, dict):
+                tool_config.update(params)
+            elif hasattr(tool_config, '__dataclass_fields__'):
+                # Update dataclass fields directly
+                for key, value in params.items():
+                    if hasattr(tool_config, key):
+                        setattr(tool_config, key, value)
 
 
 @dataclass
@@ -142,117 +148,227 @@ class PerformanceConfig:
     threads: int = 8
 
 
+# ================== Typed Tool Configuration Classes ==================
+
+
+class ToolConfigMixin:
+    """Mixin class providing common methods for tool configuration dataclasses.
+
+    All tool config classes inherit from this mixin to provide:
+    - to_dict(): Convert to dictionary
+    - from_dict(): Create from dictionary, ignoring unknown keys
+    - get(): Dict-like get method
+    - __getitem__(): Dict-like access
+    """
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ToolConfigMixin":
+        """Create from dictionary, ignoring unknown keys."""
+        valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
+        filtered = {k: v for k, v in data.items() if k in valid_keys}
+        return cls(**filtered)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """Dict-like get method."""
+        return getattr(self, key, default)
+
+    def __getitem__(self, key: str) -> Any:
+        """Dict-like access."""
+        return getattr(self, key)
+
+
+@dataclass
+class TideHunterConfig(ToolConfigMixin):
+    """TideHunter tool configuration with type safety."""
+
+    k: int = 16  # k-mer size
+    w: int = 1  # window size
+    p: int = 100  # minimum period size
+    P: int = 2000000  # maximum period size
+    e: float = 0.1  # maximum allowed error rate
+    f: int = 2  # output format
+    c: int = 2  # minimum copy number
+
+
+@dataclass
+class TandemToRingConfig(ToolConfigMixin):
+    """TandemToRing tool configuration with type safety."""
+
+    min_ave_match: float = 99.0  # Minimum average match percentage
+
+
+@dataclass
+class UMClassifyConfig(ToolConfigMixin):
+    """UMClassify tool configuration with type safety."""
+
+    # Gap threshold for alignment analysis
+    gap_threshold: float = 10.0
+    # Coverage model parameters (fractions 0-1)
+    theta_full: float = 0.95
+    theta_u: float = 0.95
+    theta_m: float = 0.95
+    theta_u2_max: float = 0.05
+    theta_locus: float = 0.95
+    # MAPQ thresholds
+    mapq_u_min: int = 0
+    mapq_m_ambiguous_threshold: int = 0
+    mecc_identity_gap_threshold: float = 0.0
+    # Secondary evidence thresholds
+    u_secondary_min_frac: float = 0.01
+    u_secondary_min_bp: int = 50
+    u_contig_gap_bp: int = 1000
+    u_secondary_max_ratio: float = 0.05
+    u_high_coverage_threshold: float = 0.98
+    u_high_mapq_threshold: int = 50
+    pos_tol_bp: int = 50
+    # Ambiguity interception
+    delta_uc: float = 0.05
+    epsilon_mc: float = 0.05
+    # Legacy keys (for backward compatibility)
+    min_full_length_coverage: float = 95.0
+    max_identity_gap_for_mecc: float = 5.0
+
+
+@dataclass
+class CeccBuildConfig(ToolConfigMixin):
+    """CeccBuild tool configuration with type safety."""
+
+    overlap_threshold: float = 0.95
+    min_segments: int = 2
+    edge_tolerance: int = 20  # Gap tolerance on query (bp)
+    tau_gap: int = 20
+    position_tolerance: int = 50  # Position tolerance for closure checks (bp)
+    half_query_buffer: int = 50  # Buffer for doubled-sequence detection (bp)
+    locus_overlap_threshold: float = 0.95
+    theta_chain: float = 0.95  # Chain coverage threshold (fraction 0-1)
+    min_match_degree: float = 95.0  # Legacy key (percent 0-100)
+    max_rotations: int = 20
+
+
+@dataclass
+class AlignmentConfig(ToolConfigMixin):
+    """General alignment configuration (supports multiple aligners)."""
+
+    aligner: str = "minimap2"  # "minimap2" or "last"
+    min_identity: float = 99.0
+    min_alignment_length: int = 50
+    db_prefix: Optional[str] = None  # LAST-specific: pre-built database
+
+
+@dataclass
+class Minimap2AlignConfig(ToolConfigMixin):
+    """Minimap2-specific alignment configuration for run_alignment step."""
+
+    preset: str = "map-hifi"
+    max_target_seqs: int = 5
+    additional_args: str = ""
+    min_identity: float = 99.0  # Base identity threshold (%)
+    identity_decay_per_10kb: float = 0.5  # Length-based compensation (%)
+    min_identity_floor: float = 97.0  # Identity threshold floor (%)
+    split_by_length: bool = False  # Use different presets for short/long
+    split_length: int = 5000  # Length threshold in bp
+    preset_short: str = "map-hifi"  # Preset for sequences < split_length
+    preset_long: str = "map-hifi"  # Preset for sequences >= split_length
+
+
+@dataclass
+class Minimap2Config(ToolConfigMixin):
+    """Minimap2 tool configuration for inference step."""
+
+    preset: str = "map-hifi"
+    additional_args: str = ""
+
+
+@dataclass
+class SamtoolsConfig(ToolConfigMixin):
+    """Samtools tool configuration."""
+
+    # Currently no specific parameters, but structured for future use
+    pass
+
+
+# Type alias for tool config that can be either typed class or dict
+ToolConfigValue = (
+    TideHunterConfig | TandemToRingConfig | UMClassifyConfig | CeccBuildConfig |
+    AlignmentConfig | Minimap2AlignConfig | Minimap2Config | SamtoolsConfig |
+    dict[str, Any]
+)
+
+
+def _ensure_tool_config(
+    value: ToolConfigValue | None,
+    config_class: type,
+    default_factory: callable,
+) -> Any:
+    """Convert dict to typed config class, or return default if None."""
+    if value is None:
+        return default_factory()
+    if isinstance(value, config_class):
+        return value
+    if isinstance(value, dict):
+        return config_class.from_dict(value)
+    return value
+
+
 @dataclass
 class ToolConfig:
-    """External tool configuration."""
+    """External tool configuration with typed sub-configs."""
 
-    tidehunter: dict[str, Any] = field(
-        default_factory=lambda: {
-            "k": 16,
-            "w": 1,
-            "p": 100,
-            "P": 2000000,
-            "e": 0.1,
-            "f": 2,
-            "c": 2,
-        }
+    tidehunter: TideHunterConfig | dict[str, Any] = field(
+        default_factory=TideHunterConfig
     )
-    tandem_to_ring: dict[str, Any] = field(
-        default_factory=lambda: {"min_ave_match": 99.0}
+    tandem_to_ring: TandemToRingConfig | dict[str, Any] = field(
+        default_factory=TandemToRingConfig
     )
-    um_classify: dict[str, Any] = field(
-        default_factory=lambda: {
-            "gap_threshold": 10.0,
-            # Coverage model parameters (preferred, fractions 0-1)
-            "theta_full": 0.95,
-            # Split thresholds (preferred): U and M can use different cutoffs.
-            # If unset, code falls back to theta_full for both.
-            "theta_u": 0.95,
-            "theta_m": 0.95,
-            # U requires the 2nd-best locus coverage to be low (fractions 0-1).
-            # Set to 1.0 to disable.
-            "theta_u2_max": 0.05,
-            # Optional: require minimap2 MAPQ >= this threshold for Uecc (0 disables).
-            "mapq_u_min": 0,
-            # When attempting to call U, veto if there is significant secondary evidence
-            # (other-chr or far-away mappings) beyond these thresholds.
-            "u_secondary_min_frac": 0.01,
-            "u_secondary_min_bp": 50,
-            "u_contig_gap_bp": 1000,
-            # Adaptive secondary mapping thresholds (for improved large-scale performance)
-            "u_secondary_max_ratio": 0.05,  # Max secondary/primary ratio before veto
-            "u_high_coverage_threshold": 0.98,  # Coverage above this gets relaxed thresholds
-            "u_high_mapq_threshold": 50,  # MAPQ above this increases confidence
-            "theta_locus": 0.95,
-            "pos_tol_bp": 50,
-            # Ambiguity interception (fractions 0-1)
-            "delta_uc": 0.05,
-            "epsilon_mc": 0.05,
-            # Legacy keys (accepted for backward compatibility)
-            "min_full_length_coverage": 95.0,
-            "max_identity_gap_for_mecc": 5.0,
-        }
+    um_classify: UMClassifyConfig | dict[str, Any] = field(
+        default_factory=UMClassifyConfig
     )
-    cecc_build: dict[str, Any] = field(
-        default_factory=lambda: {
-            "overlap_threshold": 0.95,
-            "min_segments": 2,
-            # Gap tolerance on query (bp)
-            "edge_tolerance": 20,
-            "tau_gap": 20,
-            # Position tolerance used by legacy closure checks (bp)
-            "position_tolerance": 50,
-            # Buffer around query mid-point for doubled-sequence detection (bp)
-            "half_query_buffer": 50,
-            # Reciprocal-overlap threshold to treat two genomic intervals as the same locus
-            # in the final overlap filter (fractions 0-1; accepts percents for convenience)
-            "locus_overlap_threshold": 0.95,
-            # Chain coverage threshold (preferred, fraction 0-1)
-            "theta_chain": 0.95,
-            # Legacy key (percent 0-100)
-            "min_match_degree": 95.0,
-            "max_rotations": 20,
-        }
+    cecc_build: CeccBuildConfig | dict[str, Any] = field(
+        default_factory=CeccBuildConfig
     )
-    # General alignment configuration (supports multiple aligners)
-    alignment: dict[str, Any] = field(
-        default_factory=lambda: {
-            # aligner: "minimap2" (default) or "last"
-            "aligner": "minimap2",
-            # Common options
-            "min_identity": 99.0,
-            "min_alignment_length": 50,
-            # LAST-specific options (only used when aligner="last")
-            "db_prefix": None,  # Pre-built LAST database (optional)
-        }
+    alignment: AlignmentConfig | dict[str, Any] = field(
+        default_factory=AlignmentConfig
     )
-    # Minimap2-specific alignment configuration for run_alignment step
-    minimap2_align: dict[str, Any] = field(
-        default_factory=lambda: {
-            "preset": "map-hifi",
-            "max_target_seqs": 5,
-            "additional_args": "",
-            # min_identity: Base identity threshold (%).
-            # For HiFi data, 99.0 is recommended as HiFi error rate is ~1%.
-            "min_identity": 99.0,
-            # identity_decay_per_10kb: Length-based compensation (%).
-            # Longer sequences are allowed lower identity because errors accumulate.
-            # For HiFi data, 0.5 per 10kb is recommended.
-            # Example: 10kb -> 98.5%, 20kb -> 98.0%, 40kb+ -> 97.0% (floor)
-            "identity_decay_per_10kb": 0.5,
-            # min_identity_floor: Identity threshold never goes below this (%).
-            "min_identity_floor": 97.0,
-            # split_by_length: Use different presets for short/long sequences.
-            "split_by_length": False,
-            "split_length": 5000,  # Length threshold in bp
-            "preset_short": "map-hifi",  # Preset for sequences < split_length
-            "preset_long": "map-hifi",  # Preset for sequences >= split_length
-        }
+    minimap2_align: Minimap2AlignConfig | dict[str, Any] = field(
+        default_factory=Minimap2AlignConfig
     )
-    minimap2: dict[str, Any] = field(
-        default_factory=lambda: {"preset": "map-hifi", "additional_args": ""}
+    minimap2: Minimap2Config | dict[str, Any] = field(
+        default_factory=Minimap2Config
     )
-    samtools: dict[str, Any] = field(default_factory=dict)
+    samtools: SamtoolsConfig | dict[str, Any] = field(
+        default_factory=SamtoolsConfig
+    )
+
+    def __post_init__(self) -> None:
+        """Convert dict values to typed configs after initialization."""
+        self.tidehunter = _ensure_tool_config(
+            self.tidehunter, TideHunterConfig, TideHunterConfig
+        )
+        self.tandem_to_ring = _ensure_tool_config(
+            self.tandem_to_ring, TandemToRingConfig, TandemToRingConfig
+        )
+        self.um_classify = _ensure_tool_config(
+            self.um_classify, UMClassifyConfig, UMClassifyConfig
+        )
+        self.cecc_build = _ensure_tool_config(
+            self.cecc_build, CeccBuildConfig, CeccBuildConfig
+        )
+        self.alignment = _ensure_tool_config(
+            self.alignment, AlignmentConfig, AlignmentConfig
+        )
+        self.minimap2_align = _ensure_tool_config(
+            self.minimap2_align, Minimap2AlignConfig, Minimap2AlignConfig
+        )
+        self.minimap2 = _ensure_tool_config(
+            self.minimap2, Minimap2Config, Minimap2Config
+        )
+        self.samtools = _ensure_tool_config(
+            self.samtools, SamtoolsConfig, SamtoolsConfig
+        )
 
 
 @dataclass
@@ -310,6 +426,17 @@ class Config:
         if self.performance.threads < 1:
             raise ConfigurationError("Threads must be >= 1")
 
+        # Validate threads upper bound to prevent resource exhaustion
+        import os
+        max_threads = (os.cpu_count() or 8) * 2
+        if self.performance.threads > max_threads:
+            raise ConfigurationError(
+                f"Threads must be <= {max_threads} (2x CPU cores), got {self.performance.threads}"
+            )
+
+        # Validate tool configuration parameters
+        self._validate_tool_params()
+
         # Validate runtime tmp_dir safety.
         # - Relative tmp_dir must be a subdirectory name/path (not '.', not escaping via '..')
         # - If you want temp files outside the output dir, use an absolute path.
@@ -325,6 +452,61 @@ class Config:
                     "Invalid runtime.tmp_dir: must not contain '..'. "
                     "Use an absolute path if you want an external temp directory."
                 )
+
+    def _validate_tool_params(self) -> None:
+        """Validate tool configuration parameter ranges."""
+        # Helper for range validation
+        def check_range(
+            value: float, name: str, min_val: float = 0.0, max_val: float = 1.0
+        ) -> None:
+            if not min_val <= value <= max_val:
+                raise ConfigurationError(
+                    f"{name} must be in [{min_val}, {max_val}], got {value}"
+                )
+
+        def check_positive(value: float, name: str) -> None:
+            if value < 0:
+                raise ConfigurationError(f"{name} must be non-negative, got {value}")
+
+        # Validate UMClassify thresholds (fractions in [0, 1])
+        um = self.tools.um_classify
+        check_range(um.theta_full, "um_classify.theta_full")
+        check_range(um.theta_u, "um_classify.theta_u")
+        check_range(um.theta_m, "um_classify.theta_m")
+        check_range(um.theta_u2_max, "um_classify.theta_u2_max")
+        check_range(um.theta_locus, "um_classify.theta_locus")
+        check_range(um.u_secondary_max_ratio, "um_classify.u_secondary_max_ratio")
+        check_range(um.u_high_coverage_threshold, "um_classify.u_high_coverage_threshold")
+        check_positive(um.gap_threshold, "um_classify.gap_threshold")
+
+        # Validate CeccBuild thresholds
+        cecc = self.tools.cecc_build
+        check_range(cecc.overlap_threshold, "cecc_build.overlap_threshold")
+        check_range(cecc.locus_overlap_threshold, "cecc_build.locus_overlap_threshold")
+        check_range(cecc.theta_chain, "cecc_build.theta_chain")
+        check_range(cecc.min_match_degree, "cecc_build.min_match_degree", 0.0, 100.0)
+        if cecc.min_segments < 1:
+            raise ConfigurationError(
+                f"cecc_build.min_segments must be >= 1, got {cecc.min_segments}"
+            )
+
+        # Validate TandemToRing
+        ttr = self.tools.tandem_to_ring
+        check_range(ttr.min_ave_match, "tandem_to_ring.min_ave_match", 0.0, 100.0)
+
+        # Validate Minimap2Align identity thresholds
+        mm2 = self.tools.minimap2_align
+        check_range(mm2.min_identity, "minimap2_align.min_identity", 0.0, 100.0)
+        check_range(mm2.min_identity_floor, "minimap2_align.min_identity_floor", 0.0, 100.0)
+        check_positive(mm2.identity_decay_per_10kb, "minimap2_align.identity_decay_per_10kb")
+
+        # Validate TideHunter
+        th = self.tools.tidehunter
+        if th.c < 2:
+            raise ConfigurationError(
+                f"tidehunter.c (min copy number) must be >= 2, got {th.c}"
+            )
+        check_range(th.e, "tidehunter.e (error rate)", 0.0, 1.0)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -398,6 +580,7 @@ def load_config(path: Path) -> Config:
             "skip_um_classify",
             "skip_alignment",
             "skip_gatekeeper",
+            "skip_tandem_to_ring",
         ]
         present_unsupported = [flag for flag in unsupported_skip_flags if flag in data]
         if present_unsupported:

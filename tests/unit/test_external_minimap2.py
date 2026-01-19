@@ -283,6 +283,76 @@ class TestMinimap2:
 
     @patch('circleseeker.external.minimap2.shutil.which')
     @patch('subprocess.run')
+    def test_additional_args_preserve_quotes_simple(self, mock_run, mock_which, tmp_path):
+        """Quoted additional_args should stay grouped in simple alignment."""
+        mock_which.side_effect = (
+            lambda tool: f"/usr/bin/{tool}" if tool in {"minimap2", "samtools"} else None
+        )
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+
+        config = MiniMapConfig(
+            output_format="sam",
+            build_index=False,
+            sort_bam=False,
+            index_bam=False,
+            additional_args='--foo "bar baz"',
+        )
+        minimap2 = Minimap2(config=config)
+
+        reference = tmp_path / "reference.fasta"
+        reads = tmp_path / "reads.fasta"
+        output_file = tmp_path / "output.sam"
+
+        minimap2._run_alignment_simple(reference, reads, output_file)
+
+        call_args = mock_run.call_args[0][0]
+        assert "--foo" in call_args
+        assert "bar baz" in call_args
+
+    @patch('circleseeker.external.minimap2.shutil.which')
+    @patch('subprocess.run')
+    def test_additional_args_preserve_quotes_unsorted(self, mock_run, mock_which, tmp_path):
+        """Quoted additional_args should stay grouped in unsorted BAM alignment."""
+        mock_which.side_effect = (
+            lambda tool: f"/usr/bin/{tool}" if tool in {"minimap2", "samtools"} else None
+        )
+
+        temp_dir = tmp_path / "tmp_sort"
+        temp_dir.mkdir(exist_ok=True)
+        output_bam = tmp_path / "output.bam"
+        calls = []
+
+        def run_side_effect(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[0] == "minimap2":
+                temp_sam = temp_dir / "temp_alignment.sam"
+                temp_sam.write_text("@HD\tVN:1.6\n")
+            if cmd[0] == "samtools":
+                output_bam.write_bytes(b"dummy bam")
+            return MagicMock(returncode=0, stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        config = MiniMapConfig(
+            output_format="bam",
+            build_index=False,
+            sort_bam=False,
+            index_bam=False,
+            additional_args='--foo "bar baz"',
+        )
+        minimap2 = Minimap2(config=config)
+
+        reference = tmp_path / "reference.fasta"
+        reads = tmp_path / "reads.fasta"
+
+        minimap2._run_alignment_unsorted(reference, reads, output_bam, temp_dir)
+
+        minimap2_cmd = calls[0]
+        assert "--foo" in minimap2_cmd
+        assert "bar baz" in minimap2_cmd
+
+    @patch('circleseeker.external.minimap2.shutil.which')
+    @patch('subprocess.run')
     def test_index_bam(self, mock_run, mock_which, tmp_path):
         """Test _index_bam method."""
         mock_which.side_effect = (

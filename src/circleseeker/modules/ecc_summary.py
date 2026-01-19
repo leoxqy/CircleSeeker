@@ -25,7 +25,7 @@ import sys
 class EccSummary:
     """Generate comprehensive eccDNA analysis reports."""
 
-    def __init__(self, sample_name: str, output_dir: Path, logger: Optional[logging.Logger] = None):
+    def __init__(self, sample_name: str, output_dir: Path, logger: Optional[logging.Logger] = None) -> None:
         """Initialize the summary generator.
 
         Args:

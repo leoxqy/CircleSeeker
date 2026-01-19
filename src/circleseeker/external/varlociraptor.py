@@ -124,6 +124,32 @@ class Varlociraptor(ExternalTool):
         p2 = None
         p3 = None
 
+        def _cleanup_processes() -> None:
+            """Terminate and clean up all pipeline processes gracefully."""
+            for proc in [p1, p2, p3]:
+                if proc is None:
+                    continue
+                try:
+                    # First try graceful termination
+                    proc.terminate()
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # Force kill if graceful termination fails
+                    try:
+                        proc.kill()
+                        proc.wait(timeout=2)
+                    except OSError:
+                        pass
+                except OSError:
+                    pass  # Process already terminated
+                # Close any remaining pipes
+                for pipe in [proc.stdout, proc.stderr, proc.stdin]:
+                    if pipe is not None:
+                        try:
+                            pipe.close()
+                        except OSError:
+                            pass
+
         try:
             p1 = subprocess.Popen(
                 [
@@ -175,7 +201,6 @@ class Varlociraptor(ExternalTool):
                 p2.stdout.close()
 
             # Wait for processes in reverse order to avoid deadlock
-            # No timeout - bioinformatics pipelines can run for extended periods
             _, stderr3 = p3.communicate(timeout=timeout)
             _, stderr2 = p2.communicate(timeout=timeout)
             _, stderr1 = p1.communicate(timeout=timeout)
@@ -206,14 +231,21 @@ class Varlociraptor(ExternalTool):
                     stderr=err_text,
                 )
 
+        except subprocess.TimeoutExpired as e:
+            _cleanup_processes()
+            raise PipelineError(
+                f"Pipeline timed out after {timeout} seconds: {e}"
+            ) from e
         except ExternalToolError:
             raise
         except Exception as e:
-            # Clean up processes on unexpected errors
-            for proc in [p1, p2, p3]:
-                if proc is not None:
-                    try:
-                        proc.kill()
-                    except Exception:
-                        pass
+            _cleanup_processes()
             raise PipelineError(f"Pipeline execution failed: {e}") from e
+        finally:
+            # Ensure stderr pipes are closed even on success
+            for proc in [p1, p2, p3]:
+                if proc is not None and proc.stderr is not None:
+                    try:
+                        proc.stderr.close()
+                    except OSError:
+                        pass

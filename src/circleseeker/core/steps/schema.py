@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 def _format_template(template: str, *, prefix: str) -> str:
     try:
         return template.format(prefix=prefix)
-    except Exception:
+    except (KeyError, IndexError, ValueError):
         return template
 
 

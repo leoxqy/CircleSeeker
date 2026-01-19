@@ -7,6 +7,7 @@ import sys
 import click
 
 from circleseeker import __version__
+from circleseeker.cli.exit_codes import EXIT_ERROR
 
 
 @click.command(hidden=True)
@@ -27,7 +28,7 @@ def validate(full: bool) -> None:
             click.echo("✗ Issues found:")
             for issue in issues:
                 click.echo(f"  - {issue}")
-            sys.exit(1)
+            sys.exit(EXIT_ERROR)
     except ImportError:
         # Basic validation without full validator
         click.echo("✓ Basic installation check passed!")

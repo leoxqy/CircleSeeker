@@ -193,7 +193,7 @@ class DependencyChecker:
         self.found_tools: list[str] = []
         self.version_warnings: list[str] = []
 
-    def check_all(self) -> bool:
+    def check_all(self, skip_tools: Optional[set[str]] = None) -> bool:
         """Check all dependencies.
 
         Returns:
@@ -201,7 +201,20 @@ class DependencyChecker:
         """
         self.logger.info("Checking dependencies...")
 
+        skip_set = {name.lower() for name in (skip_tools or set())}
+
+        def is_skipped(tool: Tool) -> bool:
+            if not skip_set:
+                return False
+            names = [tool.name]
+            if tool.alt_names:
+                names.extend(tool.alt_names)
+            return any(name.lower() in skip_set for name in names)
+
         for tool in TOOLS:
+            if is_skipped(tool):
+                self.logger.debug("Skipping dependency check for %s", tool.name)
+                continue
             is_required = tool.required
             found_name = find_tool(tool.name, tool.alt_names)
             if found_name is not None:
@@ -316,11 +329,12 @@ class DependencyChecker:
             sys.exit(1)
 
 
-def check_dependencies(logger=None) -> bool:
+def check_dependencies(logger=None, skip_tools: Optional[set[str]] = None) -> bool:
     """Convenience function to check all dependencies.
 
     Args:
         logger: Optional logger instance
+        skip_tools: Optional set of tool names to skip
 
     Returns:
         True if all required tools are available
@@ -329,7 +343,7 @@ def check_dependencies(logger=None) -> bool:
         SystemExit: If required dependencies are missing
     """
     checker = DependencyChecker(logger=logger)
-    all_ok = checker.check_all()
+    all_ok = checker.check_all(skip_tools=skip_tools)
 
     if not all_ok:
         checker.print_report()

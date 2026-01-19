@@ -31,5 +31,5 @@ def iter_progress(
                 ncols=80,
             )
         )  # Fixed width for alignment
-    except Exception:
+    except (ImportError, TypeError):
         return iter(iterable)

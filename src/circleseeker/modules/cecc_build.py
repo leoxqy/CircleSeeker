@@ -26,6 +26,7 @@ Output format is fully compatible with cecc_build.py (V1/V2/V3).
 from __future__ import annotations
 
 import logging
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -94,9 +95,15 @@ class CeccBuild:
     Output format is fully compatible with CeccBuild (V1/V2/V3).
     """
 
+    # Import unified constants
+    from circleseeker.constants import (
+        MAPQ_LOW_THRESHOLD as _MAPQ_LOW,
+        IDENTITY_LOW_THRESHOLD as _IDENTITY_LOW,
+    )
+
     MAPQ_MAX = 60
-    MAPQ_LOW_THRESHOLD = 20
-    IDENTITY_LOW_THRESHOLD = 95.0
+    MAPQ_LOW_THRESHOLD = _MAPQ_LOW
+    IDENTITY_LOW_THRESHOLD = _IDENTITY_LOW
 
     BASE_REQUIRED_COLS = [
         "query_id",
@@ -130,8 +137,10 @@ class CeccBuild:
         min_repeat_query_gap: int = 100,
         half_query_buffer: int = 50,
         threads: int = 4,
+        tmp_dir: Optional[Path] = None,
+        keep_tmp: bool = False,
         logger: Optional[logging.Logger] = None,
-    ):
+    ) -> None:
         """
         Initialize CeccBuild v4 (LAST-based).
 
@@ -145,6 +154,8 @@ class CeccBuild:
             min_repeat_query_gap: Minimum gap between repeat positions on query
             half_query_buffer: Buffer around query mid-point (bp) to separate halves
             threads: Number of threads for LAST
+            tmp_dir: Optional directory for LAST intermediate files
+            keep_tmp: Keep LAST intermediate files when tmp_dir is provided
             logger: Optional logger
         """
         self.gap_tolerance = gap_tolerance
@@ -156,6 +167,8 @@ class CeccBuild:
         self.min_repeat_query_gap = min_repeat_query_gap
         self.half_query_buffer = max(0, int(half_query_buffer))
         self.threads = threads
+        self.tmp_dir = Path(tmp_dir) if tmp_dir is not None else None
+        self.keep_tmp = bool(keep_tmp)
         self.logger = logger or get_logger(self.__class__.__name__)
 
         # Runtime paths (set during run)
@@ -601,11 +614,11 @@ class CeccBuild:
     def _check_last_available(self) -> bool:
         """Check if LAST tools are available."""
         try:
-            subprocess.run(["lastdb", "--version"], capture_output=True, check=False)
-            subprocess.run(["lastal", "--version"], capture_output=True, check=False)
-            return True
+            lastdb = subprocess.run(["lastdb", "--version"], capture_output=True, check=False)
+            lastal = subprocess.run(["lastal", "--version"], capture_output=True, check=False)
         except FileNotFoundError:
             return False
+        return lastdb.returncode == 0 and lastal.returncode == 0
 
     def _build_last_db(self, reference_fasta: Path, db_prefix: Path) -> Path:
         """Build LAST database from reference."""
@@ -934,20 +947,32 @@ class CeccBuild:
         return extracted
 
     def _get_metadata_from_csv(self, df: pd.DataFrame) -> Dict[str, dict]:
-        """Extract metadata for each read from input CSV."""
-        metadata = {}
-        for _, row in df.iterrows():
-            query_id = str(row.get("query_id", ""))
-            reads = str(row.get("reads", query_id))
+        """Extract metadata for each read from input CSV.
+
+        Uses vectorized operations for better performance with large DataFrames.
+        """
+        metadata: Dict[str, dict] = {}
+        if df.empty:
+            return metadata
+
+        # Prepare columns with defaults using vectorized operations
+        query_ids = df["query_id"].astype(str) if "query_id" in df.columns else pd.Series([""] * len(df))
+        reads_col = df["reads"].astype(str) if "reads" in df.columns else query_ids
+        lengths = pd.to_numeric(df.get("length", pd.Series([0] * len(df))), errors="coerce").fillna(0).astype(int)
+        copy_numbers = pd.to_numeric(df.get("copy_number", pd.Series([1.0] * len(df))), errors="coerce").fillna(1.0)
+
+        # Build metadata using zip (more efficient than iterrows for simple extraction)
+        for query_id, reads, length, copy_number in zip(query_ids, reads_col, lengths, copy_numbers):
             entry = {
                 "reads": reads,
-                "length": int(row.get("length", 0)),
-                "copy_number": float(row.get("copy_number", 1.0)),
+                "length": int(length),
+                "copy_number": float(copy_number),
             }
             if query_id and query_id not in metadata:
                 metadata[query_id] = entry
             if reads and reads not in metadata:
                 metadata[reads] = entry
+
         return metadata
 
     def detect_circles_from_last(
@@ -1069,7 +1094,7 @@ class CeccBuild:
         self.logger.info(f"Reading: {input_csv}")
         try:
             df = pd.read_csv(input_csv)
-        except Exception:
+        except (pd.errors.ParserError, pd.errors.EmptyDataError, ValueError):
             df = pd.read_csv(input_csv, sep="\t")
 
         if df.empty:
@@ -1096,10 +1121,7 @@ class CeccBuild:
         # Get metadata
         metadata = self._get_metadata_from_csv(df)
 
-        # Create temp directory for LAST files
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir = Path(tmpdir)
-
+        def _run_last_in_tmp(tmpdir: Path) -> pd.DataFrame:
             # Extract sequences
             query_fasta = tmpdir / "query.fasta"
             extracted = self._extract_sequences(read_ids, fasta_file, query_fasta)
@@ -1107,10 +1129,7 @@ class CeccBuild:
 
             if extracted == 0:
                 self.logger.warning("No sequences extracted")
-                result_df = pd.DataFrame()
-                output_csv.parent.mkdir(parents=True, exist_ok=True)
-                result_df.to_csv(output_csv, index=False)
-                return result_df
+                return pd.DataFrame()
 
             # Build LAST database
             db_prefix = tmpdir / "lastdb"
@@ -1125,7 +1144,27 @@ class CeccBuild:
             self.logger.info(f"Parsed {len(alignments)} query alignments")
 
             # Detect circles
-            result_df = self.detect_circles_from_last(alignments, metadata)
+            return self.detect_circles_from_last(alignments, metadata)
+
+        result_df = pd.DataFrame()
+        tmp_root = self.tmp_dir
+        if tmp_root is None and self.keep_tmp:
+            tmp_root = output_csv.parent / "cecc_last_tmp"
+
+        if tmp_root is not None:
+            tmp_root = Path(tmp_root)
+            tmp_root.mkdir(parents=True, exist_ok=True)
+            tmpdir = Path(tempfile.mkdtemp(prefix="cecc_last_", dir=tmp_root))
+            try:
+                result_df = _run_last_in_tmp(tmpdir)
+            finally:
+                if self.keep_tmp:
+                    self.logger.info(f"Keeping LAST temp dir: {tmpdir}")
+                else:
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+        else:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                result_df = _run_last_in_tmp(Path(tmpdir))
 
         # Save output
         output_csv.parent.mkdir(parents=True, exist_ok=True)

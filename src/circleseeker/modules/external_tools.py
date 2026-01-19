@@ -88,12 +88,15 @@ class TideHunterModule(ExternalToolModule):
             result.add_output("ecc_candidates", output_file)
 
             # Count lines in output (rough estimate of candidates)
+            num_candidates = 0
             if output_file.exists():
                 with open(output_file, "r") as f:
                     num_candidates = sum(
                         1 for line in f if line.strip() and not line.startswith("#")
                     )
-                result.add_metric("num_candidates", num_candidates)
+            else:
+                self.logger.warning(f"TideHunter output file not found: {output_file}")
+            result.add_metric("num_candidates", num_candidates)
 
             self.logger.info(f"TideHunter found {num_candidates} tandem repeat candidates")
 
@@ -265,28 +268,50 @@ class Minimap2Module(ExternalToolModule):
             ]
 
             # Use Popen to safely pipe minimap2 output to samtools
-            minimap2_proc = subprocess.Popen(minimap2_cmd, stdout=subprocess.PIPE)
-            samtools_proc = subprocess.Popen(
-                samtools_cmd, stdin=minimap2_proc.stdout,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE
-            )
-            # Allow minimap2 to receive SIGPIPE if samtools exits early
-            if minimap2_proc.stdout is not None:
-                minimap2_proc.stdout.close()
-
-            _, samtools_stderr = samtools_proc.communicate()
-            minimap2_proc.wait()
-
-            if minimap2_proc.returncode != 0 or samtools_proc.returncode != 0:
-                raise subprocess.CalledProcessError(
-                    samtools_proc.returncode or minimap2_proc.returncode,
-                    minimap2_cmd + ["|"] + samtools_cmd,
-                    stderr=samtools_stderr.decode() if samtools_stderr else ""
+            minimap2_proc = None
+            samtools_proc = None
+            try:
+                minimap2_proc = subprocess.Popen(minimap2_cmd, stdout=subprocess.PIPE)
+                samtools_proc = subprocess.Popen(
+                    samtools_cmd, stdin=minimap2_proc.stdout,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE
                 )
+                # Allow minimap2 to receive SIGPIPE if samtools exits early
+                if minimap2_proc.stdout is not None:
+                    minimap2_proc.stdout.close()
 
-            # Index the BAM file
+                _, samtools_stderr = samtools_proc.communicate()
+                minimap2_proc.wait()
+
+                if minimap2_proc.returncode != 0 or samtools_proc.returncode != 0:
+                    raise subprocess.CalledProcessError(
+                        samtools_proc.returncode or minimap2_proc.returncode,
+                        minimap2_cmd + ["|"] + samtools_cmd,
+                        stderr=samtools_stderr.decode() if samtools_stderr else ""
+                    )
+            finally:
+                # Ensure processes are properly cleaned up with graceful termination
+                for proc in [minimap2_proc, samtools_proc]:
+                    if proc is None:
+                        continue
+                    try:
+                        # First try graceful termination
+                        proc.terminate()
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        # Force kill if graceful termination fails
+                        proc.kill()
+                        proc.wait(timeout=2)
+                    except OSError:
+                        pass  # Process already terminated
+
+            # Index the BAM file with timeout protection
             self.logger.info("Indexing BAM file...")
-            subprocess.run(["samtools", "index", str(output_bam)], check=True)
+            subprocess.run(
+                ["samtools", "index", str(output_bam)],
+                check=True,
+                timeout=600,  # 10-minute timeout for indexing
+            )
 
             result.success = True
             result.add_output("bam_file", output_bam)

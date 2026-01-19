@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -31,13 +32,19 @@ def _get_xecc_source_read_names(xecc_fasta: Path, logger: logging.Logger) -> set
             for line in f:
                 if line.startswith(">"):
                     # Parse ID: >readName|repN|consLen|copyNum|circular or similar
-                    seq_id = line[1:].split()[0]  # Remove > and take first part
+                    header_parts = line[1:].split()
+                    if not header_parts:
+                        continue  # Skip malformed headers
+                    seq_id = header_parts[0]
                     # Original read name is the first part before |
                     original_read_name = seq_id.split("|")[0]
                     if original_read_name:
                         read_names.add(original_read_name)
-    except Exception as e:
-        logger.warning(f"Failed to parse XeccDNA FASTA: {e}")
+    except OSError as e:
+        logger.warning(f"Failed to parse XeccDNA FASTA (I/O error): {e}")
+        return set()
+    except UnicodeDecodeError as e:
+        logger.warning(f"Failed to parse XeccDNA FASTA (encoding error): {e}")
         return set()
 
     logger.info(f"Found {len(read_names)} unique source reads from XeccDNA")
@@ -67,6 +74,11 @@ def _append_reads_from_fasta(
 
     appended_count = 0
     try:
+        if target_fasta.exists() and target_fasta.stat().st_size > 0:
+            with open(target_fasta, "rb+") as out_f:
+                out_f.seek(-1, os.SEEK_END)
+                if out_f.read(1) != b"\n":
+                    out_f.write(b"\n")
         with open(target_fasta, "ab") as out_f:
             with open(source_fasta, "rb") as in_f:
                 current_header: Optional[bytes] = None
@@ -87,7 +99,11 @@ def _append_reads_from_fasta(
                         current_lines = []
 
                         # Check if this read should be included
-                        header_str = line[1:].decode("utf-8", errors="replace").split()[0]
+                        header_parts = line[1:].decode("utf-8", errors="replace").split()
+                        if not header_parts:
+                            write_current = False
+                            continue
+                        header_str = header_parts[0]
                         write_current = header_str in read_names
                     else:
                         current_lines.append(line)
@@ -99,8 +115,11 @@ def _append_reads_from_fasta(
                         out_f.write(seq_line)
                     appended_count += 1
 
-    except Exception as e:
-        logger.warning(f"Failed to append XeccDNA source reads: {e}")
+    except OSError as e:
+        logger.warning(f"Failed to append XeccDNA source reads (I/O error): {e}")
+        return 0
+    except UnicodeDecodeError as e:
+        logger.warning(f"Failed to append XeccDNA source reads (encoding error): {e}")
         return 0
 
     if appended_count > 0:
@@ -112,7 +131,7 @@ def read_filter(pipeline: Pipeline) -> None:
     """Step 9: Filter sequences using read_filter module (Sieve)."""
     from circleseeker.modules.read_filter import Sieve
 
-    carousel_csv = pipeline.config.output_dir / "tandem_to_ring.csv"
+    tandem_to_ring_csv = pipeline.config.output_dir / "tandem_to_ring.csv"
 
     original_fasta = pipeline.config.input_file
     if original_fasta is None:
@@ -125,7 +144,7 @@ def read_filter(pipeline: Pipeline) -> None:
 
     sieve = Sieve(pipeline.logger.getChild("read_filter"))
 
-    if not carousel_csv.exists():
+    if not tandem_to_ring_csv.exists():
         pipeline.logger.warning(
             "TandemToRing CSV not found; skipping CtcR filtering and retaining all reads"
         )
@@ -135,7 +154,7 @@ def read_filter(pipeline: Pipeline) -> None:
         )
     else:
         stats = sieve.run_sieve(
-            carousel_csv=carousel_csv,
+            tandem_to_ring_csv=tandem_to_ring_csv,
             input_fastas=[original_fasta],
             output_fasta=output_fasta,
             ctcr_classes=None,
@@ -220,7 +239,7 @@ def minimap2(pipeline: Pipeline, *, force_alignment: bool = False) -> None:
         pipeline.logger.warning(
             "Inference input FASTA is empty; skipping minimap2 alignment and inference steps"
         )
-        pipeline.state.results[ResultKeys.INFERENCE_INPUT_EMPTY] = True
+        pipeline._set_result(ResultKeys.INFERENCE_INPUT_EMPTY, True)
         return
 
     reference_mmi = pipeline._ensure_reference_mmi()
@@ -259,23 +278,23 @@ def minimap2(pipeline: Pipeline, *, force_alignment: bool = False) -> None:
 
 def ecc_inference(pipeline: Pipeline) -> None:
     """Step 11: Circular DNA detection - Cresil preferred, Cyrcular fallback."""
-    pipeline.state.results.pop(ResultKeys.INFERENCE_FAILED, None)
-    pipeline.state.results.pop(ResultKeys.INFERENCE_ERROR, None)
-    pipeline.state.results.pop(ResultKeys.INFERENCE_ERROR_FILE, None)
+    pipeline._del_result(ResultKeys.INFERENCE_FAILED)
+    pipeline._del_result(ResultKeys.INFERENCE_ERROR)
+    pipeline._del_result(ResultKeys.INFERENCE_ERROR_FILE)
 
-    if pipeline.state.results.get(ResultKeys.INFERENCE_INPUT_EMPTY):
+    if pipeline._get_result(ResultKeys.INFERENCE_INPUT_EMPTY):
         pipeline.logger.warning("Inference input FASTA empty; skipping eccDNA inference")
-        pipeline.state.results[ResultKeys.CYRCULAR_RESULT_COUNT] = 0
-        pipeline.state.results[ResultKeys.CYRCULAR_OVERVIEW] = None
+        pipeline._set_result(ResultKeys.CYRCULAR_RESULT_COUNT, 0)
+        pipeline._set_result(ResultKeys.CYRCULAR_OVERVIEW, None)
         return
 
-    all_filtered = pipeline.state.results.get(ResultKeys.ALL_FILTERED_FASTA)
+    all_filtered = pipeline._get_result(ResultKeys.ALL_FILTERED_FASTA)
     if all_filtered:
         all_filtered_path = Path(all_filtered)
         if all_filtered_path.exists() and all_filtered_path.stat().st_size == 0:
             pipeline.logger.warning("Inference input FASTA empty; skipping eccDNA inference")
-            pipeline.state.results[ResultKeys.CYRCULAR_RESULT_COUNT] = 0
-            pipeline.state.results[ResultKeys.CYRCULAR_OVERVIEW] = None
+            pipeline._set_result(ResultKeys.CYRCULAR_RESULT_COUNT, 0)
+            pipeline._set_result(ResultKeys.CYRCULAR_OVERVIEW, None)
             return
 
     def _mark_inference_failed(tool_name: str, exc: Exception) -> None:
@@ -284,15 +303,15 @@ def ecc_inference(pipeline: Pipeline) -> None:
             tool_name,
             exc,
         )
-        pipeline.state.results[ResultKeys.INFERENCE_FAILED] = True
-        pipeline.state.results[ResultKeys.INFERENCE_ERROR] = str(exc)
-        pipeline.state.results[ResultKeys.CYRCULAR_RESULT_COUNT] = 0
-        pipeline.state.results[ResultKeys.CYRCULAR_OVERVIEW] = None
-        pipeline.state.results[ResultKeys.INFERRED_SIMPLE_TSV] = None
-        pipeline.state.results[ResultKeys.INFERRED_CHIMERIC_TSV] = None
-        pipeline.state.results[ResultKeys.INFERRED_SIMPLE_FASTA] = None
-        pipeline.state.results[ResultKeys.INFERRED_CHIMERIC_FASTA] = None
-        pipeline.state.results[ResultKeys.INFERRED_DIR] = None
+        pipeline._set_result(ResultKeys.INFERENCE_FAILED, True)
+        pipeline._set_result(ResultKeys.INFERENCE_ERROR, str(exc))
+        pipeline._set_result(ResultKeys.CYRCULAR_RESULT_COUNT, 0)
+        pipeline._set_result(ResultKeys.CYRCULAR_OVERVIEW, None)
+        pipeline._set_result(ResultKeys.INFERRED_SIMPLE_TSV, None)
+        pipeline._set_result(ResultKeys.INFERRED_CHIMERIC_TSV, None)
+        pipeline._set_result(ResultKeys.INFERRED_SIMPLE_FASTA, None)
+        pipeline._set_result(ResultKeys.INFERRED_CHIMERIC_FASTA, None)
+        pipeline._set_result(ResultKeys.INFERRED_DIR, None)
 
         try:
             pipeline.config.output_dir.mkdir(parents=True, exist_ok=True)
@@ -311,22 +330,31 @@ def ecc_inference(pipeline: Pipeline) -> None:
                 + "\n",
                 encoding="utf-8",
             )
-            pipeline.state.results[ResultKeys.INFERENCE_ERROR_FILE] = pipeline._serialize_path_for_state(
-                marker
+            pipeline._set_result(
+                ResultKeys.INFERENCE_ERROR_FILE,
+                pipeline._serialize_path_for_state(marker),
             )
         except Exception as write_exc:  # pragma: no cover
             pipeline.logger.debug("Failed to write inference failure marker: %s", write_exc)
 
-    def _run_cyrcular_fallback(cresil_exc: Exception) -> None:
+    def _run_cyrcular_fallback(cresil_exc: Exception) -> bool:
         pipeline.logger.warning(
             "Cresil failed (%s); attempting Cyrcular fallback", cresil_exc
         )
-        bam_path = pipeline.state.results.get(ResultKeys.MINIMAP2_BAM)
+        bam_path = pipeline._get_result(ResultKeys.MINIMAP2_BAM)
         if not (bam_path and Path(bam_path).exists()):
             pipeline.logger.info("Preparing minimap2 alignment for Cyrcular fallback")
             minimap2(pipeline, force_alignment=True)
+            bam_path = pipeline._get_result(ResultKeys.MINIMAP2_BAM)
+        if not (bam_path and Path(bam_path).exists()):
+            pipeline.logger.warning(
+                "Cyrcular fallback skipped: minimap2 BAM not available"
+            )
+            return False
         pipeline._run_cyrcular_inference()
+        return True
 
+    tool = "unknown"
     try:
         tool = pipeline._select_inference_tool()
         if tool == "cresil":
@@ -334,12 +362,13 @@ def ecc_inference(pipeline: Pipeline) -> None:
             try:
                 pipeline._run_cresil_inference()
             except Exception as exc:
-                _run_cyrcular_fallback(exc)
+                if not _run_cyrcular_fallback(exc):
+                    _mark_inference_failed(tool_name="cresil", exc=exc)
         else:
             pipeline.logger.info("Using Cyrcular for circular DNA detection (fallback)")
             pipeline._run_cyrcular_inference()
     except Exception as exc:
-        _mark_inference_failed(tool_name=locals().get("tool", "unknown"), exc=exc)
+        _mark_inference_failed(tool_name=tool, exc=exc)
 
 
 def run_cresil_inference(pipeline: Pipeline) -> None:
@@ -358,8 +387,8 @@ def run_cresil_inference(pipeline: Pipeline) -> None:
                 "No filtered FASTA found; skipping Cresil inference. "
                 "Inference requires filtered reads from earlier pipeline steps."
             )
-            pipeline.state.results[ResultKeys.CYRCULAR_RESULT_COUNT] = 0
-            pipeline.state.results[ResultKeys.CYRCULAR_OVERVIEW] = None
+            pipeline._set_result(ResultKeys.CYRCULAR_RESULT_COUNT, 0)
+            pipeline._set_result(ResultKeys.CYRCULAR_OVERVIEW, None)
             return
 
     reference_mmi_str = pipeline._get_result(ResultKeys.REFERENCE_MMI)
@@ -394,17 +423,18 @@ def run_cresil_inference(pipeline: Pipeline) -> None:
     write_cyrcular_compatible_tsv(eccDNA_final, overview_tsv)
 
     if overview_tsv.exists():
-        pipeline.state.results[ResultKeys.CYRCULAR_OVERVIEW] = pipeline._serialize_path_for_state(
-            overview_tsv
+        pipeline._set_result(
+            ResultKeys.CYRCULAR_OVERVIEW,
+            pipeline._serialize_path_for_state(overview_tsv),
         )
         import pandas as pd
 
         df = pd.read_csv(overview_tsv, sep="\t")
-        pipeline.state.results[ResultKeys.CYRCULAR_RESULT_COUNT] = len(df)
+        pipeline._set_result(ResultKeys.CYRCULAR_RESULT_COUNT, len(df))
         pipeline.logger.info(f"Cresil detected {len(df)} circular DNA candidates")
     else:
         pipeline.logger.warning("Cresil output conversion failed")
-        pipeline.state.results[ResultKeys.CYRCULAR_RESULT_COUNT] = 0
+        pipeline._set_result(ResultKeys.CYRCULAR_RESULT_COUNT, 0)
 
 
 def run_cyrcular_inference(pipeline: Pipeline) -> None:
@@ -412,7 +442,7 @@ def run_cyrcular_inference(pipeline: Pipeline) -> None:
     from circleseeker.modules.cyrcular_calling import PipelineConfig as CCConfig
     from circleseeker.modules.cyrcular_calling import CyrcularCallingPipeline
 
-    bam_file = pipeline.state.results.get(ResultKeys.MINIMAP2_BAM)
+    bam_file = pipeline._get_result(ResultKeys.MINIMAP2_BAM)
     if not bam_file or not Path(bam_file).exists():
         pipeline.logger.warning("No BAM file from minimap2, skipping Cyrcular-Calling step")
         return
@@ -434,14 +464,15 @@ def run_cyrcular_inference(pipeline: Pipeline) -> None:
 
     overview = cyrcular_pipeline.file_paths.get("overview_table")
     if overview and overview.exists():
-        pipeline.state.results[ResultKeys.CYRCULAR_OVERVIEW] = pipeline._serialize_path_for_state(
-            overview
+        pipeline._set_result(
+            ResultKeys.CYRCULAR_OVERVIEW,
+            pipeline._serialize_path_for_state(overview),
         )
     else:
         pipeline.logger.warning(
             "Cyrcular overview table not found; inferred eccDNA curation may be skipped"
         )
-    pipeline.state.results[ResultKeys.CYRCULAR_RESULT_COUNT] = len(results) if results else 0
+    pipeline._set_result(ResultKeys.CYRCULAR_RESULT_COUNT, len(results) if results else 0)
 
 
 def curate_inferred_ecc(pipeline: Pipeline) -> list[str] | None:
@@ -452,18 +483,18 @@ def curate_inferred_ecc(pipeline: Pipeline) -> list[str] | None:
         write_curated_tables_with_fasta,
     )
 
-    if pipeline.state.results.get(ResultKeys.INFERENCE_INPUT_EMPTY) or pipeline.state.results.get(
+    if pipeline._get_result(ResultKeys.INFERENCE_INPUT_EMPTY) or pipeline._get_result(
         ResultKeys.INFERENCE_FAILED
     ):
         pipeline.logger.warning("Inference was skipped/failed; skipping inferred eccDNA curation step")
-        pipeline.state.results[ResultKeys.INFERRED_SIMPLE_TSV] = None
-        pipeline.state.results[ResultKeys.INFERRED_CHIMERIC_TSV] = None
-        pipeline.state.results[ResultKeys.INFERRED_SIMPLE_FASTA] = None
-        pipeline.state.results[ResultKeys.INFERRED_CHIMERIC_FASTA] = None
-        pipeline.state.results[ResultKeys.INFERRED_DIR] = None
+        pipeline._set_result(ResultKeys.INFERRED_SIMPLE_TSV, None)
+        pipeline._set_result(ResultKeys.INFERRED_CHIMERIC_TSV, None)
+        pipeline._set_result(ResultKeys.INFERRED_SIMPLE_FASTA, None)
+        pipeline._set_result(ResultKeys.INFERRED_CHIMERIC_FASTA, None)
+        pipeline._set_result(ResultKeys.INFERRED_DIR, None)
         return None
 
-    overview_path_str = pipeline.state.results.get(ResultKeys.CYRCULAR_OVERVIEW)
+    overview_path_str = pipeline._get_result(ResultKeys.CYRCULAR_OVERVIEW)
 
     overview_path_obj = pipeline._resolve_stored_path(
         overview_path_str,
@@ -471,15 +502,16 @@ def curate_inferred_ecc(pipeline: Pipeline) -> list[str] | None:
     )
     if not overview_path_obj:
         pipeline.logger.warning("Cyrcular overview table missing; skipping inferred eccDNA curation")
-        pipeline.state.results[ResultKeys.INFERRED_SIMPLE_TSV] = None
-        pipeline.state.results[ResultKeys.INFERRED_CHIMERIC_TSV] = None
-        pipeline.state.results[ResultKeys.INFERRED_SIMPLE_FASTA] = None
-        pipeline.state.results[ResultKeys.INFERRED_CHIMERIC_FASTA] = None
-        pipeline.state.results[ResultKeys.INFERRED_DIR] = None
+        pipeline._set_result(ResultKeys.INFERRED_SIMPLE_TSV, None)
+        pipeline._set_result(ResultKeys.INFERRED_CHIMERIC_TSV, None)
+        pipeline._set_result(ResultKeys.INFERRED_SIMPLE_FASTA, None)
+        pipeline._set_result(ResultKeys.INFERRED_CHIMERIC_FASTA, None)
+        pipeline._set_result(ResultKeys.INFERRED_DIR, None)
         return None
 
-    pipeline.state.results[ResultKeys.CYRCULAR_OVERVIEW] = pipeline._serialize_path_for_state(
-        overview_path_obj
+    pipeline._set_result(
+        ResultKeys.CYRCULAR_OVERVIEW,
+        pipeline._serialize_path_for_state(overview_path_obj),
     )
 
     simple_df, chimeric_df = curate_ecc_tables(overview_path_obj)
@@ -520,29 +552,33 @@ def curate_inferred_ecc(pipeline: Pipeline) -> list[str] | None:
 
     written: list[str] = []
     if simple_csv_path and simple_csv_path.exists() and simple_csv_path.stat().st_size > 0:
-        pipeline.state.results[ResultKeys.INFERRED_SIMPLE_TSV] = pipeline._serialize_path_for_state(
-            simple_csv_path
+        pipeline._set_result(
+            ResultKeys.INFERRED_SIMPLE_TSV,
+            pipeline._serialize_path_for_state(simple_csv_path),
         )
         written.append(str(simple_csv_path))
     else:
         pipeline.logger.info("No inferred simple eccDNA records; simple TSV not created")
 
     if chimeric_csv_path and chimeric_csv_path.exists() and chimeric_csv_path.stat().st_size > 0:
-        pipeline.state.results[ResultKeys.INFERRED_CHIMERIC_TSV] = pipeline._serialize_path_for_state(
-            chimeric_csv_path
+        pipeline._set_result(
+            ResultKeys.INFERRED_CHIMERIC_TSV,
+            pipeline._serialize_path_for_state(chimeric_csv_path),
         )
         written.append(str(chimeric_csv_path))
     else:
         pipeline.logger.info("No inferred chimeric eccDNA records; chimeric TSV not created")
 
     if simple_fasta_path and simple_fasta_path.exists() and simple_fasta_path.stat().st_size > 0:
-        pipeline.state.results[ResultKeys.INFERRED_SIMPLE_FASTA] = pipeline._serialize_path_for_state(
-            simple_fasta_path
+        pipeline._set_result(
+            ResultKeys.INFERRED_SIMPLE_FASTA,
+            pipeline._serialize_path_for_state(simple_fasta_path),
         )
 
     if chimeric_fasta_path and chimeric_fasta_path.exists() and chimeric_fasta_path.stat().st_size > 0:
-        pipeline.state.results[ResultKeys.INFERRED_CHIMERIC_FASTA] = pipeline._serialize_path_for_state(
-            chimeric_fasta_path
+        pipeline._set_result(
+            ResultKeys.INFERRED_CHIMERIC_FASTA,
+            pipeline._serialize_path_for_state(chimeric_fasta_path),
         )
 
     inferred_dir_path = None
@@ -551,8 +587,9 @@ def curate_inferred_ecc(pipeline: Pipeline) -> list[str] | None:
     elif chimeric_csv_path:
         inferred_dir_path = chimeric_csv_path.parent
     if inferred_dir_path and inferred_dir_path.exists():
-        pipeline.state.results[ResultKeys.INFERRED_DIR] = pipeline._serialize_path_for_state(
-            inferred_dir_path
+        pipeline._set_result(
+            ResultKeys.INFERRED_DIR,
+            pipeline._serialize_path_for_state(inferred_dir_path),
         )
 
     if not simple_df.empty and not (

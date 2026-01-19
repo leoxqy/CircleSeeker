@@ -1,6 +1,6 @@
-# CircleSeeker Pipeline 模块说明（v0.10.3）
+# CircleSeeker Pipeline 模块说明（v1.0.0）
 
-本文件概述 CircleSeeker 0.10.3 的 16 个管线步骤、输入输出关系以及关键实现要点，帮助使用者理解整体流程与模块职责。
+本文件概述 CircleSeeker 1.0.0 的 16 个管线步骤、输入输出关系以及关键实现要点，帮助使用者理解整体流程与模块职责。
 
 ---
 
@@ -33,13 +33,13 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 | 1 | check_dependencies | 内部 | 配置/环境 | 依赖检查报告（失败则中止） |
 | 2 | tidehunter | 外部 | HiFi reads FASTA | 重复片段列表、共识序列 |
 | 3 | tandem_to_ring | 内部 | TideHunter 输出 | 环状候选 FASTA/CSV |
-| 4 | run_alignment | 外部（minimap2） | 候选 FASTA、参考基因组 | alignment TSV |
+| 4 | run_alignment | 外部（minimap2/LAST） | 候选 FASTA、参考基因组 | alignment TSV |
 | 5 | um_classify | 内部 | alignment TSV | `um_classify.uecc.csv` / `mecc.csv` |
 | 6 | cecc_build | 内部 | 未分类对齐记录 | `cecc_build.csv` |
 | 7 | umc_process | 内部 | U/M/C CSV | 标准化表格、FASTA |
 | 8 | cd_hit | 外部（CD-HIT） | FASTA | 去冗余 FASTA |
 | 9 | ecc_dedup | 内部 | 各类 CSV/FASTA | 去重后的坐标与序列 |
-|10 | read_filter | 内部 | 去重结果、reads | 确认的 eccDNA reads FASTA |
+|10 | read_filter | 内部 | 原始 reads、tandem_to_ring.csv | 推断输入 FASTA |
 |11 | minimap2 | 外部（minimap2） | 参考基因组 | `.mmi` 索引（必要时自动生成） |
 |12 | ecc_inference | 外部 + 内部 | Cresil/Cyrcular 所需文件 | 推断结果 TSV/FASTA |
 |13 | curate_inferred_ecc | 内部 | 推断结果 | 精炼后的表格与 FASTA（内部调用 `iecc_curator`） |
@@ -63,18 +63,18 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
    将重复序列转换为候选环状 DNA。通过图结构分析 overlaps，识别简单读段、复杂读段等类型，输出 FASTA 与候选元数据。
 
 4. **run_alignment**
-   使用 minimap2 将候选序列比对回参考基因组，获得 identity 与基因组坐标（输出为 BLAST outfmt 6-like 的 TSV，末尾额外追加 `mapq` 字段供下游解析）。
+   使用 minimap2（默认）或 LAST（`tools.alignment.aligner`）将候选序列比对回参考基因组，输出 BLAST outfmt 6-like 的 TSV，末尾追加 `mapq` 字段供下游解析。minimap2 支持长度补偿的 identity 门控（`min_identity` / `identity_decay_per_10kb` / `min_identity_floor`）。
 
 5. **um_classify**
-   对对齐结果进行解析，基于“环坐标覆盖度 + locus 聚类”的参数化模型划分 UeccDNA / MeccDNA；可选通过 `tools.um_classify.mapq_u_min` 对 Uecc 判定做 MAPQ gate；并输出标准化的 `um_classify.all.csv` 供后续 Cecc/歧义分析使用。判别模型详见 `docs/UMC_Classification_Model.md`。
+   对对齐结果进行解析，基于“环坐标覆盖度 + locus 聚类”的模型划分 UeccDNA / MeccDNA；可选通过 `mapq_u_min` 与次级比对 veto 提升 Uecc 可靠性。输出 `um_classify.uecc.csv` / `um_classify.mecc.csv` / `um_classify.unclassified.csv`。判别模型详见 `docs/UMC_Classification_Model.md`。
 
 6. **cecc_build**
-   基于 `um_classify.all.csv`（或回退到 `um_classify.unclassified.csv`）进行多段链构建，输出 `cecc_build.csv`。同时拦截并单独输出 `ambiguous_uc.csv` / `ambiguous_mc.csv`（不进入后续主流程），用于后续研究与参数调优。
+   基于 `um_classify.unclassified.csv` 进行 Cecc 检测。优先使用 LAST 对双倍序列进行重复模式检测；若 LAST 或关键输入缺失则回退图方法。输出 `cecc_build.csv`。
 
 ### 3.2 处理阶段（CtcReads-Caller，步骤 7-10）
 
 7. **umc_process**
-   统一整理 U/M/C 三类结果，生成标准化 CSV 与 FASTA，并统计对应数量。
+   统一整理 U/M/C 三类结果，生成标准化 CSV 与 FASTA；若 `enable_xecc=true` 会额外导出 XeccDNA FASTA。
 
 8. **cd_hit**
    对 FASTA 进行 99% identity 去冗余，减少重复候选。
@@ -83,28 +83,25 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
    整理并去重坐标信息，生成规范化 BED/CSV，确保重复记录合并到统一 ID。
 
 10. **read_filter**
-    依据过滤规则筛选确认的 eccDNA reads，输出与 downstream 兼容的 FASTA。
+    使用 Sieve 根据 `tandem_to_ring.csv` 过滤 CtcR reads，生成推断输入 FASTA；若 CSV 缺失则保留全部 reads。
 
 ### 3.3 推断阶段（SplitReads-Caller，步骤 11-13）
 
 11. **minimap2**
-    检查并生成参考基因组 `.mmi` 索引，用于 Cresil 或 Cyrcular。若索引缺失会自动运行 `minimap2 -d`。
+    检查并生成参考基因组 `.mmi` 索引，用于推断阶段。若选择 Cresil，则通常跳过 BAM 比对，仅保留索引。
 
 12. **ecc_inference**
     - 优先调用 Cresil：对 reads 进行 trim/identify，若缺失 `.fai` 会尝试执行 `samtools faidx` 自动补建。
-    - 若 Cresil 不可用且检测到 Cyrcular，则使用后者作为备选。
-    输出推断的简单/嵌合 eccDNA。
+    - 若 Cresil 不可用或执行失败，则尝试 Cyrcular 作为备选。
+    - 推断失败会写入 `<prefix>_inference_failed.txt` 供排查。
 
 13. **curate_inferred_ecc**
-    对推断结果进行清洗、格式化，生成 CSV/FASTA，并与既有标准列名称对齐（内部调用 `iecc_curator` 模块）。
+    对推断结果进行清洗、格式化，生成简单/嵌合 CSV；若参考基因组可用且 pysam 可用，会额外生成 FASTA（内部调用 `iecc_curator` 模块）。
 
 ### 3.4 整合阶段（Integration，步骤 14-16）
 
 14. **ecc_unify**
-    汇总确认与推断结果，检测并标记冗余的嵌合体 eccDNA。v0.9.4 引入了基于片段重叠的检测算法：
-    - 使用 99% 互惠重叠阈值和 +/-10bp 坐标容差
-    - 逐片段比较嵌合体结构，避免因微小坐标差异导致的假阴性
-    - 产出统一的 `*_unified.csv` 与重叠统计文件
+    汇总确认与推断结果，基于片段互惠重叠检测冗余嵌合体（默认阈值 0.99、坐标容差 10bp），并产出 `*_unified.csv` 与重叠统计文件。
 
 15. **ecc_summary**
     - 合并所有 FASTA，生成 `<prefix>_all.fasta`；
@@ -112,13 +109,13 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
     - 缺失的统计文件会自动填充默认值以保证后续步骤可运行。
 
 16. **ecc_packager**
-    按固定结构复制并重命名文件，形成最终产物目录（Confirmed_U/M/C、Inferred_eccDNA、报告等），同时清理临时文件（除非启用 `--keep-tmp`）。
+    按固定结构复制并重命名文件，形成最终产物目录（Confirmed_U/M/C、Inferred_eccDNA、报告等），同时清理临时文件（除非启用 `--keep-tmp`）。XeccDNA 不再拷贝到最终目录，源 reads 已并入推断输入。
 
 ---
 
 ## 4. 运行时注意事项
 
-- **外部依赖** 请确认 `tidehunter`, `cd-hit-est`, `minimap2`, `samtools`, `cresil`（或 `cyrcular`）均在 `PATH` 内。启动时的预检机制会在管线执行前验证所有必需工具是否可用，并给出清晰的安装提示。
+- **外部依赖** 请确认 `tidehunter`, `cd-hit-est`, `minimap2`, `samtools`, `cresil`（或 `cyrcular`）均在 `PATH` 内。若启用 LAST（`tools.alignment.aligner=last` 或 CeccBuild v4），需额外安装 LAST（`lastdb`/`lastal`）。
 - **检查点机制** 每个步骤开始前都会写入 `<prefix>.checkpoint`，一旦失败可通过 `--resume` 从最近步骤继续；`--force` 可清除状态后重跑。
 - **配置继承** 所有参数均由 `circleseeker.config.Config` 驱动，可通过 YAML 或 CLI 覆写。文档中的默认值等同于仓库内置配置。
 - **调试工具** `circleseeker --debug --show-steps` 可查看当前步骤状态；`show-checkpoint` 子命令能列出历史执行记录。

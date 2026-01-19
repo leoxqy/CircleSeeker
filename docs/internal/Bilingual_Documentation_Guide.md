@@ -1,5 +1,7 @@
 # CircleSeeker 双语文档维护指南
 
+> 注意：本文档为内部流程参考，创建于 v0.10.0 时期；当前版本为 v1.0.0。
+
 本指南定义 CircleSeeker 项目的双语文档维护策略和流程。
 
 ---
@@ -12,16 +14,16 @@
 |----------|----------|------|
 | `CLI_Reference.md` | `CLI_Reference_en.md` | ✅ 同步 |
 | `Pipeline_Modules.md` | `Pipeline_Modules_en.md` | ✅ 同步 |
-| `Simulation_Validation.md` | `Simulation_Validation_en.md` | ✅ 同步 |
 | `Configuration_Reference.md` | `Configuration_Reference_en.md` | ✅ 同步 |
 | `Output_Format_Reference.md` | `Output_Format_Reference_en.md` | ✅ 同步 |
+| `Validation_Methodology.md` | `Validation_Methodology_en.md` | ✅ 同步 |
 
 ### 仅单语言文档
 
 | 文档 | 语言 | 说明 |
 |------|------|------|
 | `UMC_Classification_Model.md` | 中文 | 内部技术文档，暂不需翻译 |
-| `eccDNA_Evolutionary_Dynamics_Hypothesis.md` | 中文 | 研究假说文档，暂不需翻译 |
+| `Validation_Report.md` | 中文 | 历史验证报告快照 |
 | `Code_Review_Report_v0.10.0.md` | 中文 | 版本审阅报告，内部使用 |
 | `Implementation_Plan.md` | 中文 | 实施计划，内部使用 |
 
@@ -42,7 +44,8 @@
 |------|----------|------|
 | **用户指南** | ✅ 是 | CLI 参考、配置参考、输出格式 |
 | **技术规范** | ✅ 是 | 管道模块说明 |
-| **验证报告** | ✅ 是 | 仿真验证报告 |
+| **验证方法** | ✅ 是 | Validation_Methodology |
+| **验证报告** | ⚪ 可选 | Validation_Report |
 | **内部文档** | ❌ 否 | 审阅报告、实施计划 |
 | **研究文档** | ⚪ 可选 | 分类模型、假说文档 |
 

@@ -67,7 +67,7 @@ def test_sieve_initialization():
     assert sieve.stats.total_reads == 0
 
 
-def test_load_carousel_classification(tmp_path):
+def test_load_tandem_to_ring_classification(tmp_path):
     """Test loading classification from TandemToRing CSV."""
     # Create a classification CSV
     csv_file = tmp_path / "tandem_to_ring.csv"
@@ -80,7 +80,7 @@ def test_load_carousel_classification(tmp_path):
     ]))
 
     sieve = Sieve()
-    sieve.load_carousel_classification(csv_file)
+    sieve.load_tandem_to_ring_classification(csv_file)
 
     # Should have loaded 2 reads to filter (CtcR variants)
     assert len(sieve.reads_to_filter) == 2
@@ -154,8 +154,8 @@ def test_filter_fasta_files_merges_inputs(tmp_path):
 def test_run_sieve_complete_pipeline(tmp_path):
     """Test the complete sieve pipeline with classification and filtering."""
     # Create classification CSV
-    carousel_csv = tmp_path / "tandem_to_ring.csv"
-    carousel_csv.write_text("\n".join([
+    tandem_to_ring_csv = tmp_path / "tandem_to_ring.csv"
+    tandem_to_ring_csv.write_text("\n".join([
         "readName,readClass",
         "keep_read,Normal",
         "filter_read,CtcR-perfect",
@@ -174,7 +174,7 @@ def test_run_sieve_complete_pipeline(tmp_path):
 
     sieve = Sieve()
     stats = sieve.run_sieve(
-        carousel_csv=carousel_csv,
+        tandem_to_ring_csv=tandem_to_ring_csv,
         input_fastas=[fasta_path],
         output_fasta=output_fasta,
     )
@@ -190,8 +190,8 @@ def test_run_sieve_complete_pipeline(tmp_path):
 
 def test_run_sieve_with_custom_ctcr_classes(tmp_path):
     """Test filtering with custom CtcR class set."""
-    carousel_csv = tmp_path / "tandem_to_ring.csv"
-    carousel_csv.write_text("\n".join([
+    tandem_to_ring_csv = tmp_path / "tandem_to_ring.csv"
+    tandem_to_ring_csv.write_text("\n".join([
         "readName,readClass",
         "read1,CustomBad",
         "read2,Normal",
@@ -209,7 +209,7 @@ def test_run_sieve_with_custom_ctcr_classes(tmp_path):
 
     sieve = Sieve()
     stats = sieve.run_sieve(
-        carousel_csv=carousel_csv,
+        tandem_to_ring_csv=tandem_to_ring_csv,
         input_fastas=[fasta_path],
         output_fasta=output_fasta,
         ctcr_classes={"CustomBad"},  # Custom filter class
@@ -223,21 +223,21 @@ def test_run_sieve_with_custom_ctcr_classes(tmp_path):
     assert ">read1" not in content
 
 
-def test_load_carousel_classification_file_not_found(tmp_path):
+def test_load_tandem_to_ring_classification_file_not_found(tmp_path):
     """Test error handling when classification file doesn't exist."""
     sieve = Sieve()
     with pytest.raises(FileNotFoundError):
-        sieve.load_carousel_classification(tmp_path / "nonexistent.csv")
+        sieve.load_tandem_to_ring_classification(tmp_path / "nonexistent.csv")
 
 
-def test_load_carousel_classification_tab_delimited(tmp_path):
+def test_load_tandem_to_ring_classification_tab_delimited(tmp_path):
     """Test loading tab-delimited classification file."""
     csv_file = tmp_path / "tandem_to_ring.tsv"
     csv_file.write_text("\t".join(["readName", "readClass"]) + "\n" +
                         "\t".join(["read1", "CtcR-hybrid"]))
 
     sieve = Sieve()
-    sieve.load_carousel_classification(csv_file)
+    sieve.load_tandem_to_ring_classification(csv_file)
 
     assert "read1" in sieve.reads_to_filter
     assert sieve.stats.csv_ctcr_reads == 1

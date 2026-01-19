@@ -17,7 +17,11 @@ def check_dependencies(pipeline: Pipeline) -> None:
     from circleseeker.utils.dependency_checker import DependencyChecker
 
     checker = DependencyChecker(logger=pipeline.logger.getChild("dependency_checker"))
-    all_ok = checker.check_all()
+    skip_tools: set[str] = set()
+    if getattr(pipeline.config, "skip_tidehunter", False):
+        skip_tools.add("tidehunter")
+
+    all_ok = checker.check_all(skip_tools=skip_tools or None)
 
     if not all_ok:
         checker.print_report()
@@ -45,7 +49,7 @@ def tidehunter(pipeline: Pipeline) -> None:
         **pipeline.config.tools.tidehunter,
     )
 
-    pipeline.state.results[ResultKeys.TIDEHUNTER_OUTPUT] = str(output_file)
+    pipeline._set_result(ResultKeys.TIDEHUNTER_OUTPUT, str(output_file))
 
 
 def tandem_to_ring(pipeline: Pipeline) -> None:
@@ -60,7 +64,7 @@ def tandem_to_ring(pipeline: Pipeline) -> None:
     fasta_output = pipeline.config.output_dir / "tandem_to_ring.fasta"
 
     t2r_cfg = getattr(pipeline.config.tools, "tandem_to_ring", {}) or {}
-    if not isinstance(t2r_cfg, dict):
+    if not isinstance(t2r_cfg, dict) and not hasattr(t2r_cfg, 'get'):
         raise PipelineError(
             "Invalid tandem_to_ring config; expected mapping, "
             f"got {type(t2r_cfg).__name__}"
@@ -94,16 +98,31 @@ def run_alignment(pipeline: Pipeline) -> None:
     if default_query is None:
         raise PipelineError("Input file is required")
 
-    query_file = Path(
-        pipeline._get_result(ResultKeys.T2R_FASTA, default=default_query)
+    skip_t2r = bool(getattr(pipeline.config, "skip_tandem_to_ring", False))
+    t2r_fasta = pipeline._resolve_stored_path(
+        pipeline.state.results.get(ResultKeys.T2R_FASTA),
+        ["tandem_to_ring.fasta", f"{pipeline.config.prefix}_circular.fasta"],
     )
+    if t2r_fasta is not None:
+        query_file = t2r_fasta
+    elif skip_t2r:
+        query_file = Path(default_query)
+        pipeline.logger.warning(
+            "tandem_to_ring output not found; using input reads for alignment. "
+            "Ensure query IDs match 'read|repN|length|copy' for um_classify."
+        )
+    else:
+        raise PipelineError(
+            "tandem_to_ring.fasta not found. Run tandem_to_ring or provide a "
+            "precomputed output and set skip_carousel: true."
+        )
 
     reference = pipeline.config.reference
     if reference is None:
         raise PipelineError("Reference genome is required")
 
     alignment_cfg = getattr(pipeline.config.tools, "alignment", {}) or {}
-    if not isinstance(alignment_cfg, dict):
+    if not isinstance(alignment_cfg, dict) and not hasattr(alignment_cfg, 'get'):
         raise PipelineError(
             "Invalid alignment config; expected mapping, "
             f"got {type(alignment_cfg).__name__}"
@@ -112,7 +131,7 @@ def run_alignment(pipeline: Pipeline) -> None:
     min_alignment_length = int(alignment_cfg.get("min_alignment_length", 0) or 0)
 
     minimap_cfg = pipeline.config.tools.minimap2_align or {}
-    if not isinstance(minimap_cfg, dict):
+    if not isinstance(minimap_cfg, dict) and not hasattr(minimap_cfg, 'get'):
         raise PipelineError(
             "Invalid minimap2_align config; expected mapping, "
             f"got {type(minimap_cfg).__name__}"
@@ -136,41 +155,33 @@ def run_alignment(pipeline: Pipeline) -> None:
     preset_long = minimap_cfg.get("preset_long", "sr")
 
     if aligner_name == "last":
-        from circleseeker._experimental.last import LastAligner
+        pipeline.logger.warning(
+            "LAST aligner is not yet implemented; falling back to minimap2. "
+            "Set alignment.aligner='minimap2' to silence this warning."
+        )
+        aligner_name = "minimap2"
 
-        last_runner = LastAligner(
-            threads=pipeline.config.threads,
-            logger=pipeline.logger.getChild("last_align"),
-        )
-        db_prefix = alignment_cfg.get("db_prefix")
-        last_runner.run_alignment(
-            query_fasta=query_file,
-            reference_fasta=reference,
-            output_tsv=alignment_output,
-            db_prefix=Path(db_prefix) if db_prefix else None,
-            min_identity=min_identity,
-        )
-    else:
-        if aligner_name not in ("minimap2", ""):
-            pipeline.logger.warning("Unknown aligner '%s', falling back to minimap2", aligner_name)
-        runner = Minimap2Aligner(
-            threads=pipeline.config.threads, logger=pipeline.logger.getChild("minimap2_align")
-        )
-        runner.run_alignment(
-            reference=reference,
-            query=query_file,
-            output_tsv=alignment_output,
-            preset=preset,
-            max_target_seqs=int(max_target_seqs),
-            additional_args=additional_args,
-            min_identity=min_identity,
-            identity_decay_per_10kb=identity_decay_per_10kb,
-            min_identity_floor=min_identity_floor,
-            split_by_length=split_by_length,
-            split_length=split_length,
-            preset_short=preset_short,
-            preset_long=preset_long,
-        )
+    if aligner_name not in ("minimap2", ""):
+        pipeline.logger.warning("Unknown aligner '%s', falling back to minimap2", aligner_name)
+
+    runner = Minimap2Aligner(
+        threads=pipeline.config.threads, logger=pipeline.logger.getChild("minimap2_align")
+    )
+    runner.run_alignment(
+        reference=reference,
+        query=query_file,
+        output_tsv=alignment_output,
+        preset=preset,
+        max_target_seqs=int(max_target_seqs),
+        additional_args=additional_args,
+        min_identity=min_identity,
+        identity_decay_per_10kb=identity_decay_per_10kb,
+        min_identity_floor=min_identity_floor,
+        split_by_length=split_by_length,
+        split_length=split_length,
+        preset_short=preset_short,
+        preset_long=preset_long,
+    )
 
     if min_alignment_length > 0:
         tmp_output = alignment_output.with_suffix(".tmp.tsv")
@@ -188,4 +199,4 @@ def run_alignment(pipeline: Pipeline) -> None:
                 if aln_len >= min_alignment_length:
                     fout.write(line)
         tmp_output.replace(alignment_output)
-    pipeline.state.results[ResultKeys.ALIGNMENT_OUTPUT] = str(alignment_output)
+    pipeline._set_result(ResultKeys.ALIGNMENT_OUTPUT, str(alignment_output))

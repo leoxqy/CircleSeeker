@@ -31,6 +31,14 @@ backup/
 Demo/
 Demo_*/
 
+# Validation results (large)
+server_validation_results/
+*_validation_results/
+
+# Checkpoint backups
+*.checkpoint.bak
+*.checkpoint.tmp
+
 # Temporary scripts and tarballs
 *.tar.gz
 run_*.sh

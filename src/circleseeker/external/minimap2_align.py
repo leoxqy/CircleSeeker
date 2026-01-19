@@ -420,8 +420,8 @@ class Minimap2Aligner(ExternalTool):
         try:
             import shutil
             shutil.rmtree(work_dir)
-        except Exception:
-            pass
+        except OSError as e:
+            self.logger.debug(f"Failed to cleanup work directory {work_dir}: {e}")
 
     def _split_fasta_by_length(
         self,

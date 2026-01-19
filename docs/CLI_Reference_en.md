@@ -1,6 +1,6 @@
-# CircleSeeker CLI Reference (v0.10.3)
+# CircleSeeker CLI Reference (v1.0.0)
 
-This document describes the CircleSeeker 0.10.3 command-line interface for English-speaking users.
+This document describes the CircleSeeker 1.0.0 command-line interface for English-speaking users.
 
 ---
 
@@ -27,10 +27,11 @@ Common optional flags:
 
 ## 2. Logging & Debugging
 
-- `-n, --noise` Increase log verbosity (once for INFO, twice for DEBUG)
+- `-v, --verbose` Increase log verbosity (-v for INFO, -vv for DEBUG)
 - `--debug` Enable debug mode and expose advanced options
+- `--help-advanced` Show advanced/debug options and exit
 - `-h, --help` Show help and exit
-- `-v, --version` Print CircleSeeker version
+- `-V, --version` Print CircleSeeker version
 
 ---
 
@@ -45,7 +46,8 @@ These flags are available only when `--debug` is present:
 - `--generate-config` Print default configuration YAML and exit
 - `--show-steps` List all 16 steps (grouped by CtcReads-Caller / SplitReads-Caller / Integration) without executing them
 - `--dry-run` Show planned operations without running
-- `--log-output PATH` Write logs to an additional file
+- `--log-file PATH` Write logs to an additional file
+- `--preset CHOICE` Sensitivity preset (`relaxed` / `balanced` / `strict`)
 
 ---
 
@@ -58,7 +60,7 @@ Visible only when `--debug` is set:
 | `run` | Legacy-compatible entry point |
 | `init-config` | Write default configuration to disk |
 | `show-checkpoint` | Inspect checkpoint information |
-| `validate` | Verify installation and dependencies |
+| `validate` | Verify installation and dependencies (`--full` for extended checks) |
 
 ```bash
 circleseeker --debug init-config -o config.yaml
@@ -95,15 +97,15 @@ For clarity, CircleSeeker describes the workflow as two evidence-driven callers:
 | 1 | `check_dependencies` | Verify required tools and inference engine |
 | 2 | `tidehunter` | Detect tandem repeats |
 | 3 | `tandem_to_ring` | Convert repeats to circular candidates |
-| 4 | `run_alignment` | Align candidates back to the reference (minimap2) |
-| 5 | `um_classify` | Classify into UeccDNA / MeccDNA |
-| 6 | `cecc_build` | Assemble complex eccDNA |
+| 4 | `run_alignment` | Align candidates back to the reference (minimap2 or LAST) |
+| 5 | `um_classify` | Coverage + locus-based U/Mecc classification |
+| 6 | `cecc_build` | LAST-first complex eccDNA detection (graph fallback) |
 | 7 | `umc_process` | Consolidate U/M/C outputs |
 | 8 | `cd_hit` | Remove redundant sequences |
 | 9 | `ecc_dedup` | Harmonize coordinates |
-|10 | `read_filter` | Filter confirmed eccDNA reads |
-|11 | `minimap2` | Prepare reference index / alignments |
-|12 | `ecc_inference` | Cresil inference (Cyrcular fallback) |
+|10 | `read_filter` | Filter CtcR reads and build inference FASTA |
+|11 | `minimap2` | Build reference index; skip alignment when Cresil is used |
+|12 | `ecc_inference` | Cresil inference (Cyrcular fallback on failure) |
 |13 | `curate_inferred_ecc` | Curate inferred eccDNA tables (`iecc_curator`) |
 |14 | `ecc_unify` | Merge confirmed and inferred tables using segment overlap algorithm for chimeric redundancy detection |
 |15 | `ecc_summary` | Generate statistics and reports |

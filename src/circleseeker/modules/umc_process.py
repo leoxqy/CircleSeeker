@@ -151,7 +151,7 @@ class BaseEccProcessor(ABC):
 class SequenceLibrary:
     """Manages FASTA sequences with flexible lookup strategies."""
 
-    def __init__(self, logger: Optional[logging.Logger] = None):
+    def __init__(self, logger: Optional[logging.Logger] = None) -> None:
         """Initialize sequence library."""
         self.logger = logger if logger else get_logger(self.__class__.__name__)
         self.fasta_sequences: dict[str, str] = {}
@@ -621,7 +621,7 @@ class MeccProcessor:
                     extracted_seq = extract_ring_sequence(seq_str, int(q_start), int(cons_len))
                     df.loc[query_mask, "eSeq"] = extracted_seq
                     sequences_found += 1
-                except Exception:
+                except (ValueError, IndexError, TypeError):
                     sequences_missing += 1
             else:
                 sequences_missing += 1

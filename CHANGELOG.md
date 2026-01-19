@@ -5,6 +5,27 @@ All notable changes to CircleSeeker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-01-19
+
+### Added
+- **CtcReads-Caller core validator**: Added `scripts/run_ctcreads_core_validation.py` (replaces the older gradient validation script).
+- **CeccBuild temp controls**: Support `tmp_dir` and `keep_tmp` to retain LAST intermediates when needed.
+
+### Changed
+- **Default config template**: Synced with current config schema (alignment, tandem_to_ring, um_classify, cecc_build, minimap2_align).
+- **Xecc output gating**: `enable_xecc` now controls XeccDNA export in `umc_process`.
+- **Documentation refresh**: Updated CLI/config/pipeline/output docs to match current behavior and set version to 1.0.0.
+
+### Fixed
+- **Inference fallback hardening**: Avoid silent Cyrcular fallback when minimap2 BAM is missing; mark inference failure explicitly.
+- **FASTA append safety**: Ensure newline separation when appending source reads.
+- **minimap2 additional_args**: Use shell-style splitting to preserve quoted arguments.
+- **ecc_unify failure handling**: Raise `PipelineError` instead of silently returning on merge errors.
+- **TideHunter output handling**: Warn and report zero candidates when output file is missing.
+
+### Tests
+- Added unit coverage for minimap2 quoted args, TideHunter missing output, ecc_unify error handling, and Mecc simulation expectations.
+
 ## [0.13.2] - 2026-01-19
 
 ### Fixed
