@@ -248,6 +248,7 @@ class TestConfig:
             config = Config()
             config.input_file = Path(input_f.name)
             config.reference = Path(ref_f.name)
+            config.threads = 4  # Safe value for CI
             config.runtime.tmp_dir = Path(".")
 
             with pytest.raises(ConfigurationError) as exc_info:
@@ -262,6 +263,7 @@ class TestConfig:
             config = Config()
             config.input_file = Path(input_f.name)
             config.reference = Path(ref_f.name)
+            config.threads = 4  # Safe value for CI
             config.runtime.tmp_dir = Path("../tmp_work")
 
             with pytest.raises(ConfigurationError) as exc_info:
@@ -276,6 +278,7 @@ class TestConfig:
             config = Config()
             config.input_file = Path(input_f.name)
             config.reference = Path(ref_f.name)
+            config.threads = 4  # Safe value for CI
 
             # Should not raise any exception
             config.validate()
@@ -504,7 +507,7 @@ class TestConfigIntegration:
             config.input_file = Path(input_f.name)
             config.reference = Path(ref_f.name)
             config.prefix = "integration_test"
-            config.threads = 8
+            config.threads = 4  # Use safe value for CI environments
             config.keep_tmp = True
 
             # Validate
@@ -513,7 +516,7 @@ class TestConfigIntegration:
             # Convert to dict
             config_dict = config.to_dict()
             assert config_dict["prefix"] == "integration_test"
-            assert config_dict["performance"]["threads"] == 8
+            assert config_dict["performance"]["threads"] == 4
             assert config_dict["runtime"]["keep_tmp"] is True
 
     def test_config_yaml_roundtrip(self):
@@ -521,7 +524,7 @@ class TestConfigIntegration:
         # Create config with custom values
         original_config = Config()
         original_config.prefix = "roundtrip_test"
-        original_config.threads = 12
+        original_config.threads = 4  # Use safe value for CI environments
         original_config.skip_tandem_to_ring = True
 
         # Save to YAML
@@ -535,7 +538,7 @@ class TestConfigIntegration:
 
             # Compare important values
             assert loaded_config.prefix == "roundtrip_test"
-            assert loaded_config.performance.threads == 12
+            assert loaded_config.performance.threads == 4  # Safe value used above
             assert loaded_config.skip_carousel is True
             assert loaded_config.skip_tandem_to_ring is True
         finally:

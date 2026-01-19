@@ -271,8 +271,8 @@ class TandemToRing:
             # Calculate statistics
             mean_consLen = np.mean(consLen_values)
             std_consLen = np.std(consLen_values)
-            min_consLen = np.min(consLen_values)
-            max_consLen = np.max(consLen_values)
+            min_consLen: Any = np.min(consLen_values)
+            max_consLen: Any = np.max(consLen_values)
 
             # Coefficient of variation (CV)
             cv = (std_consLen / mean_consLen * 100) if mean_consLen > 0 else 0

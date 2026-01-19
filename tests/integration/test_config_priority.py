@@ -92,7 +92,7 @@ def test_cli_overrides_config() -> None:
                 "-o",
                 str(cli_out),
                 "-t",
-                "7",
+                "4",  # Use safe value for CI environments
                 "--dry-run",
             ],
         )
@@ -100,12 +100,13 @@ def test_cli_overrides_config() -> None:
         assert f"Would process: {reads_cli}" in result.output
         assert f"With reference: {ref_cli}" in result.output
         assert str(cli_out.absolute()) in result.output
-        assert "Using 7 threads" in result.output
+        assert "Using 4 threads" in result.output
         assert not cfg_out.exists()
         assert not cli_out.exists()
 
 
 def test_defaults_apply_without_config() -> None:
+    import os
     runner = CliRunner()
     with runner.isolated_filesystem():
         reads = Path("reads.fa")
@@ -117,7 +118,9 @@ def test_defaults_apply_without_config() -> None:
         result = runner.invoke(cli, ["run", "-i", str(reads), "-r", str(ref), "--dry-run"])
         assert result.exit_code == 0, result.output
         assert str(default_out.absolute()) in result.output
-        assert "Using 8 threads" in result.output
+        # Default threads = min(8, cpu_count * 2), check pattern instead of exact value
+        expected_threads = min(8, (os.cpu_count() or 4) * 2)
+        assert f"Using {expected_threads} threads" in result.output
         assert not default_out.exists()
 
 

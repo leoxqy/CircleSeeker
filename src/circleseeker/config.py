@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Optional, Any, cast, Literal, Union, Callable, TYPE_CHECKING
 import yaml
 from circleseeker.exceptions import ConfigurationError
+
+
+def _default_threads() -> int:
+    """Calculate default threads: min(8, cpu_count * 2) to avoid exceeding resources."""
+    cpu_count = os.cpu_count() or 4
+    return min(8, cpu_count * 2)
 
 
 # ================== Preset Definitions ==================
@@ -145,7 +152,7 @@ class RuntimeConfig:
 class PerformanceConfig:
     """Performance-related configuration."""
 
-    threads: int = 8
+    threads: int = field(default_factory=_default_threads)
 
 
 # ================== Typed Tool Configuration Classes ==================

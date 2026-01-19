@@ -162,6 +162,8 @@ def test_cli_resume_ignores_force_flag(tmp_path: Path, monkeypatch: pytest.Monke
                 str(reference),
                 "-o",
                 "out",
+                "-t",
+                "4",  # Use safe value for CI environments
                 "--resume",
                 "--force",
                 "--start-from",
