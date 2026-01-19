@@ -202,6 +202,8 @@ class ToolConfig:
             "tau_gap": 20,
             # Position tolerance used by legacy closure checks (bp)
             "position_tolerance": 50,
+            # Buffer around query mid-point for doubled-sequence detection (bp)
+            "half_query_buffer": 50,
             # Reciprocal-overlap threshold to treat two genomic intervals as the same locus
             # in the final overlap filter (fractions 0-1; accepts percents for convenience)
             "locus_overlap_threshold": 0.95,

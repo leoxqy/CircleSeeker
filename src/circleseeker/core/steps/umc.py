@@ -212,6 +212,7 @@ def cecc_build(pipeline: Pipeline) -> None:
             min_match_degree=float(min_match_degree),
             max_rotations=int(cecc_cfg.get("max_rotations", 20)),
             locus_overlap_threshold=cecc_cfg.get("locus_overlap_threshold", 0.95),
+            half_query_buffer=int(cecc_cfg.get("half_query_buffer", 50)),
             reference_fasta=reference_fasta,
             fasta_file=fasta_file,
         )

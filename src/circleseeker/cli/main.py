@@ -60,6 +60,7 @@ def _print_advanced_help(ctx: click.Context, _param: click.Parameter, value: boo
         click.echo("  --generate-config    Print default config YAML to stdout")
         click.echo("  --show-steps         Show pipeline steps and exit")
         click.echo("  --log-file PATH      Write logs to file")
+        click.echo("  --preset CHOICE      Sensitivity preset (relaxed/balanced/strict)")
         click.echo()
         click.echo("Subcommands (require --debug):")
         click.echo("  run                  Run pipeline (explicit subcommand)")
@@ -110,6 +111,7 @@ def _print_advanced_help(ctx: click.Context, _param: click.Parameter, value: boo
     "--preset",
     type=click.Choice(["relaxed", "balanced", "strict"], case_sensitive=False),
     default=None,
+    hidden=True,
     help="Sensitivity preset: relaxed (high recall), balanced (default), strict (high precision)",
 )
 # Verbosity option (unified: -v/--verbose)
@@ -194,6 +196,8 @@ def cli(
             advanced_used.append(ADVANCED_ONLY_KEYS["show_steps"])
         if log_file:
             advanced_used.append(ADVANCED_ONLY_KEYS["log_file"])
+        if preset is not None:
+            advanced_used.append(ADVANCED_ONLY_KEYS["preset"])
 
         if advanced_used:
             opt_names = ", ".join(sorted(set(advanced_used)))
@@ -284,4 +288,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

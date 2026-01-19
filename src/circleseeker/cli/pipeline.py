@@ -25,6 +25,7 @@ ADVANCED_ONLY_KEYS = {
     "generate_config": "--generate-config",
     "show_steps": "--show-steps",
     "log_file": "--log-file",
+    "preset": "--preset",
 }
 
 

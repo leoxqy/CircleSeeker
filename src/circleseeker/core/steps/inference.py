@@ -153,7 +153,7 @@ def read_filter(pipeline: Pipeline) -> None:
     )
 
 
-def minimap2(pipeline: Pipeline) -> None:
+def minimap2(pipeline: Pipeline, *, force_alignment: bool = False) -> None:
     """Step 10: Prepare mapping artifacts (alignment optional for Cresil)."""
     from circleseeker.external.minimap2 import Minimap2, MiniMapConfig
 
@@ -227,7 +227,7 @@ def minimap2(pipeline: Pipeline) -> None:
     pipeline._set_result(ResultKeys.REFERENCE_MMI, str(reference_mmi))
 
     inference_tool = pipeline._select_inference_tool()
-    if inference_tool == "cresil":
+    if inference_tool == "cresil" and not force_alignment:
         pipeline.logger.info("Cresil selected; skipping minimap2 alignment (BAM not required)")
         return
 
@@ -317,11 +317,24 @@ def ecc_inference(pipeline: Pipeline) -> None:
         except Exception as write_exc:  # pragma: no cover
             pipeline.logger.debug("Failed to write inference failure marker: %s", write_exc)
 
+    def _run_cyrcular_fallback(cresil_exc: Exception) -> None:
+        pipeline.logger.warning(
+            "Cresil failed (%s); attempting Cyrcular fallback", cresil_exc
+        )
+        bam_path = pipeline.state.results.get(ResultKeys.MINIMAP2_BAM)
+        if not (bam_path and Path(bam_path).exists()):
+            pipeline.logger.info("Preparing minimap2 alignment for Cyrcular fallback")
+            minimap2(pipeline, force_alignment=True)
+        pipeline._run_cyrcular_inference()
+
     try:
         tool = pipeline._select_inference_tool()
         if tool == "cresil":
             pipeline.logger.info("Using Cresil for circular DNA detection (preferred)")
-            pipeline._run_cresil_inference()
+            try:
+                pipeline._run_cresil_inference()
+            except Exception as exc:
+                _run_cyrcular_fallback(exc)
         else:
             pipeline.logger.info("Using Cyrcular for circular DNA detection (fallback)")
             pipeline._run_cyrcular_inference()

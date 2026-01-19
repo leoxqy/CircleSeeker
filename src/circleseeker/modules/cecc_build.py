@@ -128,6 +128,7 @@ class CeccBuild:
         min_identity: float = 95.0,
         min_query_coverage: float = 0.8,
         min_repeat_query_gap: int = 100,
+        half_query_buffer: int = 50,
         threads: int = 4,
         logger: Optional[logging.Logger] = None,
     ):
@@ -142,6 +143,7 @@ class CeccBuild:
             min_identity: Minimum alignment identity for LAST (%)
             min_query_coverage: Minimum query coverage for valid detection
             min_repeat_query_gap: Minimum gap between repeat positions on query
+            half_query_buffer: Buffer around query mid-point (bp) to separate halves
             threads: Number of threads for LAST
             logger: Optional logger
         """
@@ -152,6 +154,7 @@ class CeccBuild:
         self.min_identity = min_identity
         self.min_query_coverage = min_query_coverage
         self.min_repeat_query_gap = min_repeat_query_gap
+        self.half_query_buffer = max(0, int(half_query_buffer))
         self.threads = threads
         self.logger = logger or get_logger(self.__class__.__name__)
 
@@ -729,8 +732,9 @@ class CeccBuild:
             return False, f"low_coverage_{coverage:.2f}", []
 
         # Find alignments in first and second half
-        first_half_alns = [a for a in alns if a.query_start < half_len - 50]
-        second_half_alns = [a for a in alns if a.query_end > half_len + 50]
+        buf = self.half_query_buffer
+        first_half_alns = [a for a in alns if a.query_start < half_len - buf]
+        second_half_alns = [a for a in alns if a.query_end > half_len + buf]
 
         if not first_half_alns or not second_half_alns:
             return False, "no_half_alignments", []
@@ -1024,6 +1028,7 @@ class CeccBuild:
         edge_tolerance: Optional[int] = None,
         position_tolerance: Optional[int] = None,
         min_match_degree: Optional[float] = None,
+        half_query_buffer: Optional[int] = None,
     ) -> pd.DataFrame:
         """
         Run the complete Cecc detection pipeline with LAST.
@@ -1047,6 +1052,8 @@ class CeccBuild:
             self.position_tolerance = position_tolerance
         if min_match_degree is not None:
             self.min_match_degree = min_match_degree
+        if half_query_buffer is not None:
+            self.half_query_buffer = max(0, int(half_query_buffer))
 
         self.logger.info("=" * 60)
         self.logger.info("CeccBuild v4 - LAST-based CeccDNA Detection")
@@ -1056,6 +1063,7 @@ class CeccBuild:
         self.logger.info(f"  - Min identity: {self.min_identity}%")
         self.logger.info(f"  - Min query coverage: {self.min_query_coverage}")
         self.logger.info(f"  - Min repeat query gap: {self.min_repeat_query_gap} bp")
+        self.logger.info(f"  - Half buffer: {self.half_query_buffer} bp")
 
         # Read input CSV
         self.logger.info(f"Reading: {input_csv}")
@@ -1173,6 +1181,7 @@ class CeccBuild:
         min_match_degree: float = 95.0,
         max_rotations: int = 20,
         locus_overlap_threshold: float = 0.95,
+        half_query_buffer: int = 50,
         reference_fasta: Optional[Path] = None,
         fasta_file: Optional[Path] = None,
     ) -> pd.DataFrame:
@@ -1188,12 +1197,14 @@ class CeccBuild:
         self.overlap_threshold = overlap_threshold
         self.max_rotations = max_rotations
         self.locus_overlap_threshold = locus_overlap_threshold
+        self.half_query_buffer = max(0, int(half_query_buffer))
 
         return self.run(
             input_csv=input_csv,
             output_csv=output_csv,
             reference_fasta=reference_fasta,
             fasta_file=fasta_file,
+            half_query_buffer=half_query_buffer,
         )
 
 
