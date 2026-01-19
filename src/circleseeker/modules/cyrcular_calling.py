@@ -15,7 +15,7 @@ from __future__ import annotations
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 import pandas as pd
 
 from circleseeker.exceptions import PipelineError
@@ -373,7 +373,7 @@ class CyrcularCallingPipeline:
         self.logger.info("=" * 60)
 
 
-def _parse_args():
+def _parse_args() -> Any:
     """Parse CLI arguments for direct script execution"""
     import argparse
 
@@ -413,7 +413,7 @@ def _parse_args():
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
     """Main function for CLI execution"""
     from pathlib import Path
     import logging as _logging

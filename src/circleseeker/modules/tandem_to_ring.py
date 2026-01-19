@@ -19,7 +19,7 @@ import pandas as pd
 import numpy as np
 import networkx as nx
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
@@ -548,7 +548,7 @@ class TandemToRing:
         self.process()
 
 
-def _parse_args():
+def _parse_args() -> Any:
     """Parse CLI arguments for direct script execution"""
     import argparse
 
@@ -573,7 +573,7 @@ def _parse_args():
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
     from pathlib import Path
 
     args = _parse_args()

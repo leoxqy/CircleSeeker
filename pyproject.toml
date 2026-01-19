@@ -126,6 +126,8 @@ module = [
   "circleseeker.cli.*",
   "circleseeker.config",
   "circleseeker.core.*",
+  "circleseeker.external.*",
+  "circleseeker.modules.*",
 ]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true

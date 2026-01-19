@@ -1247,7 +1247,7 @@ class CeccBuild:
         )
 
 
-def main():
+def main() -> None:
     """CLI entry point."""
     import argparse
 

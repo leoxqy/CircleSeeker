@@ -409,7 +409,7 @@ class CDHitRunner(CDHitEst):
         return self.cluster_sequences(input_fasta, output_prefix)
 
 
-def _parse_args():
+def _parse_args() -> Any:
     """Parse CLI arguments for direct script execution"""
     import argparse
 
@@ -425,7 +425,7 @@ def _parse_args():
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
     """Main function for CLI execution"""
     from pathlib import Path
     import logging as _logging

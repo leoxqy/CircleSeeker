@@ -1033,7 +1033,7 @@ def merge_eccdna_tables(
     return merged, overlap_report, overlap_stats
 
 
-def main():
+def main() -> None:
     """Command-line interface."""
     import argparse
 

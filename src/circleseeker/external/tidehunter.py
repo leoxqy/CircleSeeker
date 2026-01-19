@@ -2,6 +2,8 @@
 
 import shutil
 from pathlib import Path
+from typing import Any, Optional
+
 from circleseeker.external.base import ExternalTool
 
 
@@ -28,7 +30,7 @@ class TideHunter(ExternalTool):
     # Detect the actual binary name (case-sensitive on some systems)
     tool_name = "TideHunter"  # Default, will be updated in __init__
 
-    def __init__(self, threads: int = 1, **kwargs):
+    def __init__(self, threads: int = 1, **kwargs: Any) -> None:
         """Initialize TideHunter wrapper.
 
         Args:
@@ -54,7 +56,7 @@ class TideHunter(ExternalTool):
         c: int = 2,
         out_fmt: int = 2,
         # Legacy parameter name (maps to out_fmt)
-        f: int | None = None,
+        f: Optional[int] = None,
     ) -> None:
         """Run TideHunter analysis.
 
@@ -144,7 +146,7 @@ class TideHunter(ExternalTool):
 class TideHunterRunner(TideHunter):
     """Backward compatibility wrapper for existing code."""
 
-    def __init__(self, num_threads=8):
+    def __init__(self, num_threads: int = 8) -> None:
         super().__init__(threads=num_threads)
         self.num_threads = num_threads
 

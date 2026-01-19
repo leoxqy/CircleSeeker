@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 import re
 from types import ModuleType
-from typing import Optional
+from typing import Any, Optional
 
 import pandas as pd
 from circleseeker.utils.logging import get_logger
@@ -411,7 +411,7 @@ def process_eccDNA(
             write_curated_tables(simple_df, chimeric_df, output_prefix)
 
 
-def _parse_args():
+def _parse_args() -> Any:
     """Parse CLI arguments for direct script execution."""
     import argparse
 
@@ -435,7 +435,7 @@ def _parse_args():
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
     args = _parse_args()
     inp = Path(args.input)
     out_prefix = Path(args.output_prefix)

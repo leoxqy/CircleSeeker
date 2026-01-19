@@ -961,7 +961,7 @@ class EccSummary:
         return html_content, text_content
 
 
-def main():
+def main() -> None:
     """Command-line interface for ecc_summary."""
     parser = argparse.ArgumentParser(
         description="Generate eccDNA analysis summary reports",

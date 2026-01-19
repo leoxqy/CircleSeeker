@@ -1294,7 +1294,7 @@ class UMeccClassifier:
         return uecc_df, mecc_df, unclassified_df
 
 
-def _parse_args():
+def _parse_args() -> Any:
     """Parse CLI arguments for direct script execution"""
     import argparse
 
@@ -1317,7 +1317,7 @@ def _parse_args():
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
     from pathlib import Path
 
     args = _parse_args()

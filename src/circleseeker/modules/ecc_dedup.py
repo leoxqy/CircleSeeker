@@ -26,7 +26,7 @@ from circleseeker.utils.logging import get_logger
 import re
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 import pandas as pd
 from circleseeker.utils.column_standards import ColumnStandard
 
@@ -102,12 +102,12 @@ def to_numeric_safe(series: pd.Series, default: float = 0) -> pd.Series:
         return pd.Series([default] * len(series))
 
 
-def format_two_decimals(value: float | int | str | None) -> str:
+def format_two_decimals(value: object) -> str:
     """Format value to 2 decimal places."""
     try:
         if pd.isna(value):
             return ""
-        return f"{float(value):.2f}"
+        return f"{float(value):.2f}"  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return ""
 
@@ -2441,7 +2441,7 @@ class eccDedup:
         return results
 
 
-def _parse_args():
+def _parse_args() -> Any:
     """Parse CLI arguments for direct script execution"""
     import argparse
 
@@ -2487,7 +2487,7 @@ def _parse_args():
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
     """Main function for CLI execution"""
     from pathlib import Path
     import logging as _logging

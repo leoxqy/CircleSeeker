@@ -1320,7 +1320,7 @@ class UMCProcess:
         )
 
 
-def main():
+def main() -> None:
     """Command-line interface."""
     import argparse
 

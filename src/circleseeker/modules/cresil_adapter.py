@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+from typing import Any
+
 import pandas as pd
 
 from circleseeker.utils.logging import get_logger
@@ -191,7 +193,7 @@ def write_cyrcular_compatible_tsv(cresil_file: Path | str, output_tsv: Path | st
     return output_tsv
 
 
-def _parse_args():
+def _parse_args() -> Any:
     """Parse CLI arguments for direct script execution."""
     import argparse
 
@@ -205,7 +207,7 @@ def _parse_args():
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
     """CLI entry point."""
     args = _parse_args()
     write_cyrcular_compatible_tsv(args.input, args.output)
