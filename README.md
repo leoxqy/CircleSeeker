@@ -124,10 +124,24 @@ CircleSeeker implements a 16-step analysis pipeline with two evidence-driven cal
 ### Architecture
 
 ```mermaid
+%%{init: {
+  'theme': 'base',
+  'themeVariables': {
+    'primaryColor': '#e8f4f8',
+    'primaryBorderColor': '#0077b6',
+    'primaryTextColor': '#023e8a',
+    'secondaryColor': '#fff3e6',
+    'secondaryBorderColor': '#e85d04',
+    'tertiaryColor': '#e8f5e9',
+    'tertiaryBorderColor': '#2e7d32',
+    'lineColor': '#495057',
+    'textColor': '#212529'
+  }
+}}%%
 flowchart TB
-    A[/"HiFi FASTA"/]
+    A[/"🧬 HiFi FASTA"/]
 
-    subgraph CtcReads["CtcReads-Caller"]
+    subgraph CtcReads["🔬 CtcReads-Caller"]
         B1[TideHunter] --> B2[tandem_to_ring]
         B2 --> B3[minimap2]
         B3 --> B4[um_classify]
@@ -136,15 +150,15 @@ flowchart TB
         B4 --> B7[LAST] --> B7b[Cecc]
         B5 & B6 & B7b --> B8[CD-HIT]
         B8 --> B9[dedup]
-        B9 --> B10[/"Confirmed eccDNA"/]
+        B9 --> B10[/"✓ Confirmed eccDNA"/]
     end
 
-    subgraph SplitReads["SplitReads-Caller"]
-        C1["Cresil"] --> C2[/"Inferred eccDNA"/]
+    subgraph SplitReads["🔍 SplitReads-Caller"]
+        C1["Cresil"] --> C2[/"✓ Inferred eccDNA"/]
         C3["Cyrcular"] -.-> C2
     end
 
-    subgraph Integrate["Integration"]
+    subgraph Integrate["📦 Integration"]
         D1[ecc_unify] --> D2[ecc_summary]
         D2 --> D3[ecc_packager]
     end
@@ -153,7 +167,12 @@ flowchart TB
     B1 -->|non-CtcReads| SplitReads
     B10 --> D1
     C2 --> D1
-    D3 --> E[/"Final Output"/]
+    D3 --> E[/"📊 Final Output"/]
+
+    style A fill:#caf0f8,stroke:#0077b6,stroke-width:2px
+    style B10 fill:#d8f3dc,stroke:#2d6a4f,stroke-width:2px
+    style C2 fill:#d8f3dc,stroke:#2d6a4f,stroke-width:2px
+    style E fill:#ffd6a5,stroke:#e85d04,stroke-width:2px
 ```
 
 ### CtcReads-Caller (Steps 1-10)
