@@ -124,56 +124,41 @@ CircleSeeker implements a 16-step analysis pipeline with two evidence-driven cal
 ### Architecture
 
 ```mermaid
-%%{init: {
-  'theme': 'base',
-  'themeVariables': {
-    'primaryColor': '#e8f4f8',
-    'primaryBorderColor': '#0077b6',
-    'primaryTextColor': '#023e8a',
-    'secondaryColor': '#fff3e6',
-    'secondaryBorderColor': '#e85d04',
-    'tertiaryColor': '#e8f5e9',
-    'tertiaryBorderColor': '#2e7d32',
-    'lineColor': '#495057',
-    'textColor': '#212529'
-  }
-}}%%
-flowchart TB
-    A[/"🧬 HiFi FASTA"/]
-
-    subgraph CtcReads["🔬 CtcReads-Caller"]
-        B1[TideHunter] --> B2[tandem_to_ring]
-        B2 --> B3[minimap2]
-        B3 --> B4[um_classify]
-        B4 --> B5[Uecc]
-        B4 --> B6[Mecc]
-        B4 --> B7[LAST] --> B7b[Cecc]
-        B5 & B6 & B7b --> B8[CD-HIT]
-        B8 --> B9[dedup]
-        B9 --> B10[/"✓ Confirmed eccDNA"/]
+flowchart LR
+    subgraph Input[" "]
+        A["HiFi FASTA"]
     end
 
-    subgraph SplitReads["🔍 SplitReads-Caller"]
-        C1["Cresil"] --> C2[/"✓ Inferred eccDNA"/]
-        C3["Cyrcular"] -.-> C2
+    subgraph Caller1["CtcReads-Caller"]
+        direction TB
+        B1["TideHunter → tandem_to_ring → minimap2"]
+        B2["um_classify → LAST"]
+        B3["Uecc / Mecc / Cecc"]
+        B4["CD-HIT → dedup"]
+        B1 --> B2 --> B3 --> B4
     end
 
-    subgraph Integrate["📦 Integration"]
-        D1[ecc_unify] --> D2[ecc_summary]
-        D2 --> D3[ecc_packager]
+    subgraph Caller2["SplitReads-Caller"]
+        direction TB
+        C1["Cresil / Cyrcular"]
     end
 
-    A --> B1
-    B1 -->|non-CtcReads| SplitReads
-    B10 --> D1
-    C2 --> D1
-    D3 --> E[/"📊 Final Output"/]
+    subgraph Output[" "]
+        D["Confirmed + Inferred eccDNA"]
+        E["Final Output"]
+    end
 
-    style A fill:#caf0f8,stroke:#0077b6,stroke-width:2px
-    style B10 fill:#d8f3dc,stroke:#2d6a4f,stroke-width:2px
-    style C2 fill:#d8f3dc,stroke:#2d6a4f,stroke-width:2px
-    style E fill:#ffd6a5,stroke:#e85d04,stroke-width:2px
+    A -->|CtcReads| Caller1
+    A -->|non-CtcReads| Caller2
+    Caller1 --> D
+    Caller2 --> D
+    D --> E
 ```
+
+**Pipeline flow:**
+- **CtcReads-Caller** (Steps 1-10): Detects eccDNA from reads with concatemeric tandem copies (CtcReads)
+- **SplitReads-Caller** (Steps 11-13): Detects eccDNA from split-read evidence (non-CtcReads)
+- **Integration** (Steps 14-16): Merges results and generates final output
 
 ### CtcReads-Caller (Steps 1-10)
 
