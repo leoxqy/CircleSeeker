@@ -199,6 +199,8 @@ class ConsoleFormatter:
             lines.append(self.format_line("", "Threads", str(config["threads"])))
         if "inference" in config:
             lines.append(self.format_line("", "Inference", str(config["inference"])))
+        if "turbo" in config:
+            lines.append(self.format_line("", "Turbo mode", str(config["turbo"])))
 
         return "\n".join(lines)
 

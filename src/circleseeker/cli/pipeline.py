@@ -280,6 +280,18 @@ def execute_pipeline(
     # Print configuration (including inference engine and preset)
     # Use user_output_dir for display (cfg.output_dir was changed to temp_dir by Pipeline)
     preset_display = opts.preset.capitalize() if opts.preset else "Balanced"
+
+    # Determine turbo mode status for display
+    turbo_requested = opts.turbo or cfg.runtime.turbo_mode
+    turbo_active = getattr(pipeline, "_turbo_mode_active", False)
+    if turbo_requested:
+        if turbo_active:
+            turbo_status = "Enabled (RAM-backed)"
+        else:
+            turbo_status = "Fallback (unavailable)"
+    else:
+        turbo_status = None  # Don't show if not requested
+
     config_dict = {
         "input_file": input_file.name,
         "reference": reference.name,
@@ -288,11 +300,17 @@ def execute_pipeline(
         "preset": preset_display,
         "inference": inference_info,
     }
+    if turbo_status:
+        config_dict["turbo"] = turbo_status
     print_formatted(formatter.format_config(config_dict))
 
     # Show warning if recommended tool is missing
     if inference_warning:
         print_formatted(f"  [!] {inference_warning}")
+
+    # Show warning if turbo mode was requested but not available
+    if turbo_requested and not turbo_active:
+        print_formatted("  [!] Turbo mode unavailable: /dev/shm not accessible or insufficient space")
 
     print_formatted(formatter.separator())
     print_formatted(formatter.start_message())
