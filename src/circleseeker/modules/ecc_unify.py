@@ -50,7 +50,7 @@ def parse_chimeric_regions(regions_str: str) -> list[tuple[str, int, int]]:
 
 
 def reciprocal_overlap_ok(
-    a_start: int, a_end: int, b_start: int, b_end: int, thr: float = 0.99, tol: int = 10
+    a_start: int, a_end: int, b_start: int, b_end: int, thr: float = 0.99, tol: int = 20
 ) -> bool:
     """Check if two regions have reciprocal overlap above threshold.
 
@@ -58,7 +58,7 @@ def reciprocal_overlap_ok(
         a_start, a_end: First region coordinates
         b_start, b_end: Second region coordinates
         thr: Minimum reciprocal overlap fraction (default 0.99)
-        tol: Tolerance in bp for boundary matching (default 10)
+        tol: Tolerance in bp for boundary matching (default 20)
 
     Returns:
         True if regions have sufficient reciprocal overlap
@@ -148,7 +148,7 @@ def build_chr_index(
 
 
 def find_redundant_simple(
-    inferred_df: pd.DataFrame, confirmed_df: pd.DataFrame, thr: float = 0.99, tol: int = 10
+    inferred_df: pd.DataFrame, confirmed_df: pd.DataFrame, thr: float = 0.99, tol: int = 20
 ) -> set[str]:
     """Find inferred simple eccDNA that overlap with confirmed UeccDNA.
 
@@ -216,7 +216,7 @@ def find_redundant_chimeric(
     inferred_df: pd.DataFrame,
     confirmed_df: pd.DataFrame,
     thr: float = 0.99,
-    tol: int = 10,
+    tol: int = 20,
     method: str = "overlap",
 ) -> set[str]:
     """Find inferred chimeric eccDNA that match confirmed CeccDNA.
@@ -229,7 +229,7 @@ def find_redundant_chimeric(
         inferred_df: DataFrame with inferred chimeric eccDNA
         confirmed_df: DataFrame with all confirmed eccDNA (will filter for CeccDNA)
         thr: Reciprocal overlap threshold (default 0.99)
-        tol: Coordinate tolerance in bp (default 10)
+        tol: Coordinate tolerance in bp (default 20)
         method: Matching method - 'exact' or 'overlap' (default 'overlap')
 
     Returns:
@@ -288,7 +288,7 @@ def find_redundant_chimeric_exact(
 
 
 def find_redundant_chimeric_overlap(
-    inferred_df: pd.DataFrame, confirmed_df: pd.DataFrame, thr: float = 0.99, tol: int = 10
+    inferred_df: pd.DataFrame, confirmed_df: pd.DataFrame, thr: float = 0.99, tol: int = 20
 ) -> set[str]:
     """Find redundant chimeric eccDNA using segment-wise reciprocal overlap.
 
@@ -916,7 +916,7 @@ def merge_eccdna_tables(
     inferred_simple: Path | str | pd.DataFrame | None = None,
     inferred_chimeric: Path | str | pd.DataFrame | None = None,
     overlap_threshold: float = 0.99,
-    tolerance: int = 10,
+    tolerance: int = 20,
     renumber: bool = True,
     overlap_report_file: Path | str | None = None,
     overlap_stats_json: Path | str | None = None,
@@ -1071,7 +1071,7 @@ def main() -> None:
         help="Reciprocal overlap threshold (default: 0.99)",
     )
     parser.add_argument(
-        "--tolerance", type=int, default=10, help="Coordinate tolerance in bp (default: 10)"
+        "--tolerance", type=int, default=20, help="Coordinate tolerance in bp (default: 20)"
     )
     parser.add_argument("--no-renumber", action="store_true", help="Don't renumber eccDNA IDs")
 

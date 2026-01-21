@@ -171,6 +171,8 @@ def cecc_build(pipeline: Pipeline) -> None:
         builder.tmp_dir = pipeline.config.output_dir / "cecc_last_tmp"
     if hasattr(builder, "keep_tmp"):
         builder.keep_tmp = pipeline.config.keep_tmp
+    if hasattr(builder, "threads"):
+        builder.threads = int(getattr(pipeline.config, "threads", pipeline.config.performance.threads))
 
     pipeline.logger.info("Running cecc_build module")
     try:
