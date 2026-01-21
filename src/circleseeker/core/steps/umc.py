@@ -168,7 +168,8 @@ def cecc_build(pipeline: Pipeline) -> None:
 
     builder = cast(type[Any], builder_cls)(logger=pipeline.logger.getChild("cecc_build"))
     if hasattr(builder, "tmp_dir"):
-        builder.tmp_dir = pipeline.config.output_dir / "cecc_last_tmp"
+        # Use the same temp directory as pipeline (no nested subdirectory)
+        builder.tmp_dir = pipeline.config.output_dir
     if hasattr(builder, "keep_tmp"):
         builder.keep_tmp = pipeline.config.keep_tmp
     if hasattr(builder, "threads"):
