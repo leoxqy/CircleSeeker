@@ -199,7 +199,7 @@ class TideHunterConfig(ToolConfigMixin):
     k: int = 16  # k-mer size
     w: int = 1  # window size
     p: int = 100  # minimum period size
-    P: int = 2000000  # maximum period size
+    P: int = 500000  # maximum period size (500kb, sufficient for most eccDNA)
     e: float = 0.1  # maximum allowed error rate
     f: int = 2  # output format
     c: int = 2  # minimum copy number

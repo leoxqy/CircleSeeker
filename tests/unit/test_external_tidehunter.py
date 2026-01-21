@@ -54,7 +54,7 @@ class TestTideHunter:
                 k=16,
                 w=1,
                 p=100,
-                P=2000000,
+                P=500000,
                 e=0.1,
                 f=2
             )
