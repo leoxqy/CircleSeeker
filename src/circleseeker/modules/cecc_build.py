@@ -1442,7 +1442,7 @@ class CeccBuild:
                 "CeccClass": cecc_class,
                 "length": meta.get("length", cons_len),
                 "copy_number": meta.get("copy_number", 1.0),
-                "num_segments": len(segments),
+                "num_segments": len(segments) - 1,  # Exclude first truncated segment
                 "num_distinct_loci": len(first_half_loci),
                 "cumulative_length": cum_len,
                 "match_degree": round(match_degree, 2),
@@ -1465,10 +1465,11 @@ class CeccBuild:
                 "chromosomes": ",".join(str(c) for c in sorted(chroms)),
             }
 
-            for i, seg in enumerate(segments):
+            # Skip the first segment (truncated at read start) and start numbering from 2
+            for i, seg in enumerate(segments[1:], start=2):
                 row = dict(base)
                 row.update({
-                    "segment_in_circle": i + 1,
+                    "segment_in_circle": i,
                     ColumnStandard.CHR: seg.chr,
                     ColumnStandard.START0: seg.start0,
                     ColumnStandard.END0: seg.end0,
