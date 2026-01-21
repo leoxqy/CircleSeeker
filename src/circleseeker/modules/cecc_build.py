@@ -1390,26 +1390,29 @@ class CeccBuild:
             low_mapq = mapq_best < self.MAPQ_LOW_THRESHOLD
             low_identity = identity_best < self.IDENTITY_LOW_THRESHOLD
 
-            # Convert alignments to segments
-            segments = [
-                AlignmentSegment(
-                    chr=aln.chrom,
-                    start0=aln.ref_start,
-                    end0=aln.ref_end,
-                    strand=aln.strand,
-                    q_start=aln.query_start,
-                    q_end=aln.query_end,
-                    alignment_length=aln.query_end - aln.query_start,
-                    node_id=i,
-                )
-                for i, aln in enumerate(alns)
-            ]
+            # Convert alignments to segments and sort by query position
+            # This reflects the actual structure of the eccDNA
+            segments = sorted(
+                [
+                    AlignmentSegment(
+                        chr=aln.chrom,
+                        start0=aln.ref_start,
+                        end0=aln.ref_end,
+                        strand=aln.strand,
+                        q_start=aln.query_start,
+                        q_end=aln.query_end,
+                        alignment_length=aln.query_end - aln.query_start,
+                        node_id=i,
+                    )
+                    for i, aln in enumerate(alns)
+                ],
+                key=lambda x: x.q_start,
+            )
 
-            # Calculate gap statistics
-            sorted_segs = sorted(segments, key=lambda x: x.q_start)
+            # Calculate gap statistics (segments already sorted by q_start)
             gaps = [
-                sorted_segs[i].q_start - sorted_segs[i - 1].q_end
-                for i in range(1, len(sorted_segs))
+                segments[i].q_start - segments[i - 1].q_end
+                for i in range(1, len(segments))
             ]
             max_gap = max(gaps) if gaps else 0
             avg_gap = sum(gaps) / len(gaps) if gaps else 0.0
