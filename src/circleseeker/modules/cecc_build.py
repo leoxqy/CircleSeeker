@@ -1355,13 +1355,22 @@ class CeccBuild:
                 base_id, {"reads": base_id, "length": 0, "copy_number": 1.0}
             )
 
-            # Determine Cecc class
-            chroms = set(locus[0] for locus in distinct_loci)
-            cecc_class = "Cecc-InterChr" if len(chroms) > 1 else "Cecc-IntraChr"
-
             # Calculate metrics
             query_len = alns[0].query_len if alns else 0
             cons_len = query_len // 2  # Half of doubled length
+
+            # Filter to first half alignments for single-copy ring output
+            first_half_alns = [
+                aln for aln in alns
+                if (aln.query_start + aln.query_end) / 2 < cons_len
+            ]
+
+            # Recalculate distinct loci based on first half only
+            first_half_loci = self._count_distinct_loci(first_half_alns, loci_merge_distance)
+
+            # Determine Cecc class based on first half loci
+            chroms = set(locus[0] for locus in first_half_loci)
+            cecc_class = "Cecc-InterChr" if len(chroms) > 1 else "Cecc-IntraChr"
 
             # Coverage
             intervals = [(aln.query_start, aln.query_end) for aln in alns]
@@ -1390,8 +1399,12 @@ class CeccBuild:
             low_mapq = mapq_best < self.MAPQ_LOW_THRESHOLD
             low_identity = identity_best < self.IDENTITY_LOW_THRESHOLD
 
-            # Convert alignments to segments and sort by query position
-            # This reflects the actual structure of the eccDNA
+            # Skip if no alignments in first half (shouldn't happen for valid Cecc)
+            if not first_half_alns:
+                continue
+
+            # Convert first half alignments to segments and sort by query position
+            # This outputs only the single-copy ring structure
             segments = sorted(
                 [
                     AlignmentSegment(
@@ -1404,7 +1417,7 @@ class CeccBuild:
                         alignment_length=aln.query_end - aln.query_start,
                         node_id=i,
                     )
-                    for i, aln in enumerate(alns)
+                    for i, aln in enumerate(first_half_alns)
                 ],
                 key=lambda x: x.q_start,
             )
@@ -1417,9 +1430,9 @@ class CeccBuild:
             max_gap = max(gaps) if gaps else 0
             avg_gap = sum(gaps) / len(gaps) if gaps else 0.0
 
-            # Cumulative alignment length
+            # Cumulative alignment length (based on single-copy segments)
             cum_len = sum(seg.alignment_length for seg in segments)
-            match_degree = (cum_len / query_len * 100) if query_len > 0 else 0.0
+            match_degree = (cum_len / cons_len * 100) if cons_len > 0 else 0.0
 
             # Build output rows (one row per segment)
             base = {
@@ -1430,7 +1443,7 @@ class CeccBuild:
                 "length": meta.get("length", cons_len),
                 "copy_number": meta.get("copy_number", 1.0),
                 "num_segments": len(segments),
-                "num_distinct_loci": len(distinct_loci),
+                "num_distinct_loci": len(first_half_loci),
                 "cumulative_length": cum_len,
                 "match_degree": round(match_degree, 2),
                 "match_degree_2nd": None,
