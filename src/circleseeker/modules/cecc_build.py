@@ -1,5 +1,5 @@
 """
-Cecc-Build v4 - LAST-based CeccDNA Detection
+LAST-based CeccDNA Detection Module
 
 Uses LAST aligner for precise alignment of doubled sequences, then detects
 CeccDNA by finding repeat patterns in the doubled sequence.
@@ -16,19 +16,13 @@ Detection logic:
    - Both align to same genomic position
 4. If doubled repeat pattern found -> Cecc confirmed
 
-This approach achieves:
-- Precision: ~87.5%
-- Recall: ~100% (on unclassified input)
-
-Output format is fully compatible with cecc_build.py (V1/V2/V3).
+Falls back to graph-based detection when LAST is unavailable.
 """
 
 from __future__ import annotations
 
 import logging
-import shutil
 import subprocess
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Any, List, Tuple, Dict, Set
@@ -89,10 +83,9 @@ class AlignmentSegment:
 class CeccBuild:
     """LAST-based CeccDNA detection.
 
-    V4 uses LAST aligner for precise alignment, then detects doubled repeat
-    patterns that indicate chimeric circular DNA.
-
-    Output format is fully compatible with CeccBuild (V1/V2/V3).
+    Uses LAST aligner for precise alignment, then detects doubled repeat
+    patterns that indicate chimeric circular DNA. Falls back to graph-based
+    detection when LAST is unavailable.
     """
 
     # Import unified constants
@@ -142,7 +135,7 @@ class CeccBuild:
         logger: Optional[logging.Logger] = None,
     ) -> None:
         """
-        Initialize CeccBuild v4 (LAST-based).
+        Initialize CeccBuild.
 
         Args:
             gap_tolerance: Max gap between adjacent alignments (for stats only)
@@ -612,26 +605,194 @@ class CeccBuild:
         return result_df
 
     def _check_last_available(self) -> bool:
-        """Check if LAST tools are available."""
+        """Check if LAST tools (lastdb, lastal, last-split) are available."""
         try:
             lastdb = subprocess.run(["lastdb", "--version"], capture_output=True, check=False)
             lastal = subprocess.run(["lastal", "--version"], capture_output=True, check=False)
+            # last-split doesn't have --version, check with --help
+            last_split = subprocess.run(["last-split", "--help"], capture_output=True, check=False)
         except FileNotFoundError:
             return False
-        return lastdb.returncode == 0 and lastal.returncode == 0
+        # last-split returns 0 for --help
+        return lastdb.returncode == 0 and lastal.returncode == 0 and last_split.returncode == 0
 
-    def _build_last_db(self, reference_fasta: Path, db_prefix: Path) -> Path:
-        """Build LAST database from reference."""
-        if db_prefix.with_suffix(".suf").exists():
-            self.logger.info(f"Using existing LAST database: {db_prefix}")
-            return db_prefix
+    def _canonical_lastdb_prefix(self, reference_fasta: Path) -> Path:
+        """Return canonical LAST database prefix path (ref.fa → ref.lastdb)."""
+        ref_str = str(reference_fasta)
+        for suffix in (".fasta", ".fa", ".fna"):
+            if ref_str.endswith(suffix):
+                return Path(ref_str[: -len(suffix)] + ".lastdb")
+        return Path(ref_str + ".lastdb")
 
-        self.logger.info(f"Building LAST database...")
-        cmd = ["lastdb", "-P", str(self.threads), str(db_prefix), str(reference_fasta)]
+    def _ensure_last_db(self, reference_fasta: Path) -> Path:
+        """Ensure LAST database exists and return its prefix path.
+
+        Similar to minimap2's index handling: check if index exists next to
+        reference, if not, build it there. This allows one-time indexing
+        that persists across runs.
+        """
+        # Canonical path: next to reference genome
+        canonical_prefix = self._canonical_lastdb_prefix(reference_fasta)
+
+        # Fallback: in tmp_dir if provided
+        lastdb_in_temp = self.tmp_dir / canonical_prefix.name if self.tmp_dir else None
+
+        # Check candidates (LAST index consists of multiple files, .suf is required)
+        for candidate in [canonical_prefix, lastdb_in_temp]:
+            if candidate and candidate.with_suffix(".suf").exists():
+                self.logger.info(f"Using existing LAST database: {candidate}")
+                return candidate
+
+        # Not found, build at canonical location (next to reference)
+        self.logger.info(f"Building LAST database: {canonical_prefix}")
+        cmd = ["lastdb", "-P", str(self.threads), str(canonical_prefix), str(reference_fasta)]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"lastdb failed: {result.stderr}")
-        return db_prefix
+
+        return canonical_prefix
+
+    def _run_last_split_alignment(
+        self,
+        query_fasta: Path,
+        db_prefix: Path,
+        output_maf: Path,
+    ) -> Path:
+        """Run LAST alignment with last-split for optimal chain selection.
+
+        last-split selects the best alignment chain for each query region,
+        filtering out ambiguous multi-mapping and keeping only high-confidence
+        alignments. This significantly reduces false positives from repetitive
+        elements.
+        """
+        self.logger.info("Running lastal | last-split...")
+
+        # Run lastal (outputs MAF format by default)
+        lastal_cmd = [
+            "lastal",
+            "-P", str(self.threads),
+            str(db_prefix),
+            str(query_fasta),
+        ]
+
+        # Pipe to last-split
+        lastal_proc = subprocess.Popen(
+            lastal_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        split_proc = subprocess.Popen(
+            ["last-split"],
+            stdin=lastal_proc.stdout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        # Close lastal stdout to allow it to receive SIGPIPE
+        if lastal_proc.stdout:
+            lastal_proc.stdout.close()
+
+        split_output, split_err = split_proc.communicate()
+        lastal_proc.wait()
+
+        if split_proc.returncode != 0:
+            raise RuntimeError(f"last-split failed: {split_err.decode()}")
+
+        # Write output to file
+        with open(output_maf, "wb") as f:
+            f.write(split_output)
+
+        return output_maf
+
+    def _parse_last_split_maf(self, maf_file: Path) -> Dict[str, List[LastAlignment]]:
+        """Parse last-split MAF format output.
+
+        MAF format has alignment blocks starting with 'a' line followed by
+        's' lines for each sequence in the alignment.
+        """
+        alignments: Dict[str, List[LastAlignment]] = defaultdict(list)
+
+        with open(maf_file, "r") as f:
+            current_score = 0
+            ref_info: Optional[dict] = None
+
+            for line in f:
+                line = line.strip()
+
+                if line.startswith("a "):
+                    # Alignment header - extract score
+                    current_score = 0
+                    ref_info = None
+                    for part in line.split():
+                        if part.startswith("score="):
+                            try:
+                                current_score = int(part.split("=")[1])
+                            except (ValueError, IndexError):
+                                pass
+
+                elif line.startswith("s "):
+                    # Sequence line: s name start size strand seqSize sequence
+                    parts = line.split()
+                    if len(parts) < 7:
+                        continue
+
+                    try:
+                        name = parts[1]
+                        start = int(parts[2])
+                        size = int(parts[3])
+                        strand = parts[4]
+                        seq_size = int(parts[5])
+                        # parts[6] is the sequence, not needed for coordinates
+
+                        if ref_info is None:
+                            # First 's' line is reference
+                            ref_info = {
+                                "chrom": name,
+                                "start": start,
+                                "size": size,
+                                "strand": strand,
+                            }
+                        else:
+                            # Second 's' line is query
+                            query_id = name
+                            query_strand = strand
+                            query_len = seq_size
+
+                            # Convert coordinates to forward strand
+                            # MAF uses reverse complement coordinates for - strand
+                            if query_strand == "+":
+                                query_start = start
+                                query_end = start + size
+                            else:
+                                # Convert from reverse complement to forward coordinates
+                                query_start = seq_size - start - size
+                                query_end = seq_size - start
+
+                            # Estimate identity (last-split doesn't provide it directly)
+                            # Use 95% as default since last-split filters low-quality
+                            identity = 95.0
+
+                            aln = LastAlignment(
+                                chrom=ref_info["chrom"],
+                                ref_start=ref_info["start"],
+                                ref_end=ref_info["start"] + ref_info["size"],
+                                query_start=query_start,
+                                query_end=query_end,
+                                query_len=query_len,
+                                score=current_score,
+                                identity=identity,
+                                strand="+" if query_strand == "+" else "-",
+                            )
+                            alignments[query_id].append(aln)
+
+                            # Reset for next alignment
+                            ref_info = None
+
+                    except (ValueError, IndexError):
+                        continue
+
+        return alignments
 
     def _run_last_alignment(
         self,
@@ -639,12 +800,10 @@ class CeccBuild:
         db_prefix: Path,
         output_tab: Path,
     ) -> Path:
-        """Run LAST alignment."""
+        """Run LAST alignment (legacy TAB format, kept for fallback)."""
         cmd = [
             "lastal",
             "-P", str(self.threads),
-            "-Q", "0",  # FASTA input
-            "-m", "10",  # Max alignments per query position
             "-f", "TAB",  # TAB output format
             str(db_prefix),
             str(query_fasta),
@@ -1044,6 +1203,273 @@ class CeccBuild:
 
         return result_df
 
+    def _count_distinct_loci(
+        self,
+        alns: List[LastAlignment],
+        merge_distance: int = 500,
+    ) -> List[Tuple[str, int, int]]:
+        """Count distinct genomic loci from alignments.
+
+        Merges nearby alignments on the same chromosome into single loci.
+        Returns list of (chrom, start, end) tuples for each distinct locus.
+
+        Args:
+            alns: List of alignments
+            merge_distance: Maximum distance (bp) to merge adjacent alignments
+
+        Returns:
+            List of distinct loci as (chrom, start, end) tuples
+        """
+        if not alns:
+            return []
+
+        # Group by chromosome
+        by_chrom: Dict[str, List[Tuple[int, int]]] = defaultdict(list)
+        for aln in alns:
+            by_chrom[aln.chrom].append((aln.ref_start, aln.ref_end))
+
+        # Merge overlapping/adjacent regions on each chromosome
+        distinct_loci: List[Tuple[str, int, int]] = []
+        for chrom, regions in by_chrom.items():
+            regions.sort()
+            merged: List[Tuple[int, int]] = []
+
+            for start, end in regions:
+                if merged and start <= merged[-1][1] + merge_distance:
+                    # Extend existing region
+                    merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+                else:
+                    # New region
+                    merged.append((start, end))
+
+            for start, end in merged:
+                distinct_loci.append((chrom, start, end))
+
+        return distinct_loci
+
+    def _has_closure_pattern(
+        self,
+        alns: List[LastAlignment],
+        position_tolerance: int = 50,
+        min_query_gap: int = 200,
+    ) -> Tuple[bool, Optional[Tuple[LastAlignment, LastAlignment]]]:
+        """Detect closure pattern in alignments.
+
+        A closure pattern indicates a circular structure where two different
+        query positions map to the same genomic position.
+
+        Args:
+            alns: List of alignments
+            position_tolerance: Maximum distance (bp) to consider same genomic position
+            min_query_gap: Minimum distance (bp) between query positions
+
+        Returns:
+            Tuple of (has_closure, closure_pair) where closure_pair is the
+            two alignments forming the closure, or None if no closure found.
+        """
+        if len(alns) < 2:
+            return False, None
+
+        for i, a1 in enumerate(alns):
+            for j, a2 in enumerate(alns):
+                if i >= j:
+                    continue
+
+                # Check query gap (must be significantly different positions)
+                q1_mid = (a1.query_start + a1.query_end) / 2
+                q2_mid = (a2.query_start + a2.query_end) / 2
+                q_gap = abs(q1_mid - q2_mid)
+
+                if q_gap < min_query_gap:
+                    continue
+
+                # Must be same chromosome for closure
+                if a1.chrom != a2.chrom:
+                    continue
+
+                # Check if genomic positions are similar (closure condition)
+                s1_mid = (a1.ref_start + a1.ref_end) / 2
+                s2_mid = (a2.ref_start + a2.ref_end) / 2
+                s_gap = abs(s1_mid - s2_mid)
+
+                if s_gap < position_tolerance:
+                    return True, (a1, a2)
+
+        return False, None
+
+    def detect_cecc_with_closure_and_loci(
+        self,
+        alignments: Dict[str, List[LastAlignment]],
+        metadata: Dict[str, dict],
+        position_tolerance: int = 50,
+        min_query_gap: int = 200,
+        min_distinct_loci: int = 2,
+        loci_merge_distance: int = 500,
+    ) -> pd.DataFrame:
+        """Detect CeccDNA using closure pattern + distinct loci filtering.
+
+        This method provides high precision by requiring:
+        1. Closure pattern: Different query positions mapping to same genomic position
+        2. Multiple distinct loci: At least 2 different genomic regions
+
+        The closure pattern confirms the circular structure (from doubled sequence),
+        while the distinct loci requirement filters out UeccDNA (single-source circles).
+
+        Args:
+            alignments: Dictionary mapping query_id to list of alignments
+            metadata: Dictionary with read metadata (reads, length, copy_number)
+            position_tolerance: Max distance (bp) to consider same genomic position
+            min_query_gap: Min distance (bp) between query positions for closure
+            min_distinct_loci: Minimum number of distinct genomic loci required
+            loci_merge_distance: Distance (bp) to merge adjacent loci
+
+        Returns:
+            DataFrame with Cecc detection results
+        """
+        rows: list[dict] = []
+
+        for query_id, alns in alignments.items():
+            if len(alns) < 2:
+                continue
+
+            # Step 1: Check for closure pattern
+            has_closure, closure_pair = self._has_closure_pattern(
+                alns,
+                position_tolerance=position_tolerance,
+                min_query_gap=min_query_gap,
+            )
+
+            if not has_closure:
+                continue
+
+            # Step 2: Count distinct genomic loci
+            distinct_loci = self._count_distinct_loci(alns, loci_merge_distance)
+
+            if len(distinct_loci) < min_distinct_loci:
+                continue
+
+            # This is a confirmed Cecc!
+            # Extract base read ID and metadata
+            base_id = query_id.split("|")[0]
+            meta = metadata.get(query_id) or metadata.get(
+                base_id, {"reads": base_id, "length": 0, "copy_number": 1.0}
+            )
+
+            # Determine Cecc class
+            chroms = set(locus[0] for locus in distinct_loci)
+            cecc_class = "Cecc-InterChr" if len(chroms) > 1 else "Cecc-IntraChr"
+
+            # Calculate metrics
+            query_len = alns[0].query_len if alns else 0
+            cons_len = query_len // 2  # Half of doubled length
+
+            # Coverage
+            intervals = [(aln.query_start, aln.query_end) for aln in alns]
+            merged_intervals = self._merge_intervals(intervals)
+            total_coverage = sum(end - start for start, end in merged_intervals)
+            cov_best = total_coverage / query_len if query_len > 0 else 0.0
+
+            # Quality metrics
+            identity_values = [aln.identity for aln in alns]
+            identity_best = max(identity_values) if identity_values else 0.0
+            identity_min = min(identity_values) if identity_values else 0.0
+
+            # LAST doesn't provide MAPQ, use high default for last-split output
+            mapq_best = 60
+            mapq_min = 60
+
+            # Confidence score
+            chain_unique = len(distinct_loci) / len(alns) if alns else 0.0
+            conf = self._geom_mean([
+                self._norm_mapq(mapq_best),
+                self._norm_identity(identity_best),
+                self._clamp01(cov_best),
+                self._clamp01(chain_unique),
+            ])
+
+            low_mapq = mapq_best < self.MAPQ_LOW_THRESHOLD
+            low_identity = identity_best < self.IDENTITY_LOW_THRESHOLD
+
+            # Convert alignments to segments
+            segments = [
+                AlignmentSegment(
+                    chr=aln.chrom,
+                    start0=aln.ref_start,
+                    end0=aln.ref_end,
+                    strand=aln.strand,
+                    q_start=aln.query_start,
+                    q_end=aln.query_end,
+                    alignment_length=aln.query_end - aln.query_start,
+                    node_id=i,
+                )
+                for i, aln in enumerate(alns)
+            ]
+
+            # Calculate gap statistics
+            sorted_segs = sorted(segments, key=lambda x: x.q_start)
+            gaps = [
+                sorted_segs[i].q_start - sorted_segs[i - 1].q_end
+                for i in range(1, len(sorted_segs))
+            ]
+            max_gap = max(gaps) if gaps else 0
+            avg_gap = sum(gaps) / len(gaps) if gaps else 0.0
+
+            # Cumulative alignment length
+            cum_len = sum(seg.alignment_length for seg in segments)
+            match_degree = (cum_len / query_len * 100) if query_len > 0 else 0.0
+
+            # Build output rows (one row per segment)
+            base = {
+                "query_id": query_id,
+                "reads": meta.get("reads", base_id),
+                "eccdna_type": "Cecc",
+                "CeccClass": cecc_class,
+                "length": meta.get("length", cons_len),
+                "copy_number": meta.get("copy_number", 1.0),
+                "num_segments": len(segments),
+                "num_distinct_loci": len(distinct_loci),
+                "cumulative_length": cum_len,
+                "match_degree": round(match_degree, 2),
+                "match_degree_2nd": None,
+                "best_chain_signature": None,
+                "second_chain_signature": None,
+                ColumnStandard.MAPQ_BEST: mapq_best,
+                ColumnStandard.MAPQ_MIN: mapq_min,
+                ColumnStandard.IDENTITY_BEST: round(identity_best, 3),
+                ColumnStandard.IDENTITY_MIN: round(identity_min, 3),
+                ColumnStandard.QUERY_COV_BEST: round(cov_best, 6),
+                ColumnStandard.QUERY_COV_2ND: 0.0,
+                ColumnStandard.CONFIDENCE_SCORE: round(conf, 6),
+                ColumnStandard.LOW_MAPQ: low_mapq,
+                ColumnStandard.LOW_IDENTITY: low_identity,
+                "C_cov_best": round(cov_best, 6),
+                "C_cov_2nd": 0.0,
+                "max_gap": max_gap,
+                "avg_gap": round(avg_gap, 2),
+                "chromosomes": ",".join(str(c) for c in sorted(chroms)),
+            }
+
+            for i, seg in enumerate(segments):
+                row = dict(base)
+                row.update({
+                    "segment_in_circle": i + 1,
+                    ColumnStandard.CHR: seg.chr,
+                    ColumnStandard.START0: seg.start0,
+                    ColumnStandard.END0: seg.end0,
+                    ColumnStandard.STRAND: seg.strand,
+                    "q_start": seg.q_start,
+                    "q_end": seg.q_end,
+                    "alignment_length": seg.alignment_length,
+                })
+                rows.append(row)
+
+        result_df = pd.DataFrame(rows)
+        if not result_df.empty:
+            n_cecc = result_df["query_id"].nunique()
+            self.logger.info(f"Cecc detected (closure + loci filter): {n_cecc} queries")
+
+        return result_df
+
     def run(
         self,
         input_csv: Path,
@@ -1081,14 +1507,13 @@ class CeccBuild:
             self.half_query_buffer = max(0, int(half_query_buffer))
 
         self.logger.info("=" * 60)
-        self.logger.info("CeccBuild v4 - LAST-based CeccDNA Detection")
+        self.logger.info("CeccBuild - last-split + closure + loci filter")
         self.logger.info("=" * 60)
         self.logger.info(f"Parameters:")
-        self.logger.info(f"  - Position tolerance: {self.position_tolerance} bp")
+        self.logger.info(f"  - Position tolerance (closure): {self.position_tolerance} bp")
+        self.logger.info(f"  - Min query gap (closure): {self.min_repeat_query_gap} bp")
+        self.logger.info(f"  - Min distinct loci: {self.min_segments}")
         self.logger.info(f"  - Min identity: {self.min_identity}%")
-        self.logger.info(f"  - Min query coverage: {self.min_query_coverage}")
-        self.logger.info(f"  - Min repeat query gap: {self.min_repeat_query_gap} bp")
-        self.logger.info(f"  - Half buffer: {self.half_query_buffer} bp")
 
         # Read input CSV
         self.logger.info(f"Reading: {input_csv}")
@@ -1121,50 +1546,48 @@ class CeccBuild:
         # Get metadata
         metadata = self._get_metadata_from_csv(df)
 
-        def _run_last_in_tmp(tmpdir: Path) -> pd.DataFrame:
-            # Extract sequences
-            query_fasta = tmpdir / "query.fasta"
-            extracted = self._extract_sequences(read_ids, fasta_file, query_fasta)
-            self.logger.info(f"Extracted {extracted} sequences")
+        # Ensure LAST database exists (one-time indexing, reused across runs)
+        db_prefix = self._ensure_last_db(reference_fasta)
 
-            if extracted == 0:
-                self.logger.warning("No sequences extracted")
-                return pd.DataFrame()
+        # Determine working directory for temporary files
+        work_dir = self.tmp_dir
+        if work_dir is None:
+            work_dir = output_csv.parent
+        work_dir = Path(work_dir)
+        work_dir.mkdir(parents=True, exist_ok=True)
 
-            # Build LAST database
-            db_prefix = tmpdir / "lastdb"
-            self._build_last_db(reference_fasta, db_prefix)
+        # Extract sequences
+        query_fasta = work_dir / "cecc_query.fasta"
+        extracted = self._extract_sequences(read_ids, fasta_file, query_fasta)
+        self.logger.info(f"Extracted {extracted} sequences")
 
-            # Run LAST alignment
-            tab_file = tmpdir / "alignments.tab"
-            self._run_last_alignment(query_fasta, db_prefix, tab_file)
+        if extracted == 0:
+            self.logger.warning("No sequences extracted")
+            result_df = pd.DataFrame()
+        else:
+            # Run LAST alignment with last-split for optimal chain selection
+            maf_file = work_dir / "cecc_alignments.maf"
+            self._run_last_split_alignment(query_fasta, db_prefix, maf_file)
 
-            # Parse LAST results
-            alignments = self._parse_last_tab(tab_file)
+            # Parse last-split MAF results
+            alignments = self._parse_last_split_maf(maf_file)
             self.logger.info(f"Parsed {len(alignments)} query alignments")
 
-            # Detect circles
-            return self.detect_circles_from_last(alignments, metadata)
+            # Detect circles using closure pattern + distinct loci filter
+            result_df = self.detect_cecc_with_closure_and_loci(
+                alignments,
+                metadata,
+                position_tolerance=self.position_tolerance,
+                min_query_gap=self.min_repeat_query_gap,
+                min_distinct_loci=self.min_segments,
+                loci_merge_distance=500,
+            )
 
-        result_df = pd.DataFrame()
-        tmp_root = self.tmp_dir
-        if tmp_root is None and self.keep_tmp:
-            tmp_root = output_csv.parent / "cecc_last_tmp"
-
-        if tmp_root is not None:
-            tmp_root = Path(tmp_root)
-            tmp_root.mkdir(parents=True, exist_ok=True)
-            tmpdir = Path(tempfile.mkdtemp(prefix="cecc_last_", dir=tmp_root))
-            try:
-                result_df = _run_last_in_tmp(tmpdir)
-            finally:
-                if self.keep_tmp:
-                    self.logger.info(f"Keeping LAST temp dir: {tmpdir}")
-                else:
-                    shutil.rmtree(tmpdir, ignore_errors=True)
-        else:
-            with tempfile.TemporaryDirectory() as tmpdir_str:
-                result_df = _run_last_in_tmp(Path(tmpdir_str))
+            # Clean up alignment temp files if not keeping
+            if not self.keep_tmp:
+                for tmp_file in [query_fasta, maf_file]:
+                    if tmp_file.exists():
+                        tmp_file.unlink()
 
         # Save output
         output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -1226,9 +1649,24 @@ class CeccBuild:
         fasta_file: Optional[Path] = None,
     ) -> pd.DataFrame:
         """
-        V1/V2/V3-compatible pipeline interface.
+        Run the CeccBuild pipeline.
 
-        Added reference_fasta and fasta_file parameters for LAST-based detection.
+        Args:
+            input_csv: Input alignment CSV/TSV
+            output_csv: Output CSV file
+            overlap_threshold: Segment overlap threshold
+            min_segments: Minimum number of segments
+            edge_tolerance: Edge tolerance in bp
+            position_tolerance: Position tolerance in bp
+            min_match_degree: Minimum match degree percentage
+            max_rotations: Maximum rotations for graph-based detection
+            locus_overlap_threshold: Locus overlap threshold
+            half_query_buffer: Buffer around query midpoint in bp
+            reference_fasta: Reference genome FASTA (for LAST-based detection)
+            fasta_file: Tandem-to-ring FASTA with doubled sequences
+
+        Returns:
+            DataFrame with Cecc detection results
         """
         self.min_segments = min_segments
         self.gap_tolerance = edge_tolerance
@@ -1253,7 +1691,7 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="CeccBuild v4 - LAST-based CeccDNA Detection"
+        description="CeccBuild - LAST-based CeccDNA Detection"
     )
     parser.add_argument("-i", "--input", required=True, help="Input alignment TSV/CSV")
     parser.add_argument("-o", "--output", required=True, help="Output CSV")

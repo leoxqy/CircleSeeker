@@ -505,6 +505,67 @@ class MeccDNASimulator(EccDNASimulator):
 class CeccDNASimulator(EccDNASimulator):
     """Simulate CeccDNA (Chimeric eccDNA from multiple segments)."""
 
+    # Minimum distance between IntraChr segments to ensure they are distinct loci
+    MIN_INTRACHR_SEGMENT_DISTANCE = 1000
+
+    def _generate_non_overlapping_regions(
+        self,
+        chrom: str,
+        num_segments: int,
+        min_len: int,
+        max_len: int,
+        min_distance: int = 1000,
+        max_attempts: int = 100,
+    ) -> List[GenomicRegion]:
+        """Generate non-overlapping regions with minimum distance between them.
+
+        For IntraChr CeccDNA, segments must be far enough apart to be
+        recognized as distinct genomic loci (not merged during detection).
+        """
+        chr_len = len(self.genome[chrom])
+        regions: List[GenomicRegion] = []
+
+        for seg_idx in range(num_segments):
+            found = False
+            for attempt in range(max_attempts):
+                length = random.randint(min_len, max_len)
+                max_start = chr_len - length
+                if max_start < 0:
+                    break
+
+                start = random.randint(0, max_start)
+                end = start + length
+                strand = random.choice(["+", "-"])
+
+                # Check distance from existing regions
+                too_close = False
+                for existing in regions:
+                    # Calculate distance between regions
+                    if start < existing.start:
+                        distance = existing.start - end
+                    else:
+                        distance = start - existing.end
+
+                    if distance < min_distance:
+                        too_close = True
+                        break
+
+                if not too_close:
+                    region = GenomicRegion(chrom, start, end, strand)
+                    # Also check excluded intervals
+                    if not self._overlaps_excluded(region):
+                        regions.append(region)
+                        found = True
+                        break
+
+            # If we couldn't find a valid region after max_attempts,
+            # fall back to random (may overlap, but better than failing)
+            if not found:
+                region = self._random_region_avoiding_excluded(min_len, max_len, chrom)
+                regions.append(region)
+
+        return regions
+
     def generate(self, count: int) -> List[EccDNARecord]:
         """Generate CeccDNA records."""
         records = []
@@ -522,21 +583,28 @@ class CeccDNASimulator(EccDNASimulator):
             # Generate segments
             regions = []
             sequences = []
+            min_len, max_len = self.config.cecc_segment_length_range
 
             if is_inter:
                 # Inter-chromosomal: use different chromosomes
                 chroms = random.sample(self.chromosomes,
                                        min(num_segments, len(self.chromosomes)))
+                for chrom in chroms:
+                    region = self._random_region_avoiding_excluded(min_len, max_len, chrom)
+                    regions.append(region)
+                    sequences.append(self._get_sequence(region))
             else:
-                # Intra-chromosomal: use same chromosome
+                # Intra-chromosomal: use same chromosome with guaranteed distance
                 chrom = random.choice(self.chromosomes)
-                chroms = [chrom] * num_segments
-
-            for j, chrom in enumerate(chroms):
-                min_len, max_len = self.config.cecc_segment_length_range
-                region = self._random_region_avoiding_excluded(min_len, max_len, chrom)
-                regions.append(region)
-                sequences.append(self._get_sequence(region))
+                regions = self._generate_non_overlapping_regions(
+                    chrom=chrom,
+                    num_segments=num_segments,
+                    min_len=min_len,
+                    max_len=max_len,
+                    min_distance=self.MIN_INTRACHR_SEGMENT_DISTANCE,
+                )
+                for region in regions:
+                    sequences.append(self._get_sequence(region))
 
             # Combine sequences
             full_sequence = ''.join(sequences)
