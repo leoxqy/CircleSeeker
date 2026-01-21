@@ -83,7 +83,7 @@ class TestToolConfig:
         assert config.tidehunter["k"] == 16
         assert config.tidehunter["w"] == 1
         assert config.tidehunter["p"] == 100
-        assert config.tidehunter["P"] == 500000
+        assert config.tidehunter["P"] == 2000000
         assert config.tidehunter["e"] == 0.1
         assert config.tidehunter["f"] == 2
 
