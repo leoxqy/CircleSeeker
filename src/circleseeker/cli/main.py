@@ -42,6 +42,7 @@ from .common_options import (
     config_option,
     threads_option,
     keep_tmp_option,
+    turbo_option,
 )
 from .pipeline import ADVANCED_ONLY_KEYS, PipelineOptions, execute_pipeline
 
@@ -123,6 +124,7 @@ def _print_advanced_help(ctx: click.Context, _param: click.Parameter, value: boo
 @config_option
 @threads_option
 @keep_tmp_option
+@turbo_option
 # Sensitivity preset option
 @click.option(
     "--preset",
@@ -176,6 +178,7 @@ def cli(
     config: Optional[Path],
     threads: Optional[int],
     keep_tmp: bool,
+    turbo: bool,
     preset: Optional[str],
     verbose: int,
     start_from: Optional[int],
@@ -266,6 +269,7 @@ def cli(
             config_path=config,
             threads=threads,
             keep_tmp=keep_tmp,
+            turbo=turbo,
             start_from=start_from,
             stop_at=stop_at,
             resume=resume,

@@ -146,6 +146,10 @@ class RuntimeConfig:
     checkpoint_policy: str = "continue"
     # Enable tqdm progress where available
     enable_progress: bool = True
+    # Turbo mode: use /dev/shm for temporary files (RAM-backed, faster I/O)
+    turbo_mode: bool = False
+    # Minimum required space in /dev/shm for turbo mode (in GB)
+    turbo_min_space_gb: float = 10.0
 
 
 @dataclass

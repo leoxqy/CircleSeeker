@@ -376,23 +376,139 @@ class Pipeline:
         # Instance-level inference tool cache (thread-safe)
         self._inference_tool = None
 
-        # Setup directory structure using configured temp dir
-        configured_tmp = config.runtime.tmp_dir if config.runtime.tmp_dir else Path(".tmp_work")
+        # Turbo mode state
+        self._turbo_mode_active = False
+        self._turbo_shm_path: Optional[Path] = None
+        self._symlink_path: Optional[Path] = None
 
-        # Determine temp directory path
-        # Track whether temp_dir is safe to auto-delete (only for relative paths we create)
+        # Setup directory structure
+        self.final_output_dir = config.output_dir
+        self.final_output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Track whether temp_dir is safe to auto-delete
         self._temp_dir_safe_to_delete = False
+
+        # Check if turbo mode should be enabled
+        if config.runtime.turbo_mode:
+            turbo_result = self._setup_turbo_mode(config)
+            if turbo_result:
+                self.temp_dir, self._turbo_shm_path, self._symlink_path = turbo_result
+                self._turbo_mode_active = True
+                self._temp_dir_safe_to_delete = True
+                self.logger.info(
+                    f"Turbo mode enabled: temp files in {self._turbo_shm_path}, "
+                    f"symlink at {self._symlink_path}"
+                )
+            else:
+                # Fallback to normal mode
+                self.logger.warning("Turbo mode unavailable, falling back to normal mode")
+                self._setup_normal_mode(config)
+        else:
+            self._setup_normal_mode(config)
+
+        # Create temp directory
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Override config to use temp directory for all intermediate files
+        self.config.output_dir = self.temp_dir
+
+        # Keep checkpoint in final directory for persistence across runs
+        self.state_file = self.final_output_dir / f"{config.prefix}.checkpoint"
+        self.state = self._load_state()
+
+    def _check_shm_space(self, min_space_gb: float) -> tuple[bool, float]:
+        """Check if /dev/shm has enough space.
+
+        Args:
+            min_space_gb: Minimum required space in GB
+
+        Returns:
+            Tuple of (has_enough_space, available_space_gb)
+        """
+        shm_path = Path("/dev/shm")
+        if not shm_path.exists():
+            return False, 0.0
+
+        try:
+            import os
+            stat = os.statvfs(shm_path)
+            available_bytes = stat.f_bavail * stat.f_frsize
+            available_gb = available_bytes / (1024 ** 3)
+            return available_gb >= min_space_gb, available_gb
+        except (OSError, AttributeError):
+            return False, 0.0
+
+    def _setup_turbo_mode(self, config: Config) -> Optional[tuple[Path, Path, Path]]:
+        """Setup turbo mode with /dev/shm.
+
+        Returns:
+            Tuple of (temp_dir, shm_path, symlink_path) if successful, None otherwise
+        """
+        # Check /dev/shm availability and space
+        min_space = config.runtime.turbo_min_space_gb
+        has_space, available_gb = self._check_shm_space(min_space)
+
+        if not has_space:
+            self.logger.warning(
+                f"/dev/shm has insufficient space: {available_gb:.1f}GB available, "
+                f"{min_space:.1f}GB required"
+            )
+            return None
+
+        # Generate unique directory name
+        import os
+        job_id = os.environ.get("SLURM_JOB_ID", str(os.getpid()))
+        shm_dir_name = f"circleseeker_{config.prefix}_{job_id}"
+        shm_path = Path("/dev/shm") / shm_dir_name
+
+        # Create /dev/shm directory
+        try:
+            shm_path.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError) as e:
+            self.logger.warning(f"Cannot create directory in /dev/shm: {e}")
+            return None
+
+        # Create symlink in output directory
+        symlink_path = self.final_output_dir / ".tmp"
+
+        # Remove existing symlink or directory if exists
+        if symlink_path.is_symlink():
+            symlink_path.unlink()
+        elif symlink_path.exists():
+            # If it's a real directory, we can't use turbo mode safely
+            self.logger.warning(
+                f"Cannot enable turbo mode: {symlink_path} exists and is not a symlink"
+            )
+            try:
+                shm_path.rmdir()
+            except OSError:
+                pass
+            return None
+
+        # Create symlink
+        try:
+            symlink_path.symlink_to(shm_path)
+        except OSError as e:
+            self.logger.warning(f"Cannot create symlink for turbo mode: {e}")
+            try:
+                shm_path.rmdir()
+            except OSError:
+                pass
+            return None
+
+        self.logger.info(f"Turbo mode: /dev/shm available space {available_gb:.1f}GB")
+        return symlink_path, shm_path, symlink_path
+
+    def _setup_normal_mode(self, config: Config) -> None:
+        """Setup normal mode with temp directory under output_dir."""
+        configured_tmp = config.runtime.tmp_dir if config.runtime.tmp_dir else Path(".tmp_work")
 
         if configured_tmp.is_absolute():
             # Absolute path: use as-is, but mark as unsafe to auto-delete
             self.temp_dir = configured_tmp
-            self.final_output_dir = config.output_dir
-            # Safety: don't auto-delete absolute paths to prevent accidental data loss
             self._temp_dir_safe_to_delete = False
         else:
-            # Reject dangerous relative tmp_dir configurations that could write outside output_dir or
-            # accidentally delete outputs during cleanup. If you want temp files outside output_dir,
-            # configure an absolute path for runtime.tmp_dir instead.
+            # Validate relative path
             if configured_tmp == Path(".") or str(configured_tmp).strip() in {"", "."}:
                 raise ConfigurationError(
                     "Invalid runtime.tmp_dir: must be a subdirectory (not '.'). "
@@ -404,28 +520,23 @@ class Pipeline:
                     "Use an absolute path if you want an external temp directory."
                 )
 
-            # Relative path: append to output_dir
             # Check if output_dir is already a temp directory from previous run
             if config.output_dir.name == configured_tmp.name:
-                # We're already in temp dir, go back to parent
                 self.final_output_dir = config.output_dir.parent
                 self.temp_dir = config.output_dir
             else:
-                # Normal case: set up temp directory relative to output
-                self.final_output_dir = config.output_dir
-                self.temp_dir = config.output_dir / configured_tmp
-            # Relative paths (subdirectories) are safe to auto-delete
+                self.temp_dir = self.final_output_dir / configured_tmp
+
             self._temp_dir_safe_to_delete = True
 
-            # Final guard: only auto-delete if temp_dir is a strict subdirectory of final_output_dir.
+            # Validate temp_dir is under final_output_dir
             try:
                 final_resolved = Path(self.final_output_dir).resolve(strict=False)
                 temp_resolved = Path(self.temp_dir).resolve(strict=False)
                 if temp_resolved == final_resolved:
                     raise ConfigurationError(
-                        "Invalid runtime.tmp_dir: resolves to output_dir; refusing to run because it "
-                        "would risk deleting your outputs. Choose a subdirectory name such as "
-                        "'.tmp_work' or use an absolute path."
+                        "Invalid runtime.tmp_dir: resolves to output_dir. "
+                        "Choose a subdirectory name such as '.tmp_work'."
                     )
                 temp_resolved.relative_to(final_resolved)
             except ValueError as exc:
@@ -433,17 +544,6 @@ class Pipeline:
                     "Invalid runtime.tmp_dir: resolves outside output_dir. "
                     "Use an absolute path if you want an external temp directory."
                 ) from exc
-
-        # Create directories
-        self.final_output_dir.mkdir(parents=True, exist_ok=True)
-        self.temp_dir.mkdir(parents=True, exist_ok=True)
-
-        # Override config to use temp directory for all intermediate files
-        self.config.output_dir = self.temp_dir
-
-        # Keep checkpoint in final directory for persistence across runs
-        self.state_file = self.final_output_dir / f"{config.prefix}.checkpoint"
-        self.state = self._load_state()
 
     def _compute_config_hash(self) -> str:
         """Compute hash of current configuration for validation.
@@ -615,14 +715,6 @@ class Pipeline:
 
     def _finalize_outputs(self) -> None:
         """Finalize outputs: only checkpoint and temp cleanup; packaging handled by ecc_packager."""
-        # Copy log files to logs/ subdirectory if they exist
-        log_files = list(self.temp_dir.glob("*.log"))
-        if log_files:
-            logs_dir = self.final_output_dir / "logs"
-            logs_dir.mkdir(parents=True, exist_ok=True)
-            for log_file in log_files:
-                shutil.copy2(log_file, logs_dir / log_file.name)
-
         # Clean up checkpoint/config artifacts unless keep_tmp is set
         if not self.config.keep_tmp:
             for cleanup_path in [
@@ -637,8 +729,10 @@ class Pipeline:
                 except Exception as exc:
                     self.logger.warning(f"Could not remove auxiliary file {cleanup_path}: {exc}")
 
-            # Clean up temp directory (only if safe to delete)
-            if self._temp_dir_safe_to_delete:
+            # Handle turbo mode cleanup
+            if self._turbo_mode_active and self._turbo_shm_path and self._symlink_path:
+                self._cleanup_turbo_mode(keep_files=False)
+            elif self._temp_dir_safe_to_delete:
                 self.logger.info(f"Cleaning up temporary directory: {self.temp_dir}")
                 try:
                     shutil.rmtree(self.temp_dir)
@@ -651,10 +745,63 @@ class Pipeline:
                     f"Please manually remove if no longer needed."
                 )
         else:
+            # keep_tmp is True
+            if self._turbo_mode_active and self._turbo_shm_path and self._symlink_path:
+                self._cleanup_turbo_mode(keep_files=True)
+            else:
+                self.logger.info(
+                    f"Temporary files retained in: {self.temp_dir}, "
+                    f"checkpoint retained at: {self.state_file}"
+                )
+
+    def _cleanup_turbo_mode(self, keep_files: bool) -> None:
+        """Cleanup turbo mode: move or delete files from /dev/shm.
+
+        Args:
+            keep_files: If True, move files to output_dir/tmp/; if False, delete everything
+        """
+        if not self._turbo_shm_path or not self._symlink_path:
+            return
+
+        if keep_files:
+            # Move files from /dev/shm to output_dir/tmp/
+            dest_dir = self.final_output_dir / "tmp"
             self.logger.info(
-                f"Temporary files retained in: {self.temp_dir}, "
-                f"checkpoint retained at: {self.state_file}"
+                f"Turbo mode: moving temp files from {self._turbo_shm_path} to {dest_dir}"
             )
+
+            try:
+                # Remove symlink first
+                if self._symlink_path.is_symlink():
+                    self._symlink_path.unlink()
+
+                # Move directory contents
+                if self._turbo_shm_path.exists():
+                    shutil.move(str(self._turbo_shm_path), str(dest_dir))
+                    self.logger.info(f"Temporary files retained in: {dest_dir}")
+            except Exception as e:
+                self.logger.warning(f"Could not move turbo temp files: {e}")
+                self.logger.info(
+                    f"Temporary files may remain in: {self._turbo_shm_path}"
+                )
+        else:
+            # Delete everything
+            self.logger.info(f"Turbo mode: cleaning up {self._turbo_shm_path}")
+
+            try:
+                # Remove symlink
+                if self._symlink_path.is_symlink():
+                    self._symlink_path.unlink()
+
+                # Remove /dev/shm directory
+                if self._turbo_shm_path.exists():
+                    shutil.rmtree(self._turbo_shm_path)
+                    self.logger.info("Turbo mode temp files cleaned up successfully")
+            except Exception as e:
+                self.logger.warning(
+                    f"Could not completely clean up turbo temp files: {e}\n"
+                    f"Please manually remove: {self._turbo_shm_path}"
+                )
 
     def show_steps(self, detailed: bool = False) -> None:
         """Show pipeline steps with enhanced status information."""

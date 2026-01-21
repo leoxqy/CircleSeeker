@@ -89,6 +89,15 @@ def keep_tmp_option(func: F) -> F:
     )(func)
 
 
+def turbo_option(func: F) -> F:
+    """Turbo mode option: use /dev/shm for faster I/O."""
+    return click.option(
+        "--turbo",
+        is_flag=True,
+        help="Enable turbo mode: use RAM-backed /dev/shm for temporary files (faster I/O)",
+    )(func)
+
+
 def verbose_option(func: F) -> F:
     """Verbosity option (unified: use -v/--verbose everywhere)."""
     return click.option(
@@ -204,6 +213,7 @@ def common_pipeline_options(func: F) -> F:
         config_option,
         threads_option,
         keep_tmp_option,
+        turbo_option,
         verbose_option,
     ]
     for decorator in reversed(decorators):

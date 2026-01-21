@@ -41,6 +41,7 @@ class PipelineOptions:
     config_path: Optional[Path]
     threads: Optional[int]  # None means use config or default
     keep_tmp: bool  # CLI flag: True if --keep-tmp provided
+    turbo: bool  # CLI flag: True if --turbo provided (use /dev/shm)
     start_from: Optional[int]
     stop_at: Optional[int]
     resume: bool
@@ -213,6 +214,12 @@ def execute_pipeline(
     if opts.keep_tmp:
         cfg.keep_tmp = True
     # Otherwise, keep config file value (cfg.keep_tmp already has default False)
+
+    # turbo: CLI --turbo flag > config file > default False
+    # When CLI flag is set, it always takes precedence
+    if opts.turbo:
+        cfg.runtime.turbo_mode = True
+    # Otherwise, keep config file value (cfg.runtime.turbo_mode already has default False)
 
     # Validate configuration FIRST (fail fast on user errors like missing files)
     from circleseeker.exceptions import ConfigurationError
