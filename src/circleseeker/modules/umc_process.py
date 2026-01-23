@@ -790,9 +790,16 @@ class CeccProcessor:
 
     def generate_cecc_signature(self, df_group: pd.DataFrame) -> str:
         """
-        Generate location signature for CeccDNA.
+        Generate rotation-invariant location signature for CeccDNA.
+
+        For circular DNA, the same ring can be represented with different starting points.
+        e.g., [A-B-C] can be represented as A-B-C, B-C-A, or C-A-B.
+
+        This method generates a canonical signature by:
+        1. Keeping the circular order of segments
+        2. Choosing the lexicographically smallest rotation as the canonical form
+
         Signature format: chr1:start1-end1;chr2:start2-end2...
-        Sorted by segment_in_circle (the order of segments in the circular DNA)
         """
         if not all(col in df_group.columns for col in ["chr", "start0", "end0"]):
             return ""
@@ -816,7 +823,20 @@ class CeccProcessor:
             except (ValueError, TypeError):
                 continue
 
-        return ";".join(segments) if segments else ""
+        if not segments:
+            return ""
+
+        # Generate all rotations and pick the lexicographically smallest one
+        # For a circular sequence [A, B, C], rotations are:
+        # [A, B, C], [B, C, A], [C, A, B]
+        n = len(segments)
+        rotations = []
+        for i in range(n):
+            rotated = segments[i:] + segments[:i]
+            rotations.append(";".join(rotated))
+
+        # Return the lexicographically smallest rotation
+        return min(rotations)
 
     def cluster_by_signature(self, df: pd.DataFrame) -> pd.DataFrame:
         """

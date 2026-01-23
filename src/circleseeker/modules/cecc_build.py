@@ -31,6 +31,12 @@ from collections import defaultdict
 import pandas as pd
 import numpy as np
 
+try:
+    import networkx as nx
+    HAS_NETWORKX = True
+except ImportError:
+    HAS_NETWORKX = False
+
 from circleseeker.utils.logging import get_logger
 from circleseeker.utils.column_standards import ColumnStandard
 
@@ -1297,6 +1303,281 @@ class CeccBuild:
 
         return False, None
 
+    def _assign_locus_id(
+        self,
+        alns: List[LastAlignment],
+        merge_distance: int = 500,
+    ) -> Tuple[Dict[int, int], Dict[int, Tuple[str, int, int, str, int, int]]]:
+        """Assign each alignment to a merged locus.
+
+        Based on CRESIL's approach: merge overlapping/adjacent alignments on the same
+        chromosome into single loci, each locus gets a unique ID.
+
+        Args:
+            alns: List of alignments
+            merge_distance: Maximum distance to merge adjacent alignments
+
+        Returns:
+            Tuple of:
+            - aln_to_locus: Dict mapping alignment index to locus ID
+            - locus_info: Dict mapping locus ID to (chrom, start, end, strand, q_start, q_end)
+        """
+        if not alns:
+            return {}, {}
+
+        # Group alignments by chromosome
+        by_chrom: Dict[str, List[Tuple[int, LastAlignment]]] = defaultdict(list)
+        for i, aln in enumerate(alns):
+            by_chrom[aln.chrom].append((i, aln))
+
+        aln_to_locus: Dict[int, int] = {}
+        locus_info: Dict[int, Tuple[str, int, int, str, int, int]] = {}
+        locus_id = 0
+
+        for chrom, chrom_alns in by_chrom.items():
+            # Sort by genomic position
+            chrom_alns.sort(key=lambda x: (x[1].ref_start, x[1].ref_end))
+
+            # Merge overlapping/adjacent alignments
+            current_start = None
+            current_end = None
+            current_strand = None
+            current_q_start = None
+            current_q_end = None
+            current_aln_indices: List[int] = []
+
+            for aln_idx, aln in chrom_alns:
+                if current_start is None:
+                    current_start = aln.ref_start
+                    current_end = aln.ref_end
+                    current_strand = aln.strand
+                    current_q_start = aln.query_start
+                    current_q_end = aln.query_end
+                    current_aln_indices = [aln_idx]
+                elif aln.ref_start <= current_end + merge_distance:
+                    # Merge: extend current region
+                    current_end = max(current_end, aln.ref_end)
+                    current_q_start = min(current_q_start, aln.query_start)
+                    current_q_end = max(current_q_end, aln.query_end)
+                    current_aln_indices.append(aln_idx)
+                    # Keep majority strand
+                else:
+                    # Save current locus
+                    for idx in current_aln_indices:
+                        aln_to_locus[idx] = locus_id
+                    locus_info[locus_id] = (chrom, current_start, current_end, current_strand,
+                                            current_q_start, current_q_end)
+                    locus_id += 1
+
+                    # Start new region
+                    current_start = aln.ref_start
+                    current_end = aln.ref_end
+                    current_strand = aln.strand
+                    current_q_start = aln.query_start
+                    current_q_end = aln.query_end
+                    current_aln_indices = [aln_idx]
+
+            # Save last locus
+            if current_start is not None:
+                for idx in current_aln_indices:
+                    aln_to_locus[idx] = locus_id
+                locus_info[locus_id] = (chrom, current_start, current_end, current_strand,
+                                        current_q_start, current_q_end)
+                locus_id += 1
+
+        return aln_to_locus, locus_info
+
+    def _build_locus_graph(
+        self,
+        alns: List[LastAlignment],
+        aln_to_locus: Dict[int, int],
+        locus_info: Dict[int, Tuple[str, int, int, str]],
+    ) -> "nx.MultiDiGraph":
+        """Build a directed graph connecting adjacent loci.
+
+        Based on CRESIL's approach: nodes are loci, edges connect adjacent alignments
+        (sorted by query position) with strand transition information.
+
+        Args:
+            alns: List of alignments sorted by query position
+            aln_to_locus: Mapping from alignment index to locus ID
+            locus_info: Information about each locus
+
+        Returns:
+            NetworkX MultiDiGraph with loci as nodes, edges representing connections
+        """
+        if not HAS_NETWORKX:
+            raise ImportError("networkx is required for graph-based CeccDNA detection")
+
+        G = nx.MultiDiGraph()
+
+        # Add all loci as nodes
+        for locus_id, (chrom, start, end, strand, q_start, q_end) in locus_info.items():
+            G.add_node(locus_id, chrom=chrom, start=start, end=end, strand=strand)
+
+        # Sort alignments by query position
+        sorted_indices = sorted(range(len(alns)), key=lambda i: alns[i].query_start)
+
+        # Add edges between adjacent alignments
+        for i in range(len(sorted_indices) - 1):
+            idx1 = sorted_indices[i]
+            idx2 = sorted_indices[i + 1]
+
+            locus1 = aln_to_locus[idx1]
+            locus2 = aln_to_locus[idx2]
+
+            if locus1 == locus2:
+                continue  # Skip edges within the same locus
+
+            # Record strand transition (like CRESIL)
+            strand1 = alns[idx1].strand
+            strand2 = alns[idx2].strand
+            strand_trans = f"{strand1}_{strand2}"
+
+            # Add edge with strand transition info
+            G.add_edge(locus1, locus2, strand_trans=strand_trans, weight=1)
+
+        return G
+
+    def _check_strand_closure(self, strand_transitions: List[str]) -> bool:
+        """Check if strand transitions form a valid closure.
+
+        Based on CRESIL's check_breakpoint_direction logic:
+        - For a valid circular structure, the cumulative strand effect must return to start
+        - +_+ and -_- preserve orientation
+        - +_- and -_+ flip orientation
+        - A valid circle needs an even number of flips
+
+        Args:
+            strand_transitions: List of strand transitions like ["+_+", "+_-", "-_+"]
+
+        Returns:
+            True if strand transitions form a valid closure
+        """
+        if not strand_transitions:
+            return False
+
+        # Count strand flips
+        flips = 0
+        for trans in strand_transitions:
+            parts = trans.split("_")
+            if len(parts) == 2 and parts[0] != parts[1]:
+                flips += 1
+
+        # For a valid closure, need even number of flips
+        return flips % 2 == 0
+
+    def _find_cycle_in_doubled_sequence(
+        self,
+        alns: List[LastAlignment],
+        aln_to_locus: Dict[int, int],
+        cons_len: int,
+    ) -> Optional[Tuple[List[int], List[str], Dict[int, Tuple[int, int]]]]:
+        """Find the cycle pattern in a doubled sequence.
+
+        For a doubled sequence [A-B-C][A-B-C]:
+        - Alignments should show pattern: A' -> B -> C -> A -> B' (where ' indicates partial)
+        - The cycle is [A, B, C] (or any rotation)
+        - We detect by finding where locus pattern repeats
+
+        Args:
+            alns: List of alignments sorted by query position
+            aln_to_locus: Mapping from alignment index to locus ID
+            cons_len: Consensus length (half of query length)
+
+        Returns:
+            Tuple of (locus_path, strand_transitions, locus_q_coords) for the cycle, or None
+            locus_q_coords maps locus_id to (q_start, q_end) for first occurrence in cycle
+        """
+        # Sort alignments by query position
+        sorted_indices = sorted(range(len(alns)), key=lambda i: alns[i].query_start)
+
+        # Build locus sequence with q_coords
+        # For the first locus in cycle, we want the SECOND occurrence (complete one)
+        # For other loci, we want the FIRST occurrence
+        locus_seq: List[int] = []
+        strand_seq: List[str] = []
+        locus_q_coords_first: Dict[int, Tuple[int, int]] = {}  # First occurrence
+        locus_q_coords_second: Dict[int, Tuple[int, int]] = {}  # Second occurrence
+
+        for idx in sorted_indices:
+            locus_id = aln_to_locus[idx]
+            strand = alns[idx].strand
+            aln = alns[idx]
+
+            if not locus_seq or locus_seq[-1] != locus_id:
+                locus_seq.append(locus_id)
+                strand_seq.append(strand)
+                # Record occurrences
+                if locus_id not in locus_q_coords_first:
+                    locus_q_coords_first[locus_id] = (aln.query_start, aln.query_end)
+                elif locus_id not in locus_q_coords_second:
+                    locus_q_coords_second[locus_id] = (aln.query_start, aln.query_end)
+
+        if len(locus_seq) < 3:
+            return None
+
+        # Find the cycle by detecting repeat pattern
+        # In [A-B-C][A-B-C], the locus sequence is like: A B C A B
+        # We look for the point where locus_seq[i] == locus_seq[0]
+        cycle_start = None
+        for i in range(1, len(locus_seq)):
+            if locus_seq[i] == locus_seq[0]:
+                cycle_start = i
+                break
+
+        if cycle_start is None or cycle_start < 2:
+            # No clear repeat found, try alternative: use first half only
+            # Find alignments in first half of query
+            first_half_loci = []
+            first_half_strands = []
+            first_half_q_coords: Dict[int, Tuple[int, int]] = {}
+
+            for idx in sorted_indices:
+                aln = alns[idx]
+                if (aln.query_start + aln.query_end) / 2 < cons_len:
+                    locus_id = aln_to_locus[idx]
+                    if not first_half_loci or first_half_loci[-1] != locus_id:
+                        first_half_loci.append(locus_id)
+                        first_half_strands.append(aln.strand)
+                        if locus_id not in first_half_q_coords:
+                            first_half_q_coords[locus_id] = (aln.query_start, aln.query_end)
+
+            if len(first_half_loci) >= 2:
+                # Build strand transitions
+                strand_trans = []
+                for i in range(len(first_half_strands) - 1):
+                    strand_trans.append(f"{first_half_strands[i]}_{first_half_strands[i+1]}")
+                return first_half_loci, strand_trans, first_half_q_coords
+            return None
+
+        # The cycle is locus_seq[0:cycle_start]
+        cycle_loci = locus_seq[:cycle_start]
+        cycle_strands = strand_seq[:cycle_start]
+
+        # Build strand transitions for the cycle
+        strand_trans = []
+        for i in range(len(cycle_strands) - 1):
+            strand_trans.append(f"{cycle_strands[i]}_{cycle_strands[i+1]}")
+        # Add closing transition (last -> first)
+        strand_trans.append(f"{cycle_strands[-1]}_{cycle_strands[0]}")
+
+        # Build final q_coords:
+        # - For the first locus (segment 1), use SECOND occurrence (complete one)
+        # - For other loci, use FIRST occurrence
+        locus_q_coords: Dict[int, Tuple[int, int]] = {}
+        for i, locus_id in enumerate(cycle_loci):
+            if locus_id in locus_q_coords:
+                continue  # Already added
+            if i == 0 and locus_id in locus_q_coords_second:
+                # First locus: use second occurrence
+                locus_q_coords[locus_id] = locus_q_coords_second[locus_id]
+            else:
+                # Other loci: use first occurrence
+                locus_q_coords[locus_id] = locus_q_coords_first.get(locus_id, (0, 0))
+
+        return cycle_loci, strand_trans, locus_q_coords
+
     def detect_cecc_with_closure_and_loci(
         self,
         alignments: Dict[str, List[LastAlignment]],
@@ -1306,14 +1587,17 @@ class CeccBuild:
         min_distinct_loci: int = 2,
         loci_merge_distance: int = 500,
     ) -> pd.DataFrame:
-        """Detect CeccDNA using closure pattern + distinct loci filtering.
+        """Detect CeccDNA using graph-based approach inspired by CRESIL.
 
-        This method provides high precision by requiring:
-        1. Closure pattern: Different query positions mapping to same genomic position
-        2. Multiple distinct loci: At least 2 different genomic regions
+        This method combines CRESIL's graph theory approach with CircleSeeker's
+        advantages (known ring length, doubled sequence pattern).
 
-        The closure pattern confirms the circular structure (from doubled sequence),
-        while the distinct loci requirement filters out UeccDNA (single-source circles).
+        Algorithm:
+        1. Assign alignments to merged loci (nodes)
+        2. Build directed graph with strand transitions (edges)
+        3. Detect cycle using doubled sequence property
+        4. Validate strand closure for circular structure
+        5. Output unique loci forming the circle
 
         Args:
             alignments: Dictionary mapping query_id to list of alignments
@@ -1326,68 +1610,220 @@ class CeccBuild:
         Returns:
             DataFrame with Cecc detection results
         """
+        if not HAS_NETWORKX:
+            self.logger.warning("networkx not available, falling back to simple detection")
+            return self._detect_cecc_simple_fallback(
+                alignments, metadata, min_distinct_loci, loci_merge_distance
+            )
+
         rows: list[dict] = []
 
         for query_id, alns in alignments.items():
-            if len(alns) < 2:
+            if len(alns) < 3:  # Need at least 3 alignments for a meaningful cycle
                 continue
 
-            # Step 1: Check for closure pattern
-            has_closure, closure_pair = self._has_closure_pattern(
-                alns,
-                position_tolerance=position_tolerance,
-                min_query_gap=min_query_gap,
+            # Get query length and consensus length
+            query_len = alns[0].query_len if alns else 0
+            cons_len = query_len // 2  # Half of doubled length
+
+            # Step 1: Assign alignments to merged loci
+            aln_to_locus, locus_info = self._assign_locus_id(alns, loci_merge_distance)
+
+            # Check minimum distinct loci
+            if len(locus_info) < min_distinct_loci:
+                continue
+
+            # Step 2: Build locus graph
+            G = self._build_locus_graph(alns, aln_to_locus, locus_info)
+
+            # Step 3: Find cycle using doubled sequence property
+            cycle_result = self._find_cycle_in_doubled_sequence(
+                alns, aln_to_locus, cons_len
             )
 
-            if not has_closure:
+            if cycle_result is None:
                 continue
 
-            # Step 2: Count distinct genomic loci
-            distinct_loci = self._count_distinct_loci(alns, loci_merge_distance)
+            cycle_loci, strand_transitions, locus_q_coords = cycle_result
 
-            if len(distinct_loci) < min_distinct_loci:
+            # Check minimum distinct loci in cycle
+            if len(set(cycle_loci)) < min_distinct_loci:
                 continue
 
-            # This is a confirmed Cecc!
-            # Extract base read ID and metadata
+            # Step 4: Validate strand closure
+            if not self._check_strand_closure(strand_transitions):
+                # Strand closure failed, but still output if we have valid cycle
+                # (some complex CeccDNA may have unusual strand patterns)
+                pass
+
+            # Step 5: Build output
             base_id = query_id.split("|")[0]
             meta = metadata.get(query_id) or metadata.get(
                 base_id, {"reads": base_id, "length": 0, "copy_number": 1.0}
             )
 
+            # Get unique loci in cycle order
+            unique_cycle_loci = []
+            seen = set()
+            for locus_id in cycle_loci:
+                if locus_id not in seen:
+                    unique_cycle_loci.append(locus_id)
+                    seen.add(locus_id)
+
+            if len(unique_cycle_loci) < min_distinct_loci:
+                continue
+
             # Calculate metrics
-            query_len = alns[0].query_len if alns else 0
-            cons_len = query_len // 2  # Half of doubled length
-
-            # Filter to first half alignments for single-copy ring output
-            first_half_alns = [
-                aln for aln in alns
-                if (aln.query_start + aln.query_end) / 2 < cons_len
-            ]
-
-            # Recalculate distinct loci based on first half only
-            first_half_loci = self._count_distinct_loci(first_half_alns, loci_merge_distance)
-
-            # Determine Cecc class based on first half loci
-            chroms = set(locus[0] for locus in first_half_loci)
-            cecc_class = "Cecc-InterChr" if len(chroms) > 1 else "Cecc-IntraChr"
-
             # Coverage
             intervals = [(aln.query_start, aln.query_end) for aln in alns]
             merged_intervals = self._merge_intervals(intervals)
             total_coverage = sum(end - start for start, end in merged_intervals)
             cov_best = total_coverage / query_len if query_len > 0 else 0.0
 
+            # Cumulative length from cycle loci
+            cum_len = sum(
+                locus_info[lid][2] - locus_info[lid][1]  # end - start
+                for lid in unique_cycle_loci
+            )
+            match_degree = (cum_len / cons_len * 100) if cons_len > 0 else 0.0
+
+            # Filter by match_degree
+            if match_degree < self.min_match_degree or match_degree > 105.0:
+                continue
+
             # Quality metrics
             identity_values = [aln.identity for aln in alns]
             identity_best = max(identity_values) if identity_values else 0.0
             identity_min = min(identity_values) if identity_values else 0.0
 
-            # LAST doesn't provide MAPQ, use high default for last-split output
-            mapq_best = 60
+            mapq_best = 60  # LAST doesn't provide MAPQ
             mapq_min = 60
 
             # Confidence score
+            chain_unique = len(unique_cycle_loci) / len(alns) if alns else 0.0
+            conf = self._geom_mean([
+                self._norm_mapq(mapq_best),
+                self._norm_identity(identity_best),
+                self._clamp01(cov_best),
+                self._clamp01(chain_unique),
+            ])
+
+            low_mapq = mapq_best < self.MAPQ_LOW_THRESHOLD
+            low_identity = identity_best < self.IDENTITY_LOW_THRESHOLD
+
+            # Determine class
+            chroms = set(locus_info[lid][0] for lid in unique_cycle_loci)
+            cecc_class = "Cecc-InterChr" if len(chroms) > 1 else "Cecc-IntraChr"
+
+            # Build output rows
+            base = {
+                "query_id": query_id,
+                "reads": meta.get("reads", base_id),
+                "eccdna_type": "Cecc",
+                "CeccClass": cecc_class,
+                "length": meta.get("length", cons_len),
+                "copy_number": meta.get("copy_number", 1.0),
+                "num_segments": len(unique_cycle_loci),
+                "num_distinct_loci": len(unique_cycle_loci),
+                "cumulative_length": cum_len,
+                "match_degree": round(match_degree, 2),
+                ColumnStandard.MAPQ_BEST: mapq_best,
+                ColumnStandard.MAPQ_MIN: mapq_min,
+                ColumnStandard.IDENTITY_BEST: round(identity_best, 3),
+                ColumnStandard.IDENTITY_MIN: round(identity_min, 3),
+                ColumnStandard.QUERY_COV_BEST: round(cov_best, 6),
+                ColumnStandard.QUERY_COV_2ND: 0.0,
+                ColumnStandard.CONFIDENCE_SCORE: round(conf, 6),
+                ColumnStandard.LOW_MAPQ: low_mapq,
+                ColumnStandard.LOW_IDENTITY: low_identity,
+                "C_cov_best": round(cov_best, 6),
+                "C_cov_2nd": 0.0,
+                "max_gap": 0,
+                "avg_gap": 0.0,
+                "chromosomes": ",".join(str(c) for c in sorted(chroms)),
+                "strand_closure_valid": self._check_strand_closure(strand_transitions),
+            }
+
+            # Output each locus in cycle order (按 query 位置排序)
+            for i, locus_id in enumerate(unique_cycle_loci, start=1):
+                chrom, start, end, strand, _, _ = locus_info[locus_id]
+                # Use q_coords from first occurrence in cycle
+                q_start, q_end = locus_q_coords.get(locus_id, (0, 0))
+                row = dict(base)
+                row.update({
+                    "segment_in_circle": i,
+                    ColumnStandard.CHR: chrom,
+                    ColumnStandard.START0: start,
+                    ColumnStandard.END0: end,
+                    ColumnStandard.STRAND: strand,
+                    "q_start": q_start,
+                    "q_end": q_end,
+                    "alignment_length": end - start,
+                })
+                rows.append(row)
+
+        result_df = pd.DataFrame(rows)
+        if not result_df.empty:
+            n_cecc = result_df["query_id"].nunique()
+            self.logger.info(f"Cecc detected (graph-based): {n_cecc} queries")
+
+        return result_df
+
+    def _detect_cecc_simple_fallback(
+        self,
+        alignments: Dict[str, List[LastAlignment]],
+        metadata: Dict[str, dict],
+        min_distinct_loci: int = 2,
+        loci_merge_distance: int = 500,
+    ) -> pd.DataFrame:
+        """Simple fallback when networkx is not available.
+
+        Uses closure pattern + distinct loci filtering without graph analysis.
+        """
+        rows: list[dict] = []
+
+        for query_id, alns in alignments.items():
+            if len(alns) < 2:
+                continue
+
+            # Check for closure pattern
+            has_closure, _ = self._has_closure_pattern(alns)
+            if not has_closure:
+                continue
+
+            # Count distinct loci
+            distinct_loci = self._count_distinct_loci(alns, loci_merge_distance)
+            if len(distinct_loci) < min_distinct_loci:
+                continue
+
+            # Extract metadata
+            base_id = query_id.split("|")[0]
+            meta = metadata.get(query_id) or metadata.get(
+                base_id, {"reads": base_id, "length": 0, "copy_number": 1.0}
+            )
+
+            query_len = alns[0].query_len if alns else 0
+            cons_len = query_len // 2
+
+            # Calculate metrics
+            intervals = [(aln.query_start, aln.query_end) for aln in alns]
+            merged_intervals = self._merge_intervals(intervals)
+            total_coverage = sum(end - start for start, end in merged_intervals)
+            cov_best = total_coverage / query_len if query_len > 0 else 0.0
+
+            cum_len = sum(end - start for _, start, end in distinct_loci)
+            match_degree = (cum_len / cons_len * 100) if cons_len > 0 else 0.0
+
+            if match_degree < self.min_match_degree or match_degree > 105.0:
+                continue
+
+            identity_values = [aln.identity for aln in alns]
+            identity_best = max(identity_values) if identity_values else 0.0
+            identity_min = min(identity_values) if identity_values else 0.0
+
+            mapq_best = 60
+            mapq_min = 60
+
             chain_unique = len(distinct_loci) / len(alns) if alns else 0.0
             conf = self._geom_mean([
                 self._norm_mapq(mapq_best),
@@ -1399,42 +1835,9 @@ class CeccBuild:
             low_mapq = mapq_best < self.MAPQ_LOW_THRESHOLD
             low_identity = identity_best < self.IDENTITY_LOW_THRESHOLD
 
-            # Skip if no alignments in first half (shouldn't happen for valid Cecc)
-            if not first_half_alns:
-                continue
+            chroms = set(locus[0] for locus in distinct_loci)
+            cecc_class = "Cecc-InterChr" if len(chroms) > 1 else "Cecc-IntraChr"
 
-            # Convert first half alignments to segments and sort by query position
-            # This outputs only the single-copy ring structure
-            segments = sorted(
-                [
-                    AlignmentSegment(
-                        chr=aln.chrom,
-                        start0=aln.ref_start,
-                        end0=aln.ref_end,
-                        strand=aln.strand,
-                        q_start=aln.query_start,
-                        q_end=aln.query_end,
-                        alignment_length=aln.query_end - aln.query_start,
-                        node_id=i,
-                    )
-                    for i, aln in enumerate(first_half_alns)
-                ],
-                key=lambda x: x.q_start,
-            )
-
-            # Calculate gap statistics (segments already sorted by q_start)
-            gaps = [
-                segments[i].q_start - segments[i - 1].q_end
-                for i in range(1, len(segments))
-            ]
-            max_gap = max(gaps) if gaps else 0
-            avg_gap = sum(gaps) / len(gaps) if gaps else 0.0
-
-            # Cumulative alignment length (based on single-copy segments)
-            cum_len = sum(seg.alignment_length for seg in segments)
-            match_degree = (cum_len / cons_len * 100) if cons_len > 0 else 0.0
-
-            # Build output rows (one row per segment)
             base = {
                 "query_id": query_id,
                 "reads": meta.get("reads", base_id),
@@ -1442,8 +1845,8 @@ class CeccBuild:
                 "CeccClass": cecc_class,
                 "length": meta.get("length", cons_len),
                 "copy_number": meta.get("copy_number", 1.0),
-                "num_segments": len(segments) - 1,  # Exclude first truncated segment
-                "num_distinct_loci": len(first_half_loci),
+                "num_segments": len(distinct_loci),
+                "num_distinct_loci": len(distinct_loci),
                 "cumulative_length": cum_len,
                 "match_degree": round(match_degree, 2),
                 "match_degree_2nd": None,
@@ -1460,30 +1863,29 @@ class CeccBuild:
                 ColumnStandard.LOW_IDENTITY: low_identity,
                 "C_cov_best": round(cov_best, 6),
                 "C_cov_2nd": 0.0,
-                "max_gap": max_gap,
-                "avg_gap": round(avg_gap, 2),
+                "max_gap": 0,
+                "avg_gap": 0.0,
                 "chromosomes": ",".join(str(c) for c in sorted(chroms)),
             }
 
-            # Skip the first segment (truncated at read start) and start numbering from 2
-            for i, seg in enumerate(segments[1:], start=2):
+            for i, (chrom, start, end) in enumerate(distinct_loci, start=1):
                 row = dict(base)
                 row.update({
                     "segment_in_circle": i,
-                    ColumnStandard.CHR: seg.chr,
-                    ColumnStandard.START0: seg.start0,
-                    ColumnStandard.END0: seg.end0,
-                    ColumnStandard.STRAND: seg.strand,
-                    "q_start": seg.q_start,
-                    "q_end": seg.q_end,
-                    "alignment_length": seg.alignment_length,
+                    ColumnStandard.CHR: chrom,
+                    ColumnStandard.START0: start,
+                    ColumnStandard.END0: end,
+                    ColumnStandard.STRAND: "+",  # Default strand
+                    "q_start": 0,
+                    "q_end": 0,
+                    "alignment_length": end - start,
                 })
                 rows.append(row)
 
         result_df = pd.DataFrame(rows)
         if not result_df.empty:
             n_cecc = result_df["query_id"].nunique()
-            self.logger.info(f"Cecc detected (closure + loci filter): {n_cecc} queries")
+            self.logger.info(f"Cecc detected (simple fallback): {n_cecc} queries")
 
         return result_df
 
