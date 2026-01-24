@@ -74,6 +74,7 @@ class UMeccClassifier:
         u_high_mapq_threshold: int = 50,
         theta_locus: float = 0.95,
         pos_tol_bp: int = 50,
+        span_ratio_min: float = 0.95,
         logger: Optional[logging.Logger] = None,
     ) -> None:
         """
@@ -115,6 +116,11 @@ class UMeccClassifier:
                 part of the same locus when attempting to call Uecc (default: 1000).
             theta_locus: Locus clustering reciprocal-overlap threshold (default: 0.95).
             pos_tol_bp: Locus clustering boundary tolerance in bp (default: 50).
+            span_ratio_min: Minimum ratio of genomic span to cons_len for Uecc classification
+                (default: 0.95). This helps reject CeccDNA that are misclassified as Uecc
+                when minimap2 fails to detect small chimeric fragments. For true Uecc,
+                the genomic span should approximately equal the eccDNA length. For Cecc
+                with missing fragments, the span will be smaller than the full length.
             logger: Optional logger instance
         """
         self.gap_threshold = gap_threshold
@@ -157,6 +163,7 @@ class UMeccClassifier:
         self.u_high_mapq_threshold = int(u_high_mapq_threshold)
         self.theta_locus = self._as_fraction(theta_locus)
         self.pos_tol_bp = int(pos_tol_bp)
+        self.span_ratio_min = self._as_fraction(span_ratio_min)
         self.stats: dict[str, int] = {}
 
         # Setup logger
@@ -956,6 +963,18 @@ class UMeccClassifier:
                 except (TypeError, ValueError):
                     best_start0 = 0
                     best_end0 = 0
+
+                # Check span_ratio: genomic span / cons_len
+                # This helps reject CeccDNA misclassified as Uecc when minimap2 fails
+                # to detect small chimeric fragments. True Uecc should have span ≈ cons_len.
+                best_span = best_end0 - best_start0
+                span_ratio = best_span / cons_len if cons_len > 0 else 0.0
+                if span_ratio < float(self.span_ratio_min):
+                    self.stats["uecc_vetoed_low_span_ratio"] = self.stats.get(
+                        "uecc_vetoed_low_span_ratio", 0
+                    ) + 1
+                    continue
+
                 all_idx = all_groups.get(query_id)
                 all_alignments = df.loc[all_idx] if all_idx is not None else group
                 if self._u_has_significant_secondary_mapping(
@@ -1035,6 +1054,12 @@ class UMeccClassifier:
                 "Uecc vetoed due to low MAPQ (< %d): %d queries",
                 self.mapq_u_min,
                 self.stats["uecc_vetoed_low_mapq"],
+            )
+        if self.stats.get("uecc_vetoed_low_span_ratio", 0) > 0:
+            self.logger.info(
+                "Uecc vetoed due to low span ratio (< %.2f): %d queries",
+                self.span_ratio_min,
+                self.stats["uecc_vetoed_low_span_ratio"],
             )
 
         return uecc_df, mecc_df, classified_queries
