@@ -49,6 +49,32 @@ def parse_chimeric_regions(regions_str: str) -> list[tuple[str, int, int]]:
     return segments
 
 
+def parse_chimeric_regions_with_strand(
+    regions_str: str, strand_str: str
+) -> list[tuple[str, int, int, str]]:
+    """Parse chimeric region and strand strings into list of (chr, start, end, strand) tuples.
+
+    Args:
+        regions_str: Semicolon-separated regions, e.g., "chr1:100-200;chr2:300-400"
+        strand_str: Semicolon-separated strands, e.g., "+;-"
+
+    Returns:
+        List of (chr, start, end, strand) tuples
+
+    Example:
+        >>> parse_chimeric_regions_with_strand("chr1:100-200;chr2:300-400", "+;-")
+        [("chr1", 100, 200, "+"), ("chr2", 300, 400, "-")]
+    """
+    segments = parse_chimeric_regions(regions_str)
+    strands = [s.strip() for s in str(strand_str).split(";") if s.strip()]
+
+    # If strand info is missing or incomplete, default to "+"
+    if len(strands) < len(segments):
+        strands.extend(["+"] * (len(segments) - len(strands)))
+
+    return [(seg[0], seg[1], seg[2], strands[i]) for i, seg in enumerate(segments)]
+
+
 def reciprocal_overlap_ok(
     a_start: int, a_end: int, b_start: int, b_end: int, thr: float = 0.99, tol: int = 20
 ) -> bool:
@@ -135,10 +161,59 @@ def build_chr_index(
     valid_df["start"] = pd.to_numeric(valid_df["start"], errors="coerce").astype("Int64")
     valid_df["end"] = pd.to_numeric(valid_df["end"], errors="coerce").astype("Int64")
 
-    # Build index from valid entries
-    for i, (chr_val, start, end) in valid_df.iterrows():
+    # Build index from valid entries (use itertuples for performance)
+    for row in valid_df.itertuples():
+        chr_val, start, end = row.chr, row.start, row.end
         if pd.notna(chr_val) and pd.notna(start) and pd.notna(end):
-            idx.setdefault(chr_val, []).append((int(start), int(end), i))
+            idx.setdefault(chr_val, []).append((int(start), int(end), row.Index))
+
+    # Sort by start position for each chromosome
+    for ch in idx:
+        idx[ch].sort(key=lambda t: t[0])
+
+    return idx
+
+
+def build_cecc_segment_index(
+    df: pd.DataFrame,
+) -> dict[str, list[tuple[int, int, int]]]:
+    """Build chromosome-indexed structure for CeccDNA segments.
+
+    Each CeccDNA has multiple segments. This function indexes ALL segments
+    from ALL CeccDNA entries for efficient overlap queries.
+
+    Args:
+        df: DataFrame with 'Regions' column containing CeccDNA entries
+
+    Returns:
+        Dict mapping chrom -> list of (start, end, row_index) tuples
+    """
+    idx: dict[str, list[tuple[int, int, int]]] = {}
+
+    # Filter for CeccDNA only
+    if "eccDNA_type" in df.columns:
+        df = df[df["eccDNA_type"] == "CeccDNA"]
+
+    if df.empty:
+        return idx
+
+    # Get regions column
+    regions_col = "Regions" if "Regions" in df.columns else "regions"
+    if regions_col not in df.columns:
+        return idx
+
+    # Reset index for proper mapping
+    df = df.reset_index(drop=True)
+
+    # Parse each CeccDNA's segments (use items() for performance)
+    for i, regions_str in df[regions_col].items():
+        if not regions_str or pd.isna(regions_str):
+            continue
+
+        # Parse all segments from chimeric region string
+        segments = parse_chimeric_regions(str(regions_str))
+        for chrom, start, end in segments:
+            idx.setdefault(chrom, []).append((start, end, i))
 
     # Sort by start position for each chromosome
     for ch in idx:
@@ -150,19 +225,23 @@ def build_chr_index(
 def find_redundant_simple(
     inferred_df: pd.DataFrame, confirmed_df: pd.DataFrame, thr: float = 0.99, tol: int = 20
 ) -> set[str]:
-    """Find inferred simple eccDNA that overlap with confirmed UeccDNA.
+    """Find inferred simple eccDNA that overlap with confirmed UeccDNA or CeccDNA segments.
 
     Args:
         inferred_df: DataFrame with inferred simple eccDNA
-        confirmed_df: DataFrame with all confirmed eccDNA (will filter for UeccDNA)
+        confirmed_df: DataFrame with all confirmed eccDNA (will check against UeccDNA and CeccDNA)
         thr: Reciprocal overlap threshold
         tol: Coordinate tolerance
 
     Returns:
         Set of redundant eccDNA IDs
     """
-    # Build index from confirmed UeccDNA regions only
-    idx = build_chr_index(confirmed_df, type_filter="UeccDNA")
+    # Build index from confirmed UeccDNA regions
+    uecc_idx = build_chr_index(confirmed_df, type_filter="UeccDNA")
+
+    # Build index from confirmed CeccDNA segments (all segments, not just first)
+    cecc_idx = build_cecc_segment_index(confirmed_df)
+
     redundant_ids = set()
 
     # Check each inferred entry
@@ -192,11 +271,11 @@ def find_redundant_simple(
             else:
                 continue
 
-        # Check against confirmed entries on same chromosome
-        cand = idx.get(ch, [])
         hit = False
 
-        for ts, te, _ in cand:
+        # Check against confirmed UeccDNA entries on same chromosome
+        uecc_cand = uecc_idx.get(ch, [])
+        for ts, te, _ in uecc_cand:
             if ts > e + tol:
                 break  # No more possible overlaps
             if te < s - tol:
@@ -205,6 +284,19 @@ def find_redundant_simple(
             if reciprocal_overlap_ok(s, e, ts, te, thr, tol):
                 hit = True
                 break
+
+        # If not redundant with UeccDNA, check against CeccDNA segments
+        if not hit:
+            cecc_cand = cecc_idx.get(ch, [])
+            for ts, te, _ in cecc_cand:
+                if ts > e + tol:
+                    break  # No more possible overlaps
+                if te < s - tol:
+                    continue  # Not overlapping yet
+
+                if reciprocal_overlap_ok(s, e, ts, te, thr, tol):
+                    hit = True
+                    break
 
         if hit:
             redundant_ids.add(row["eccDNA_id"])
@@ -288,50 +380,122 @@ def find_redundant_chimeric_exact(
 
 
 def find_redundant_chimeric_overlap(
-    inferred_df: pd.DataFrame, confirmed_df: pd.DataFrame, thr: float = 0.99, tol: int = 20
+    inferred_df: pd.DataFrame,
+    confirmed_df: pd.DataFrame,
+    thr: float = 0.99,
+    tol: int = 20,
+    detect_subset: bool = True,
+    check_strand: bool = True,
 ) -> set[str]:
     """Find redundant chimeric eccDNA using segment-wise reciprocal overlap.
 
     This method compares each segment individually using the same strategy
-    as simple eccDNA overlap detection.
+    as simple eccDNA overlap detection. It supports two matching modes:
+
+    1. Exact match (same number of segments, with cyclic rotation)
+    2. Subset match (inferred is a subset of confirmed, enabled by detect_subset)
+
+    When check_strand=True, strand information is also considered:
+    - Same-strand match: All strands identical
+    - Reverse-complement match: All strands opposite, order reversed
+      (represents same circular molecule read from opposite strand)
+
+    Args:
+        inferred_df: DataFrame with inferred chimeric eccDNA
+        confirmed_df: DataFrame with all confirmed eccDNA (will filter for CeccDNA)
+        thr: Reciprocal overlap threshold (default 0.99)
+        tol: Coordinate tolerance in bp (default 20)
+        detect_subset: If True, also detect inferred CeccDNA that are subsets
+                       of confirmed CeccDNA (default True)
+        check_strand: If True, consider strand information in matching (default True)
+
+    Returns:
+        Set of redundant eccDNA IDs
     """
     # Handle empty DataFrames
     if inferred_df.empty or confirmed_df.empty:
         return set()
 
-    # Filter confirmed CeccDNA and parse their segments
-    confirmed_c = confirmed_df[confirmed_df["eccDNA_type"] == "CeccDNA"]
-    confirmed_segs_list = []
-
-    for idx, row in confirmed_c.iterrows():
-        regions = row.get("Regions", row.get("regions", ""))
-        if regions and pd.notna(regions):
-            segs = parse_chimeric_regions(regions)
-            if segs:
-                confirmed_segs_list.append((idx, segs))
-
-    # Check each inferred chimeric eccDNA
     redundant_ids = set()
 
-    for ecc_id, group in inferred_df.groupby("eccDNA_id"):
-        group = group.sort_values("seg_index")
-        inferred_segs = []
+    # Filter confirmed CeccDNA and parse their segments.
+    # Split into two clear branches to keep types stable for mypy and reduce
+    # accidental mixing of (chr,start,end) vs (chr,start,end,strand) tuples.
+    confirmed_c = confirmed_df[confirmed_df["eccDNA_type"] == "CeccDNA"]
 
-        for _, row in group.iterrows():
-            chr_val = row.get("chr", "")
-            start_val = row.get("start0", "")
-            end_val = row.get("end0", "")
+    if check_strand:
+        confirmed_segs_list_stranded: list[list[tuple[str, int, int, str]]] = []
+        for _idx, row in confirmed_c.iterrows():
+            regions = row.get("Regions", row.get("regions", ""))
+            strand = row.get("Strand", row.get("strand", ""))
+            if regions and pd.notna(regions):
+                strand_str = strand if strand and pd.notna(strand) else "+"
+                segs_stranded = parse_chimeric_regions_with_strand(regions, strand_str)
+                if segs_stranded:
+                    confirmed_segs_list_stranded.append(segs_stranded)
 
-            if chr_val and pd.notna(start_val) and pd.notna(end_val):
-                inferred_segs.append((str(chr_val), int(start_val), int(end_val)))
+        for ecc_id, group in inferred_df.groupby("eccDNA_id"):
+            group = group.sort_values("seg_index")
+            inferred_segs_stranded: list[tuple[str, int, int, str]] = []
 
-        if not inferred_segs:
-            continue
+            for _, row in group.iterrows():
+                chr_val = row.get("chr", "")
+                start_val = row.get("start0", "")
+                end_val = row.get("end0", "")
+                strand_val = row.get("strand", "+")
 
-        for conf_idx, conf_segs in confirmed_segs_list:
-            if _segments_match(inferred_segs, conf_segs, thr, tol):
-                redundant_ids.add(ecc_id)
-                break
+                if chr_val and pd.notna(start_val) and pd.notna(end_val):
+                    inferred_segs_stranded.append(
+                        (str(chr_val), int(start_val), int(end_val), str(strand_val))
+                    )
+
+            if not inferred_segs_stranded:
+                continue
+
+            for conf_segs_stranded in confirmed_segs_list_stranded:
+                if _segments_match_with_strand(inferred_segs_stranded, conf_segs_stranded, thr, tol):
+                    redundant_ids.add(ecc_id)
+                    break
+
+                if detect_subset and _is_subset_of_with_strand(
+                    inferred_segs_stranded, conf_segs_stranded, thr, tol
+                ):
+                    redundant_ids.add(ecc_id)
+                    break
+    else:
+        confirmed_segs_list_unstranded: list[list[tuple[str, int, int]]] = []
+        for _idx, row in confirmed_c.iterrows():
+            regions = row.get("Regions", row.get("regions", ""))
+            if regions and pd.notna(regions):
+                segs_unstranded = parse_chimeric_regions(regions)
+                if segs_unstranded:
+                    confirmed_segs_list_unstranded.append(segs_unstranded)
+
+        for ecc_id, group in inferred_df.groupby("eccDNA_id"):
+            group = group.sort_values("seg_index")
+            inferred_segs_unstranded: list[tuple[str, int, int]] = []
+
+            for _, row in group.iterrows():
+                chr_val = row.get("chr", "")
+                start_val = row.get("start0", "")
+                end_val = row.get("end0", "")
+
+                if chr_val and pd.notna(start_val) and pd.notna(end_val):
+                    inferred_segs_unstranded.append((str(chr_val), int(start_val), int(end_val)))
+
+            if not inferred_segs_unstranded:
+                continue
+
+            for conf_segs_unstranded in confirmed_segs_list_unstranded:
+                if _segments_match(inferred_segs_unstranded, conf_segs_unstranded, thr, tol):
+                    redundant_ids.add(ecc_id)
+                    break
+
+                if detect_subset and _is_subset_of(
+                    inferred_segs_unstranded, conf_segs_unstranded, thr, tol
+                ):
+                    redundant_ids.add(ecc_id)
+                    break
 
     return redundant_ids
 
@@ -339,7 +503,13 @@ def find_redundant_chimeric_overlap(
 def _segments_match(
     segs_a: list[tuple[str, int, int]], segs_b: list[tuple[str, int, int]], thr: float, tol: int
 ) -> bool:
-    """Check if two lists of segments match using segment-wise reciprocal overlap."""
+    """Check if two lists of segments match using segment-wise reciprocal overlap.
+
+    This is the legacy version without strand awareness. Use _segments_match_with_strand
+    for strand-aware matching.
+
+    Matching strategy: Only cyclic rotation is allowed.
+    """
     if len(segs_a) != len(segs_b):
         return False
 
@@ -359,9 +529,11 @@ def _segments_match(
 
         return True
 
+    # Direct match
     if ordered_match(segs_a, segs_b):
         return True
 
+    # Cyclic rotation match (for circular DNA starting from different positions)
     seg_count = len(segs_a)
     if seg_count < 2:
         return False
@@ -374,10 +546,222 @@ def _segments_match(
     return False
 
 
+def _segments_match_with_strand(
+    segs_a: list[tuple[str, int, int, str]],
+    segs_b: list[tuple[str, int, int, str]],
+    thr: float,
+    tol: int,
+) -> bool:
+    """Check if two lists of segments match, considering strand information.
+
+    Matching strategy for circular DNA:
+    1. Same-strand match: All strands identical, same order (+ cyclic rotation)
+       Example: A(+)→B(+)→C(+) matches B(+)→C(+)→A(+)
+
+    2. Reverse-complement match: All strands opposite, reversed order (+ cyclic rotation)
+       Example: A(+)→B(+)→C(+) matches C(-)→B(-)→A(-)
+       This represents the same circular molecule read from the opposite strand.
+
+    Args:
+        segs_a: List of (chr, start, end, strand) tuples
+        segs_b: List of (chr, start, end, strand) tuples
+        thr: Reciprocal overlap threshold
+        tol: Coordinate tolerance in bp
+
+    Returns:
+        True if segments match (same-strand or reverse-complement)
+    """
+    if len(segs_a) != len(segs_b):
+        return False
+
+    if not segs_a:
+        return False
+
+    def coords_match(seg_a: tuple, seg_b: tuple) -> bool:
+        """Check if coordinates match (ignoring strand)."""
+        chr_a, start_a, end_a = seg_a[:3]
+        chr_b, start_b, end_b = seg_b[:3]
+
+        if chr_a != chr_b:
+            return False
+
+        return reciprocal_overlap_ok(start_a, end_a, start_b, end_b, thr, tol)
+
+    def strands_match(a: list, b: list) -> bool:
+        """Check if all strands are identical."""
+        return all(seg_a[3] == seg_b[3] for seg_a, seg_b in zip(a, b))
+
+    def strands_opposite(a: list, b: list) -> bool:
+        """Check if all strands are opposite."""
+        opposite = {"+": "-", "-": "+"}
+        return all(seg_a[3] == opposite.get(seg_b[3], seg_b[3]) for seg_a, seg_b in zip(a, b))
+
+    def ordered_match_with_strand(a: list, b: list, require_same_strand: bool) -> bool:
+        """Check if segments match in order with strand requirement."""
+        for seg_a, seg_b in zip(a, b):
+            if not coords_match(seg_a, seg_b):
+                return False
+        if require_same_strand:
+            return strands_match(a, b)
+        else:
+            return strands_opposite(a, b)
+
+    seg_count = len(segs_a)
+
+    # Strategy 1: Same-strand match (with cyclic rotation)
+    for offset in range(seg_count):
+        rotated = segs_b[offset:] + segs_b[:offset]
+        if ordered_match_with_strand(segs_a, rotated, require_same_strand=True):
+            return True
+
+    # Strategy 2: Reverse-complement match (reversed order + opposite strands + cyclic rotation)
+    segs_b_reversed = list(reversed(segs_b))
+    for offset in range(seg_count):
+        rotated = segs_b_reversed[offset:] + segs_b_reversed[:offset]
+        if ordered_match_with_strand(segs_a, rotated, require_same_strand=False):
+            return True
+
+    return False
+
+
+def _is_subset_of(
+    inferred_segs: list[tuple[str, int, int]],
+    confirmed_segs: list[tuple[str, int, int]],
+    thr: float,
+    tol: int,
+) -> bool:
+    """Check if inferred segments are a subset of confirmed segments (no strand check).
+
+    An inferred CeccDNA is considered redundant if ALL of its segments
+    can be matched to segments in a confirmed CeccDNA. This handles cases
+    where the inferred CeccDNA is missing some segments that were detected
+    in the confirmed one (e.g., inferred has 2 segments, confirmed has 3,
+    but the 2 inferred segments match 2 of the confirmed segments).
+
+    Args:
+        inferred_segs: Segments from inferred CeccDNA (chr, start, end)
+        confirmed_segs: Segments from confirmed CeccDNA (chr, start, end)
+        thr: Reciprocal overlap threshold
+        tol: Coordinate tolerance in bp
+
+    Returns:
+        True if all inferred segments match some confirmed segments
+    """
+    if not inferred_segs:
+        return False
+
+    # Inferred can't be a subset if it has more segments
+    if len(inferred_segs) > len(confirmed_segs):
+        return False
+
+    # If same length, use exact match (already handled by _segments_match)
+    if len(inferred_segs) == len(confirmed_segs):
+        return False
+
+    # Check if each inferred segment matches at least one confirmed segment
+    for inf_seg in inferred_segs:
+        inf_chr, inf_start, inf_end = inf_seg[:3]
+        found_match = False
+
+        for conf_seg in confirmed_segs:
+            conf_chr, conf_start, conf_end = conf_seg[:3]
+
+            if inf_chr != conf_chr:
+                continue
+
+            if reciprocal_overlap_ok(inf_start, inf_end, conf_start, conf_end, thr, tol):
+                found_match = True
+                break
+
+        if not found_match:
+            return False
+
+    return True
+
+
+def _is_subset_of_with_strand(
+    inferred_segs: list[tuple[str, int, int, str]],
+    confirmed_segs: list[tuple[str, int, int, str]],
+    thr: float,
+    tol: int,
+) -> bool:
+    """Check if inferred segments are a subset of confirmed segments (with strand check).
+
+    For subset matching with strand awareness:
+    - All inferred strands same as matched confirmed strands (same-strand subset)
+    - All inferred strands opposite to matched confirmed strands (reverse-complement subset)
+
+    Args:
+        inferred_segs: Segments from inferred CeccDNA (chr, start, end, strand)
+        confirmed_segs: Segments from confirmed CeccDNA (chr, start, end, strand)
+        thr: Reciprocal overlap threshold
+        tol: Coordinate tolerance in bp
+
+    Returns:
+        True if all inferred segments match some confirmed segments with consistent strand
+    """
+    if not inferred_segs:
+        return False
+
+    # Inferred can't be a subset if it has more segments
+    if len(inferred_segs) > len(confirmed_segs):
+        return False
+
+    # If same length, use exact match (already handled by _segments_match_with_strand)
+    if len(inferred_segs) == len(confirmed_segs):
+        return False
+
+    opposite = {"+": "-", "-": "+"}
+
+    def find_matches(require_same_strand: bool) -> bool:
+        """Check if all inferred segments match confirmed segments with strand requirement."""
+        for inf_seg in inferred_segs:
+            inf_chr, inf_start, inf_end, inf_strand = inf_seg
+            found_match = False
+
+            for conf_seg in confirmed_segs:
+                conf_chr, conf_start, conf_end, conf_strand = conf_seg
+
+                if inf_chr != conf_chr:
+                    continue
+
+                if not reciprocal_overlap_ok(inf_start, inf_end, conf_start, conf_end, thr, tol):
+                    continue
+
+                # Check strand consistency
+                if require_same_strand:
+                    if inf_strand == conf_strand:
+                        found_match = True
+                        break
+                else:
+                    if inf_strand == opposite.get(conf_strand, conf_strand):
+                        found_match = True
+                        break
+
+            if not found_match:
+                return False
+
+        return True
+
+    # Try same-strand subset match
+    if find_matches(require_same_strand=True):
+        return True
+
+    # Try reverse-complement subset match
+    if find_matches(require_same_strand=False):
+        return True
+
+    return False
+
+
 def prepare_inferred_simple(df: pd.DataFrame, redundant_ids: set[str]) -> pd.DataFrame:
     """Prepare inferred simple table for merging.
 
     Converts from inferred format to standard format and removes redundant entries.
+    Preserves available metrics from SplitReads-Core inference:
+    - num_split_reads → reads_count
+    - prob_present → confidence_score
+    - hifi_abundance → copy_number (coverage-based estimate)
     """
     # Filter out redundant entries
     filtered = df[~df["eccDNA_id"].isin(redundant_ids)].copy()
@@ -390,6 +774,18 @@ def prepare_inferred_simple(df: pd.DataFrame, redundant_ids: set[str]) -> pd.Dat
         lambda r: f"{r['chr']}:{int(r['start0'])}-{int(r['end0'])}", axis=1
     )
 
+    # Extract available metrics from inferred data
+    # num_split_reads: number of split-read evidence supporting this eccDNA
+    reads_count = filtered.get("num_split_reads", pd.Series([1] * len(filtered)))
+
+    # prob_present: probability that eccDNA is present (0-1 scale)
+    confidence = filtered.get("prob_present", pd.Series([pd.NA] * len(filtered)))
+
+    # hifi_abundance: coverage-based abundance estimate
+    copy_number = filtered.get("hifi_abundance", pd.Series([pd.NA] * len(filtered)))
+    # If hifi_abundance is 0 or missing, use 1.0 as default
+    copy_number = copy_number.apply(lambda x: x if pd.notna(x) and x > 0 else 1.0)
+
     # Map to standard columns
     result = pd.DataFrame(
         {
@@ -400,7 +796,10 @@ def prepare_inferred_simple(df: pd.DataFrame, redundant_ids: set[str]) -> pd.Dat
             "eccDNA_type": "UeccDNA",  # Simple inferred maps to UeccDNA
             "State": "Inferred",
             "Seg_total": 1,
-            "Hit_count": 1,
+            "Hit_count": reads_count.values,
+            "reads_count": reads_count.values,
+            "confidence_score": confidence.values,
+            "copy_number": copy_number.values,
         }
     )
 
@@ -411,6 +810,10 @@ def prepare_inferred_chimeric(df: pd.DataFrame, redundant_ids: set[str]) -> pd.D
     """Prepare inferred chimeric table for merging.
 
     Converts from segment-based format to unified format and removes redundant entries.
+    Preserves available metrics from SplitReads-Core inference:
+    - num_split_reads → reads_count
+    - prob_present → confidence_score
+    - hifi_abundance → copy_number (coverage-based estimate)
     """
     # Filter out redundant entries
     filtered = df[~df["eccDNA_id"].isin(redundant_ids)].copy()
@@ -433,8 +836,16 @@ def prepare_inferred_chimeric(df: pd.DataFrame, redundant_ids: set[str]) -> pd.D
             regions.append(f"{row['chr']}:{int(row['start0'])}-{int(row['end0'])}")
             strands.append(row.get("strand", "+"))
 
-        # Take first row for metadata
+        # Take first row for metadata (metrics are same across segments)
         first_row = group.iloc[0]
+
+        # Extract available metrics from inferred data
+        num_split_reads = first_row.get("num_split_reads", 1)
+        prob_present = first_row.get("prob_present", pd.NA)
+        hifi_abundance = first_row.get("hifi_abundance", pd.NA)
+
+        # If hifi_abundance is 0 or missing, use 1.0 as default
+        copy_number = hifi_abundance if pd.notna(hifi_abundance) and hifi_abundance > 0 else 1.0
 
         result_rows.append(
             {
@@ -445,7 +856,10 @@ def prepare_inferred_chimeric(df: pd.DataFrame, redundant_ids: set[str]) -> pd.D
                 "eccDNA_type": "CeccDNA",  # Chimeric inferred maps to CeccDNA
                 "State": "Inferred",
                 "Seg_total": first_row["seg_total"],
-                "Hit_count": 1,
+                "Hit_count": num_split_reads,
+                "reads_count": num_split_reads,
+                "confidence_score": prob_present,
+                "copy_number": copy_number,
             }
         )
 
@@ -503,8 +917,7 @@ def renumber_eccdna(df: pd.DataFrame) -> pd.DataFrame:
         next_num = max_num
         seen_numbers: set[int] = set()
 
-        for _, row in confirmed_df.iterrows():
-            orig_id = str(row["original_id"])
+        for orig_id in confirmed_df["original_id"].astype(str):
             match = pattern.match(orig_id)
             if match:
                 num = int(match.group(1))

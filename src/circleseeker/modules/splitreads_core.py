@@ -205,7 +205,7 @@ def get_idx_longest_pattern(list_group_order: list[str], list_pattern_region: li
     return max(list_merge_idx_pattern, key=len) if list_merge_idx_pattern else []
 
 
-class pdRegion:
+class PdRegion:
     """Represents a mapped region from pandas row."""
 
     def __init__(self, pd_object: pd.Series):
@@ -221,7 +221,7 @@ class pdRegion:
         self.mapq = pd_object["mapq"]
         self.strand = pd_object["strand"]
 
-    def cal_q_len(self) -> int:
+    def calc_q_len(self) -> int:
         return int(self.q_end) - int(self.q_start)
 
     def cal_r_len(self) -> int:
@@ -354,8 +354,8 @@ def _check_read_pattern(name: str, seq: str) -> list:
     return list_result
 
 
-def _merge_pd_regions(prev: "pdRegion", curr: "pdRegion", columns: pd.Index) -> "pdRegion":
-    """Merge two adjacent/overlapping pdRegion objects into one."""
+def _merge_pd_regions(prev: "PdRegion", curr: "PdRegion", columns: pd.Index) -> "PdRegion":
+    """Merge two adjacent/overlapping PdRegion objects into one."""
     series_new = pd.Series(
         [
             curr.readid,
@@ -372,7 +372,7 @@ def _merge_pd_regions(prev: "pdRegion", curr: "pdRegion", columns: pd.Index) -> 
         ],
         index=columns,
     )
-    return pdRegion(series_new)
+    return PdRegion(series_new)
 
 
 def _get_merge_all(name: str, seq: str) -> list:
@@ -424,7 +424,7 @@ def _get_merge_all(name: str, seq: str) -> list:
 
         if len(df_mapping) > 1:
             # Make initial hit objects
-            list_init_obj = [pdRegion(row) for _, row in df_mapping.iterrows()]
+            list_init_obj = [PdRegion(row) for _, row in df_mapping.iterrows()]
 
             # Merge overlapping/adjacent regions
             list_result_obj = [list_init_obj[0]]
@@ -450,7 +450,7 @@ def _get_merge_all(name: str, seq: str) -> list:
                         list_result_obj[-1] = _merge_pd_regions(prev, obj_, df_mapping.columns)
                     elif same_locus:
                         list_result_obj.append(obj_)
-                    elif obj_.cal_q_len() > prev.cal_q_len():
+                    elif obj_.calc_q_len() > prev.calc_q_len():
                         list_result_obj[-1] = obj_
                     # else: prev is bigger, skip obj_
                 elif is_q_overlap:
@@ -503,7 +503,7 @@ def _cal_pattern_trim(record: tuple[str, str]) -> list:
 # ============================================================================
 
 
-def lenLoci(loci: str) -> int:
+def len_loci(loci: str) -> int:
     """Calculate total length of loci string."""
     length = 0
     for region in loci.split(","):
@@ -967,88 +967,11 @@ class SplitReadsCore:
 
         # Analyze each subgraph
         list_graph_summary = []
-
         for idx, comp_nodes in enumerate(subgraphs, start=1):
-            gname = f"ec{idx}"
-            subgraph = G.to_undirected().subgraph(comp_nodes)
-            nodes = list(subgraph.nodes())
-
-            regions, num_nodes, can_be_solved, contain_selfloop, is_cyclic = chk_circular_subgraph(
-                G, subgraph, dict_pair_strand
+            tup = self._resolve_component_regions(
+                idx, comp_nodes, G, dict_pair_strand, dict_majority_strand
             )
-
-            # Determine region string with strands
-            if len(nodes) == 1:
-                select_repr = repr([nodes[0], nodes[0]])
-                if select_repr in dict_pair_strand:
-                    regions = f"{eval(select_repr)[0]}_{list(dict_pair_strand[select_repr])[0][0]}"
-                else:
-                    regions = f"{nodes[0]}_{dict_majority_strand.get(nodes[0], '+')}"
-
-            elif len(nodes) == 2:
-                select_repr = repr(nodes)
-                list_region = eval(select_repr)
-
-                if select_repr not in dict_pair_strand:
-                    select_repr = repr(nodes[::-1])
-
-                if select_repr in dict_pair_strand:
-                    list_strand = list(dict_pair_strand[select_repr])[0].split("_")
-                    regions = ",".join(f"{x[0]}_{x[1]}" for x in zip(list_region, list_strand))
-                else:
-                    regions = ",".join(f"{n}_{dict_majority_strand.get(n, '+')}" for n in nodes)
-
-            else:
-                test_graph = subgraph.copy()
-                test_graph.remove_edges_from(nx.selfloop_edges(test_graph))
-
-                list_traversal = nx.cycle_basis(nx.DiGraph(test_graph).to_undirected())
-                if len(list_traversal) == 0:
-                    regions = ",".join(f"{node}_{dict_majority_strand.get(node, '+')}" for node in nodes)
-                else:
-                    list_traversal = list_traversal[0]
-                    list_order_check = [(i, i + 1) for i in range(len(list_traversal)) if i + 1 < len(list_traversal)]
-
-                    list_temp_all: list[list[list[str]]] = []
-                    for tup_check in list_order_check:
-                        l_region = list_traversal[tup_check[0]]
-                        r_region = list_traversal[tup_check[1]]
-                        repr_mergeid = repr([l_region, r_region])
-
-                        list_this_level: list[list[str]] = []
-
-                        if repr_mergeid in dict_pair_strand:
-                            for str_strand in list(dict_pair_strand[repr_mergeid]):
-                                list_str_strand = [
-                                    "_".join(x) for x in zip([l_region, r_region], str_strand.split("_"))
-                                ]
-                                list_this_level.append(list_str_strand)
-                        else:
-                            rev_repr_mergeid = repr([r_region, l_region])
-                            if rev_repr_mergeid in dict_pair_strand:
-                                for str_strand in [reverse_strand(x) for x in list(dict_pair_strand[rev_repr_mergeid])]:
-                                    list_str_strand = [
-                                        "_".join(x) for x in zip([l_region, r_region], str_strand.split("_"))
-                                    ]
-                                    list_this_level.append(list_str_strand)
-
-                        if list_this_level:
-                            list_temp_all.append(list_this_level)
-
-                    if list_temp_all:
-                        list_traverse: list[list[str]] = list_temp_all[0]
-                        for list_level in list_temp_all[1:]:
-                            for list_ in list_level:
-                                for index, list_traverse_level in enumerate(list_traverse):
-                                    if list_[0] == list_traverse_level[-1]:
-                                        list_traverse[index].append(list_[1])
-
-                        regions = ",".join(max(list_traverse, key=lambda xs: len(list(xs))))
-                    else:
-                        regions = ",".join(f"{node}_{dict_majority_strand.get(node, '+')}" for node in nodes)
-
-            tup_graph_summary = (gname, regions, num_nodes, can_be_solved, contain_selfloop, is_cyclic)
-            list_graph_summary.append(tup_graph_summary)
+            list_graph_summary.append(tup)
 
         if not list_graph_summary:
             return self._write_empty_output(output_dir)
@@ -1058,37 +981,7 @@ class SplitReadsCore:
         df_graph_summary = pd.DataFrame(list_graph_summary, columns=header)
 
         # Calculate statistics for each eccDNA
-        list_identify_results = []
-
-        for idx, value in df_graph_summary.iterrows():
-            gname = value["id"]
-            merge_region = value["regions"]
-            num_region = value["num_nodes"]
-            is_cyclic = value["is_cyclic"]
-
-            length_loci = lenLoci(merge_region)
-            ctc = "True" if is_cyclic else "False"
-
-            # Collect reads
-            total_base = 0
-            list_readid = []
-
-            for node in merge_region.split(","):
-                node_no_strand = node.rsplit("_", 1)[0] if "_" in node else node
-                l1 = read_merged_ins_df["mergeid"] == node_no_strand
-                read_o = read_merged_ins_df[l1].copy()
-                for _, read_o_row in read_o.iterrows():
-                    read_o_readid = str(read_o_row["readid"])
-                    read_o_start = int(read_o_row["q_start"])
-                    read_o_end = int(read_o_row["q_end"])
-                    total_base += read_o_end - read_o_start
-                    list_readid.append(read_o_readid)
-
-            expect_cov = f"{float(total_base) / length_loci:.2f}" if length_loci > 0 else "0.00"
-
-            list_identify_results.append(
-                (gname, merge_region, length_loci, num_region, ctc, len(set(list_readid)), total_base, expect_cov)
-            )
+        list_identify_results = self._collect_eccdna_stats(df_graph_summary, read_merged_ins_df)
 
         # Write output
         header = ["id", "merge_region", "merge_len", "num_region", "ctc", "numreads", "totalbase", "coverage"]
@@ -1104,6 +997,139 @@ class SplitReadsCore:
         bt.cleanup()
 
         return eccdna_final_path
+
+    @staticmethod
+    def _resolve_component_regions(
+        idx: int,
+        comp_nodes: set,
+        G: "nx.MultiDiGraph",
+        dict_pair_strand: dict,
+        dict_majority_strand: dict,
+    ) -> tuple:
+        """Resolve region string with strand info for one connected component."""
+        gname = f"ec{idx}"
+        subgraph = G.to_undirected().subgraph(comp_nodes)
+        nodes = list(subgraph.nodes())
+
+        regions, num_nodes, can_be_solved, contain_selfloop, is_cyclic = chk_circular_subgraph(
+            G, subgraph, dict_pair_strand
+        )
+
+        if len(nodes) == 1:
+            select_repr = repr([nodes[0], nodes[0]])
+            if select_repr in dict_pair_strand:
+                regions = f"{eval(select_repr)[0]}_{list(dict_pair_strand[select_repr])[0][0]}"
+            else:
+                regions = f"{nodes[0]}_{dict_majority_strand.get(nodes[0], '+')}"
+
+        elif len(nodes) == 2:
+            select_repr = repr(nodes)
+            list_region = eval(select_repr)
+
+            if select_repr not in dict_pair_strand:
+                select_repr = repr(nodes[::-1])
+
+            if select_repr in dict_pair_strand:
+                list_strand = list(dict_pair_strand[select_repr])[0].split("_")
+                regions = ",".join(f"{x[0]}_{x[1]}" for x in zip(list_region, list_strand))
+            else:
+                regions = ",".join(f"{n}_{dict_majority_strand.get(n, '+')}" for n in nodes)
+
+        else:
+            test_graph = subgraph.copy()
+            test_graph.remove_edges_from(nx.selfloop_edges(test_graph))
+
+            list_traversal = nx.cycle_basis(nx.DiGraph(test_graph).to_undirected())
+            if len(list_traversal) == 0:
+                regions = ",".join(
+                    f"{node}_{dict_majority_strand.get(node, '+')}" for node in nodes
+                )
+            else:
+                list_traversal = list_traversal[0]
+                list_order_check = [
+                    (i, i + 1) for i in range(len(list_traversal)) if i + 1 < len(list_traversal)
+                ]
+
+                list_temp_all: list[list[list[str]]] = []
+                for tup_check in list_order_check:
+                    l_region = list_traversal[tup_check[0]]
+                    r_region = list_traversal[tup_check[1]]
+                    repr_mergeid = repr([l_region, r_region])
+
+                    list_this_level: list[list[str]] = []
+
+                    if repr_mergeid in dict_pair_strand:
+                        for str_strand in list(dict_pair_strand[repr_mergeid]):
+                            list_str_strand = [
+                                "_".join(x)
+                                for x in zip([l_region, r_region], str_strand.split("_"))
+                            ]
+                            list_this_level.append(list_str_strand)
+                    else:
+                        rev_repr_mergeid = repr([r_region, l_region])
+                        if rev_repr_mergeid in dict_pair_strand:
+                            for str_strand in [
+                                reverse_strand(x)
+                                for x in list(dict_pair_strand[rev_repr_mergeid])
+                            ]:
+                                list_str_strand = [
+                                    "_".join(x)
+                                    for x in zip([l_region, r_region], str_strand.split("_"))
+                                ]
+                                list_this_level.append(list_str_strand)
+
+                    if list_this_level:
+                        list_temp_all.append(list_this_level)
+
+                if list_temp_all:
+                    list_traverse: list[list[str]] = list_temp_all[0]
+                    for list_level in list_temp_all[1:]:
+                        for list_ in list_level:
+                            for index, list_traverse_level in enumerate(list_traverse):
+                                if list_[0] == list_traverse_level[-1]:
+                                    list_traverse[index].append(list_[1])
+
+                    regions = ",".join(max(list_traverse, key=lambda xs: len(list(xs))))
+                else:
+                    regions = ",".join(
+                        f"{node}_{dict_majority_strand.get(node, '+')}" for node in nodes
+                    )
+
+        return (gname, regions, num_nodes, can_be_solved, contain_selfloop, is_cyclic)
+
+    @staticmethod
+    def _collect_eccdna_stats(
+        df_graph_summary: pd.DataFrame, read_merged_ins_df: pd.DataFrame
+    ) -> list[tuple]:
+        """Collect read statistics for each eccDNA candidate."""
+        results = []
+        for _, value in df_graph_summary.iterrows():
+            gname = value["id"]
+            merge_region = value["regions"]
+            num_region = value["num_nodes"]
+            is_cyclic = value["is_cyclic"]
+
+            length_loci = len_loci(merge_region)
+            ctc = "True" if is_cyclic else "False"
+
+            total_base = 0
+            list_readid: list[str] = []
+
+            for node in merge_region.split(","):
+                node_no_strand = node.rsplit("_", 1)[0] if "_" in node else node
+                read_o = read_merged_ins_df[read_merged_ins_df["mergeid"] == node_no_strand]
+                total_base += (
+                    read_o["q_end"].astype(int) - read_o["q_start"].astype(int)
+                ).sum()
+                list_readid.extend(read_o["readid"].astype(str).tolist())
+
+            expect_cov = f"{float(total_base) / length_loci:.2f}" if length_loci > 0 else "0.00"
+
+            results.append(
+                (gname, merge_region, length_loci, num_region, ctc,
+                 len(set(list_readid)), total_base, expect_cov)
+            )
+        return results
 
     def _write_empty_output(self, output_dir: Path) -> Path:
         """Write empty output file."""

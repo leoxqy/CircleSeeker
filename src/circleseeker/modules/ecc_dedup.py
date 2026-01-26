@@ -721,11 +721,11 @@ class CDHitClusters:
 
 
 # ================== Main ECC Dedup Class ==================
-class eccDedup:
+class EccDedup:
     """eccDNA cluster deduplication processor with confirmed tables generation."""
 
     def __init__(self, logger: Optional[logging.Logger] = None) -> None:
-        """Initialize eccDedup."""
+        """Initialize EccDedup."""
         self.logger = logger or get_logger(self.__class__.__name__)
 
     def normalize_coordinates(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -2222,7 +2222,13 @@ class eccDedup:
         bed.to_csv(bed_file, sep="\t", header=False, index=False)
         self.logger.info(f"Wrote {bed_file}")
 
-        # Write Junctions BEDPE
+        self._write_cecc_bedpe(core, output_dir, prefix)
+        self._write_cecc_fasta(df, core, output_dir, prefix)
+
+    def _write_cecc_bedpe(
+        self, core: pd.DataFrame, output_dir: Path, prefix: Optional[str]
+    ) -> None:
+        """Write CeccDNA junctions BEDPE file."""
         junction_rows = []
         for eid, sub in core.sort_values(["eccDNA_id", "seg_index"]).groupby("eccDNA_id"):
             rows = list(sub.to_dict("records"))
@@ -2255,7 +2261,14 @@ class eccDedup:
         else:
             self.logger.info("No junctions to output for Cecc")
 
-        # Write FASTA
+    def _write_cecc_fasta(
+        self,
+        df: pd.DataFrame,
+        core: pd.DataFrame,
+        output_dir: Path,
+        prefix: Optional[str],
+    ) -> None:
+        """Write CeccDNA FASTA file."""
         fa_file = (
             output_dir / f"{prefix}_CeccDNA_C.fasta" if prefix else output_dir / "CeccDNA_C.fasta"
         )
@@ -2676,7 +2689,7 @@ def main() -> None:
     prefix = output_prefix.name
 
     # Create and run ECC dedup
-    dedup = eccDedup(logger=logger)
+    dedup = EccDedup(logger=logger)
 
     try:
         # Run deduplication
