@@ -106,10 +106,35 @@ tools:
     preset_short: "map-hifi"
     preset_long: "map-hifi"
 
-  # Minimap2 settings for inference mapping (Cyrcular)
+  # Minimap2 settings for inference mapping (SplitReads-Core)
   minimap2:
     preset: "map-hifi"
     additional_args: ""
+
+  # SplitReads-Core configuration (built-in split-read based inference)
+  # This module detects eccDNA from non-CtcReads using split-read patterns.
+  # See docs/SplitReads_Core_Algorithm.md for algorithm details.
+  splitreads:
+    # Trim phase: alignment filtering
+    mapq_threshold: 30           # Minimum mapping quality
+    gap_tolerance: 10            # Allowed gap between alignments (bp)
+    overlap_tolerance: 10        # Allowed overlap between alignments (bp)
+
+    # Identify phase: circular detection
+    min_region_size: 200         # Minimum region size (bp)
+    overlap_check_size: 50       # Breakpoint detection window (bp)
+    min_breakpoint_depth: 3      # Minimum breakpoint support reads
+    min_avg_depth: 5.0           # Minimum average coverage depth
+
+    # Inferred CeccDNA filtering
+    min_inferred_chimeric_segments: 3    # Minimum segments for inferred Cecc
+    min_inferred_two_segment_split_reads: 0  # 0 = disable 2-segment Cecc
+
+    # Merge parameters
+    ref_merge_distance: 1000     # Max reference distance for merging adjacent alignments (bp)
+
+    # Excluded chromosomes (comma-separated)
+    exclude_chrs: ""
 
   samtools: {}
 """

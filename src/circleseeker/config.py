@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Optional, Any, cast, Literal, Union, Callable, TYPE_CHECKING
+from typing import Optional, Any, cast, Literal, Union, Callable, TYPE_CHECKING, TypeVar
 import yaml
 from circleseeker.exceptions import ConfigurationError
 
@@ -218,8 +218,10 @@ class ToolConfigMixin:
         """Convert to dictionary."""
         return asdict(self)  # type: ignore[call-overload, no-any-return]
 
+    _TToolConfig = TypeVar("_TToolConfig", bound="ToolConfigMixin")
+
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ToolConfigMixin":
+    def from_dict(cls: type[_TToolConfig], data: dict[str, Any]) -> _TToolConfig:
         """Create from dictionary, ignoring unknown keys."""
         valid_keys = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
         filtered = {k: v for k, v in data.items() if k in valid_keys}
@@ -346,11 +348,10 @@ class SamtoolsConfig(ToolConfigMixin):
 
 @dataclass
 class SplitReadsConfig(ToolConfigMixin):
-    """SplitReads-Caller (internal) configuration.
+    """SplitReads-Core configuration.
 
-    This is the built-in split-reads based eccDNA detection module that replaces
-    the external Cresil tool. It uses mappy for alignment and networkx for
-    circular structure detection.
+    This is the built-in split-reads based eccDNA detection module.
+    It uses mappy for alignment and networkx for circular structure detection.
     """
 
     # Trim phase parameters
@@ -364,26 +365,6 @@ class SplitReadsConfig(ToolConfigMixin):
     min_breakpoint_depth: int = 3  # Minimum breakpoint support reads
     min_avg_depth: float = 5.0  # Minimum average coverage depth
 
-    # Region merge strategy for large eccDNA detection (>50kb)
-    # - "cresil" (default): Use groupby(mergeid).agg(min/max) to preserve large regions
-    #   even with internal coverage gaps. Better for detecting large eccDNA.
-    # - "bedtools": Original behavior using bedtools merge. May split large regions
-    #   at coverage gaps.
-    merge_strategy: str = "cresil"
-
-    # Breakpoint validation strictness
-    # - False (default, Cresil-style): Relaxed validation for multi-region circles.
-    #   Single-region circles still require both ends; multi-region circles only
-    #   require at least one region with breakpoint evidence.
-    # - True: Strict validation requiring every region to have both 5' and 3' breaks.
-    strict_breakpoint_validation: bool = False
-
-    # Coverage calculation read mode
-    # - "all_reads" (default): Use all reads (including single-segment) for coverage
-    #   calculation, but only split-reads for graph inference.
-    # - "split_only": Legacy behavior using only split-reads for coverage calculation.
-    coverage_read_mode: str = "all_reads"
-
     # Post-processing / curation filters (applied to inferred CeccDNA)
     # Chimeric (Cecc) candidates with only 2 segments are prone to artifacts in
     # split-read graph inference; default keeps >=3 segments for precision.
@@ -391,6 +372,9 @@ class SplitReadsConfig(ToolConfigMixin):
     # Optional: allow 2-segment inferred Cecc when split-read support is high.
     # Set to 0 to disable.
     min_inferred_two_segment_split_reads: int = 0
+
+    # Merge parameters
+    ref_merge_distance: int = 1000  # Max reference distance (bp) for merging adjacent alignments
 
     # Other parameters
     exclude_chrs: str = ""  # Comma-separated chromosomes to exclude
