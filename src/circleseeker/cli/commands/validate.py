@@ -10,7 +10,7 @@ from circleseeker import __version__
 from circleseeker.cli.exit_codes import EXIT_ERROR
 
 
-@click.command(hidden=True)
+@click.command()
 @click.option("--full", is_flag=True, help="Run full validation including test data")
 def validate(full: bool) -> None:
     """Validate CircleSeeker installation and dependencies."""

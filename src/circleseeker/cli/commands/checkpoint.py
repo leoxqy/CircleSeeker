@@ -8,10 +8,11 @@ from pathlib import Path
 import click
 
 
-@click.command(name="show-checkpoint", hidden=True)
+@click.command(name="show-checkpoint")
 @click.option(
-    "-o",
-    "--output",
+    "-d",
+    "--dir",
+    "output",
     type=click.Path(path_type=Path),
     default=Path("circleseeker_output"),
     help="Output directory containing checkpoint",

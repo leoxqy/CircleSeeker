@@ -19,16 +19,20 @@ Common optional flags:
 
 - `-o, --output PATH` Output directory (`circleseeker_output` by default)
 - `-p, --prefix TEXT` Filename prefix (`sample` by default)
-- `-t, --threads INT` Number of threads (default 8)
+- `-t, --threads INT` Number of threads (default `min(8, CPU_count×2)`)
 - `-c, --config PATH` Configuration file (YAML format)
 - `--keep-tmp` Retain the temporary `.tmp_work` directory (default: remove); overrides `keep_tmp` in config
+- `--turbo` Enable turbo mode (RAM-backed temp directory for faster I/O)
+- `--preset CHOICE` Sensitivity preset (`relaxed` / `balanced` / `strict`)
+- `--show-steps` List all 16 steps without executing them
+- `--dry-run` Show planned operations without running
 
 ---
 
 ## 2. Logging & Debugging
 
-- `-v, --verbose` Increase log verbosity (-v for INFO, -vv for DEBUG)
-- `--debug` Enable debug mode and expose advanced options
+- `-v, --verbose` Increase log verbosity (-v for INFO, -vv for DEBUG; default WARNING)
+- `--debug` Unlock advanced options and hidden subcommands (does not affect log level)
 - `--help-advanced` Show advanced/debug options and exit
 - `-h, --help` Show help and exit
 - `-V, --version` Print CircleSeeker version
@@ -43,28 +47,23 @@ These flags are available only when `--debug` is present:
 - `--stop-at INT` Stop after the specified step (inclusive)
 - `--resume` Resume from the last checkpoint
 - `--force` Ignore checkpoints and rerun the full pipeline
-- `--generate-config` Print default configuration YAML and exit
-- `--show-steps` List all 16 steps (grouped by CtcReads-Caller / SplitReads-Caller / Integration) without executing them
-- `--dry-run` Show planned operations without running
 - `--log-file PATH` Write logs to an additional file
-- `--preset CHOICE` Sensitivity preset (`relaxed` / `balanced` / `strict`)
 
 ---
 
-## 4. Hidden Subcommands
-
-Visible only when `--debug` is set:
+## 4. Subcommands
 
 | Subcommand | Description |
 |------------|-------------|
-| `run` | Legacy-compatible entry point |
-| `init-config` | Write default configuration to disk |
-| `show-checkpoint` | Inspect checkpoint information |
+| `init-config` | Generate default configuration (`--stdout` for terminal output, `--output-file` for file) |
+| `show-checkpoint` | Inspect checkpoint information (`-d` to specify output directory) |
 | `validate` | Verify installation and dependencies (`--full` for extended checks) |
 
 ```bash
-circleseeker --debug init-config -o config.yaml
-circleseeker --debug show-checkpoint -o results/ -p sample
+circleseeker init-config --stdout
+circleseeker init-config --output-file config.yaml
+circleseeker show-checkpoint -d results/ -p sample
+circleseeker validate
 ```
 
 ---
@@ -140,22 +139,31 @@ circleseeker -i sample.hifi.fasta -r hg38.fa -o results/ -p sample
 # Use YAML overrides and keep intermediates
 circleseeker -i sample.hifi.fasta -r hg38.fa -c configs/sample.yaml --keep-tmp
 
-# Debug utilities
-circleseeker --debug --show-steps
+# View pipeline steps (no execution)
+circleseeker --show-steps
+
+# Dry run (preview)
+circleseeker --dry-run -i sample.hifi.fasta -r hg38.fa -o results/
+
+# Sensitivity preset
+circleseeker --preset strict -i sample.hifi.fasta -r hg38.fa -o results/
+
+# Debug: resume from checkpoint
 circleseeker --debug --resume -i sample.hifi.fasta -r hg38.fa -o results/
 
 # Generate default config
-circleseeker --debug --generate-config > default_config.yaml
+circleseeker init-config --stdout > default_config.yaml
+circleseeker init-config --output-file config.yaml
 ```
 
 ---
 
 ## 10. FAQ
 
-- **"Requires --debug" errors** Add `--debug` to unlock advanced options.
+- **"Requires --debug" errors** Only `--start-from`, `--stop-at`, `--resume`, `--force`, and `--log-file` require `--debug`.
 - **Dependency check fails** The error message indicates which tools are missing. Install via conda: `conda install -c bioconda -c conda-forge <tool_name>`.
 - **Missing indexes** Automatic generation should cover `.mmi`/`.fai`; otherwise run `minimap2 -d ...` or `samtools faidx ...`.
-- **Resuming** Ensure `<prefix>.checkpoint` exists, then rerun with `--resume`.
+- **Resuming** Ensure `<prefix>.checkpoint` exists, then rerun with `--debug --resume`.
 
 ---
 

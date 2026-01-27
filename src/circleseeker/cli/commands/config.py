@@ -7,20 +7,27 @@ from pathlib import Path
 import click
 
 
-@click.command(name="init-config", hidden=True)
+@click.command(name="init-config")
 @click.option(
-    "-o",
-    "--output",
+    "--output-file",
     type=click.Path(path_type=Path),
     default=Path("config.yaml"),
-    help="Output configuration file",
+    help="Output configuration file path",
 )
-def init_config(output: Path) -> None:
+@click.option(
+    "--stdout",
+    is_flag=True,
+    help="Print default config YAML to stdout instead of writing a file",
+)
+def init_config(output_file: Path, stdout: bool) -> None:
     """Generate a template configuration file."""
     from circleseeker.resources import get_default_config
 
     config_text = get_default_config()
-    output.write_text(config_text)
-    click.echo(f"Configuration template saved to: {output}")
-    click.echo("Edit this file to customize your analysis parameters.")
+    if stdout:
+        click.echo(config_text)
+    else:
+        output_file.write_text(config_text)
+        click.echo(f"Configuration template saved to: {output_file}")
+        click.echo("Edit this file to customize your analysis parameters.")
 

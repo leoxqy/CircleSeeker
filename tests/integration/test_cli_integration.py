@@ -43,34 +43,18 @@ def test_cli_advanced_option_requires_debug() -> None:
 
 
 @pytest.mark.integration
-def test_cli_generate_config_requires_debug() -> None:
+def test_cli_init_config_stdout() -> None:
     runner = CliRunner()
-    result = runner.invoke(cli, ["--generate-config"])
-    assert result.exit_code == 2
-    assert "--generate-config" in result.output
-
-
-@pytest.mark.integration
-def test_cli_generate_config_with_debug() -> None:
-    runner = CliRunner()
-    result = runner.invoke(cli, ["--debug", "--generate-config"])
+    result = runner.invoke(cli, ["init-config", "--stdout"])
     assert result.exit_code == 0
     assert "CircleSeeker Configuration File" in result.output
     assert "input_file:" in result.output
 
 
 @pytest.mark.integration
-def test_cli_show_steps_with_debug() -> None:
+def test_cli_show_steps() -> None:
     runner = CliRunner()
-    result = runner.invoke(cli, ["--debug", "--show-steps"])
-    assert result.exit_code == 0
-    assert "CircleSeeker Pipeline Steps:" in result.output
-
-
-@pytest.mark.integration
-def test_cli_run_show_steps() -> None:
-    runner = CliRunner()
-    result = runner.invoke(cli, ["run", "--show-steps"])
+    result = runner.invoke(cli, ["--show-steps"])
     assert result.exit_code == 0
     assert "CircleSeeker Pipeline Steps:" in result.output
 
@@ -79,7 +63,7 @@ def test_cli_run_show_steps() -> None:
 def test_cli_init_config_writes_file() -> None:
     runner = CliRunner()
     with runner.isolated_filesystem():
-        result = runner.invoke(cli, ["--debug", "init-config", "-o", "config.yaml"])
+        result = runner.invoke(cli, ["init-config", "--output-file", "config.yaml"])
         assert result.exit_code == 0
 
         contents = open("config.yaml", encoding="utf-8").read()

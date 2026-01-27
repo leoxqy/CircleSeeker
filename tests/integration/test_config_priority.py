@@ -40,7 +40,7 @@ def test_run_uses_config_when_cli_not_provided() -> None:
             encoding="utf-8",
         )
 
-        result = runner.invoke(cli, ["run", "-c", str(config_path), "--dry-run"])
+        result = runner.invoke(cli, ["-c", str(config_path), "--dry-run"])
         assert result.exit_code == 0, result.output
         assert "CircleSeeker Pipeline Steps:" in result.output
         assert f"Would process: {reads}" in result.output
@@ -82,7 +82,6 @@ def test_cli_overrides_config() -> None:
         result = runner.invoke(
             cli,
             [
-                "run",
                 "-c",
                 str(config_path),
                 "-i",
@@ -115,7 +114,7 @@ def test_defaults_apply_without_config() -> None:
         _write_fasta(ref, name="chr1", sequence="A" * 200)
 
         default_out = Path("circleseeker_output")
-        result = runner.invoke(cli, ["run", "-i", str(reads), "-r", str(ref), "--dry-run"])
+        result = runner.invoke(cli, ["-i", str(reads), "-r", str(ref), "--dry-run"])
         assert result.exit_code == 0, result.output
         assert str(default_out.absolute()) in result.output
         # Default threads = min(8, cpu_count * 2), check pattern instead of exact value
@@ -130,6 +129,6 @@ def test_config_missing_required_fields_errors() -> None:
         config_path = Path("config.yaml")
         config_path.write_text("threads: 3\n", encoding="utf-8")
 
-        result = runner.invoke(cli, ["run", "-c", str(config_path), "--dry-run"])
+        result = runner.invoke(cli, ["-c", str(config_path), "--dry-run"])
         assert result.exit_code == 1
         assert "Error: Both --input and --reference are required" in result.output

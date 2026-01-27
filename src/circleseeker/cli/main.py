@@ -7,7 +7,7 @@ import signal
 import sys
 from pathlib import Path
 from types import FrameType
-from typing import Any, Optional, cast
+from typing import Optional
 
 import click
 
@@ -32,7 +32,6 @@ from circleseeker.utils.logging import get_logger, setup_logging
 
 from .commands.checkpoint import show_checkpoint
 from .commands.config import init_config
-from .commands.run import run
 from .commands.validate import validate
 from .common_options import (
     input_option,
@@ -61,35 +60,32 @@ def _print_version(ctx: click.Context, _param: click.Parameter, value: bool) -> 
 
 def _print_advanced_help(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
     """Print help for advanced/debug options."""
-    if value and not ctx.resilient_parsing:
-        click.echo("CircleSeeker Advanced Options")
-        click.echo("=" * 50)
-        click.echo()
-        click.echo("These options require --debug flag to be enabled:")
-        click.echo()
-        click.echo("Pipeline Control:")
-        click.echo("  --start-from INT     Resume from specific step number (1-16)")
-        click.echo("  --stop-at INT        Stop at specific step number (1-16)")
-        click.echo("  --resume             Resume from last checkpoint")
-        click.echo("  --force              Force re-run all steps (ignore checkpoint)")
-        click.echo("  --dry-run            Show actions without executing")
-        click.echo()
-        click.echo("Configuration:")
-        click.echo("  --generate-config    Print default config YAML to stdout")
-        click.echo("  --show-steps         Show pipeline steps and exit")
-        click.echo("  --log-file PATH      Write logs to file")
-        click.echo("  --preset CHOICE      Sensitivity preset (relaxed/balanced/strict)")
-        click.echo()
-        click.echo("Subcommands (require --debug):")
-        click.echo("  run                  Run pipeline (explicit subcommand)")
-        click.echo("  init-config          Generate config file interactively")
-        click.echo("  show-checkpoint      Display checkpoint information")
-        click.echo("  validate             Validate installation and dependencies")
-        click.echo()
-        click.echo("Example:")
-        click.echo("  circleseeker --debug --start-from 5 -i reads.fa -r ref.fa -o out/")
-        click.echo()
-        ctx.exit()
+    if not value or ctx.resilient_parsing:
+        return
+    click.echo("CircleSeeker Advanced Options")
+    click.echo("=" * 50)
+    click.echo()
+    click.echo("These options require --debug:")
+    click.echo()
+    group = ctx.command
+    for p in group.params:
+        if isinstance(p, click.Option) and p.hidden:
+            names = " / ".join(p.opts)
+            click.echo(f"  {names:<25} {p.help or ''}")
+    click.echo()
+    # Dynamically list hidden subcommands
+    if isinstance(group, click.Group):
+        hidden = [(n, c) for n, c in group.commands.items() if getattr(c, 'hidden', False)]
+        if hidden:
+            click.echo("Hidden Subcommands (require --debug):")
+            for name, cmd in hidden:
+                click.echo(f"  {name:<25} {cmd.get_short_help_str()}")
+            click.echo()
+    click.echo("Example:")
+    click.echo("  circleseeker --debug --start-from 5 -i reads.fa -r ref.fa")
+    click.echo("  circleseeker --debug -vv --resume -i reads.fa -r ref.fa")
+    click.echo()
+    ctx.exit()
 
 
 @click.group(
@@ -130,7 +126,6 @@ def _print_advanced_help(ctx: click.Context, _param: click.Parameter, value: boo
     "--preset",
     type=click.Choice(["relaxed", "balanced", "strict"], case_sensitive=False),
     default=None,
-    hidden=True,
     help="Sensitivity preset: relaxed (high recall), balanced (default), strict (high precision)",
 )
 # Verbosity option (unified: -v/--verbose)
@@ -145,10 +140,7 @@ def _print_advanced_help(ctx: click.Context, _param: click.Parameter, value: boo
 @click.option("--stop-at", type=int, help="Stop at specific step (debug only)", hidden=True)
 @click.option("--resume", is_flag=True, help="Resume from last checkpoint (debug only)", hidden=True)
 @click.option(
-    "--generate-config", is_flag=True, help="Print default config YAML (debug only)", hidden=True
-)
-@click.option(
-    "--show-steps", is_flag=True, help="Show pipeline steps and exit (debug only)", hidden=True
+    "--show-steps", is_flag=True, help="Show pipeline steps and exit",
 )
 @click.option("--force", is_flag=True, help="Force re-run all steps (debug only)", hidden=True)
 @click.option(
@@ -157,7 +149,7 @@ def _print_advanced_help(ctx: click.Context, _param: click.Parameter, value: boo
     help="Path for log file output (debug only)",
     hidden=True,
 )
-@click.option("--dry-run", is_flag=True, help="Show actions without executing (debug only)", hidden=True)
+@click.option("--dry-run", is_flag=True, help="Show actions without executing")
 @click.option(
     "-h",
     "--help",
@@ -167,7 +159,7 @@ def _print_advanced_help(ctx: click.Context, _param: click.Parameter, value: boo
     callback=_print_help,
     help="Show this message and exit.",
 )
-@click.option("--debug", is_flag=True, help="Enable advanced options and debug logging")
+@click.option("--debug", is_flag=True, help="Unlock advanced options and hidden subcommands")
 @click.pass_context
 def cli(
     ctx: click.Context,
@@ -184,7 +176,6 @@ def cli(
     start_from: Optional[int],
     stop_at: Optional[int],
     resume: bool,
-    generate_config: bool,
     show_steps: bool,
     force: bool,
     log_file: Optional[Path],
@@ -208,16 +199,8 @@ def cli(
             advanced_used.append(ADVANCED_ONLY_KEYS["resume"])
         if force:
             advanced_used.append(ADVANCED_ONLY_KEYS["force"])
-        if dry_run:
-            advanced_used.append(ADVANCED_ONLY_KEYS["dry_run"])
-        if generate_config:
-            advanced_used.append(ADVANCED_ONLY_KEYS["generate_config"])
-        if show_steps:
-            advanced_used.append(ADVANCED_ONLY_KEYS["show_steps"])
         if log_file:
             advanced_used.append(ADVANCED_ONLY_KEYS["log_file"])
-        if preset is not None:
-            advanced_used.append(ADVANCED_ONLY_KEYS["preset"])
 
         if advanced_used:
             opt_names = ", ".join(sorted(set(advanced_used)))
@@ -225,42 +208,22 @@ def cli(
             click.echo("Tip: Use --help-advanced to see all advanced options.", err=True)
             sys.exit(EXIT_USAGE)
 
-    # Hide or reveal advanced commands in help based on --debug
-    advanced_cmds = {"init-config", "show-checkpoint", "validate", "benchmark", "run"}
-    group = cast(click.Group, ctx.command)
-    for name, cmd in list(group.commands.items()):
-        if name in advanced_cmds:
-            cmd.hidden = not debug
-
     # If a subcommand was invoked, do not run the pipeline here
     if ctx.invoked_subcommand:
         return
 
     # Setup logging based on verbosity
-    if debug:
-        log_level = logging.DEBUG
-    elif verbose >= 2:
+    if verbose >= 2:
         log_level = logging.DEBUG
     elif verbose == 1:
         log_level = logging.INFO
     else:
-        log_level = logging.ERROR
+        log_level = logging.WARNING
 
     setup_logging(level=log_level, log_file=log_file)
     logger = get_logger("cli")
 
     try:
-        # Generate default config and exit
-        if generate_config:
-            try:
-                from circleseeker.resources import get_default_config
-
-                click.echo(get_default_config())
-            except Exception as exc:
-                logger.error(f"Failed to generate default config: {exc}")
-                sys.exit(1)
-            return
-
         opts = PipelineOptions(
             input_file=input_file,
             reference=reference,
@@ -294,7 +257,6 @@ def cli(
         sys.exit(EXIT_ERROR)
 
 
-cli.add_command(run)
 cli.add_command(show_checkpoint)
 cli.add_command(init_config)
 cli.add_command(validate)

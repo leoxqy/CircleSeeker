@@ -22,11 +22,7 @@ ADVANCED_ONLY_KEYS = {
     "stop_at": "--stop-at",
     "resume": "--resume",
     "force": "--force",
-    "dry_run": "--dry-run",
-    "generate_config": "--generate-config",
-    "show_steps": "--show-steps",
     "log_file": "--log-file",
-    "preset": "--preset",
 }
 
 
@@ -78,7 +74,7 @@ def execute_pipeline(
     """
     Execute the CircleSeeker pipeline with given options.
 
-    This is the unified execution function used by both the top-level command and `run`.
+    This is the unified execution function used by the top-level command.
 
     Args:
         opts: Pipeline execution options

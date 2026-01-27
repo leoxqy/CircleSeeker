@@ -19,16 +19,20 @@ circleseeker -i reads.fasta -r reference.fa -o results/
 
 - `-o, --output PATH` 输出目录，默认 `circleseeker_output`
 - `-p, --prefix TEXT` 输出文件前缀，默认 `sample`
-- `-t, --threads INT` 线程数，默认 8
+- `-t, --threads INT` 线程数，默认 `min(8, CPU核数×2)`
 - `-c, --config PATH` 配置文件路径（YAML 格式）
 - `--keep-tmp` 保留临时目录（`.tmp_work`），默认删除；可显式覆盖配置文件中的 `keep_tmp` 设置
+- `--turbo` 启用 turbo 模式（使用 RAM-backed 临时目录加速 I/O）
+- `--preset CHOICE` 灵敏度预设（`relaxed` / `balanced` / `strict`）
+- `--show-steps` 查看 16 个步骤及状态（不执行）
+- `--dry-run` 仅展示计划执行的操作，不实际运行
 
 ---
 
 ## 2. 日志与调试
 
-- `-v, --verbose` 提升日志级别；一次为 INFO，两次为 DEBUG
-- `--debug` 开启调试模式，同时解锁高级参数与隐藏子命令
+- `-v, --verbose` 提升日志级别；一次为 INFO，两次为 DEBUG（默认 WARNING）
+- `--debug` 解锁高级选项与隐藏子命令（不影响日志级别）
 - `--help-advanced` 显示高级/调试选项说明并退出
 - `-h, --help` 显示帮助并退出
 - `-V, --version` 打印版本信息
@@ -43,28 +47,25 @@ circleseeker -i reads.fasta -r reference.fa -o results/
 - `--stop-at INT` 执行到指定步骤后停止（包含该步骤）
 - `--resume` 从上次检查点恢复
 - `--force` 忽略检查点，重新执行所有步骤
-- `--generate-config` 输出默认配置 YAML 并退出
-- `--show-steps` 查看 16 个步骤（按 CtcReads-Caller / SplitReads-Caller / Integration 归类）及状态
-- `--dry-run` 仅展示计划执行的操作，不实际运行
 - `--log-file PATH` 额外写入日志文件
-- `--preset CHOICE` 灵敏度预设（`relaxed` / `balanced` / `strict`）
 
 ---
 
-## 4. 隐藏子命令（仅在 `--debug` 模式显示）
+## 4. 子命令
 
 | 子命令 | 说明 |
 |--------|------|
-| `run` | 与顶级命令等价的兼容入口，保留旧参数别名 |
-| `init-config` | 将默认配置写入指定路径 |
-| `show-checkpoint` | 查看现有运行的检查点信息 |
+| `init-config` | 生成默认配置文件（`--stdout` 输出到终端，`--output-file` 写入文件） |
+| `show-checkpoint` | 查看现有运行的检查点信息（`-d` 指定输出目录） |
 | `validate` | 检查安装与依赖环境（`--full` 可启用更完整检查） |
 
 调用示例：
 
 ```bash
-circleseeker --debug init-config -o config.yaml
-circleseeker --debug show-checkpoint -o results/ -p sample
+circleseeker init-config --stdout
+circleseeker init-config --output-file config.yaml
+circleseeker show-checkpoint -d results/ -p sample
+circleseeker validate
 ```
 
 ---
@@ -113,7 +114,7 @@ circleseeker --debug show-checkpoint -o results/ -p sample
 |15 | `ecc_summary` | 统计并生成 HTML/TXT 报告（含合并 FASTA） |
 |16 | `ecc_packager` | 复制/重命名产物，形成最终目录 |
 
-运行中可通过 `circleseeker --debug --show-steps` 查看当前状态与历史完成情况。
+运行中可通过 `circleseeker --show-steps` 查看步骤列表。
 
 ---
 
@@ -146,22 +147,31 @@ circleseeker -i sample.hifi.fasta -r hg38.fa -o results/ -p sample
 # 使用 YAML 覆写配置，并保留临时目录
 circleseeker -i sample.hifi.fasta -r hg38.fa -c configs/sample.yaml --keep-tmp
 
-# 调试模式下查看步骤与恢复执行
-circleseeker --debug --show-steps
+# 查看步骤（不执行）
+circleseeker --show-steps
+
+# 预览运行计划（dry run）
+circleseeker --dry-run -i sample.hifi.fasta -r hg38.fa -o results/
+
+# 使用灵敏度预设
+circleseeker --preset strict -i sample.hifi.fasta -r hg38.fa -o results/
+
+# 调试模式下恢复执行
 circleseeker --debug --resume -i sample.hifi.fasta -r hg38.fa -o results/
 
 # 生成默认配置模板
-circleseeker --debug --generate-config > default_config.yaml
+circleseeker init-config --stdout > default_config.yaml
+circleseeker init-config --output-file config.yaml
 ```
 
 ---
 
 ## 10. 常见问题
 
-- **命令报错 "需要 --debug 才能使用某选项"**：请加上 `--debug` 再运行。
+- **命令报错 "需要 --debug 才能使用某选项"**：请加上 `--debug` 再运行。仅 `--start-from`、`--stop-at`、`--resume`、`--force`、`--log-file` 需要 `--debug`。
 - **依赖检查失败**：程序会提示缺少哪些工具。请通过 conda 安装缺失的依赖：`conda install -c bioconda -c conda-forge <tool_name>`。
 - **参考基因组缺少索引**：程序会尝试自动创建 `.mmi` 和 `.fai`；如失败，请手工运行 `minimap2 -d ref.fa.mmi ref.fa` 或 `samtools faidx ref.fa`。
-- **中途终止想要恢复**：确认输出目录下存在 `<prefix>.checkpoint`，加 `--resume` 重新运行即可。
+- **中途终止想要恢复**：确认输出目录下存在 `<prefix>.checkpoint`，加 `--debug --resume` 重新运行即可。
 
 ---
 

@@ -30,7 +30,6 @@ def test_run_dry_run_prints_plan_without_creating_output_dir() -> None:
         result = runner.invoke(
             cli,
             [
-                "run",
                 "-i",
                 str(reads),
                 "-r",
@@ -52,4 +51,3 @@ def test_run_dry_run_prints_plan_without_creating_output_dir() -> None:
         assert str(out_dir.absolute()) in result.output
         assert "Using 4 threads" in result.output
         assert not out_dir.exists()
-

@@ -155,7 +155,7 @@ def test_cli_resume_ignores_force_flag(tmp_path: Path, monkeypatch: pytest.Monke
         result = runner.invoke(
             cli,
             [
-                "run",
+                "--debug",
                 "-i",
                 str(reads),
                 "-r",

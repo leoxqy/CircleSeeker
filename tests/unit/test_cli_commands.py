@@ -44,9 +44,9 @@ class TestCLIValidate:
     """Test the validate command."""
 
     def test_validate_command_exists(self):
-        """Test that validate command exists."""
+        """Test that validate command exists and is visible without --debug."""
         runner = CliRunner()
-        result = runner.invoke(cli, ["--debug", "validate", "--help"])
+        result = runner.invoke(cli, ["validate", "--help"])
         assert result.exit_code == 0
         assert "Validate" in result.output or "validate" in result.output.lower()
 
@@ -54,50 +54,28 @@ class TestCLIValidate:
 class TestCLIConfig:
     """Test config-related CLI functionality."""
 
-    def test_generate_config(self):
-        """Test config generation."""
+    def test_init_config_stdout(self):
+        """Test config generation via init-config --stdout."""
         runner = CliRunner()
-        result = runner.invoke(cli, ["--debug", "--generate-config"])
+        result = runner.invoke(cli, ["init-config", "--stdout"])
         assert result.exit_code == 0
         assert "input_file:" in result.output
 
-    def test_show_steps(self):
-        """Test show-steps option."""
+    def test_init_config_output_file(self):
+        """Test init-config writes to file with --output-file."""
         runner = CliRunner()
-        result = runner.invoke(cli, ["--debug", "--show-steps"])
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, ["init-config", "--output-file", "custom.yaml"])
+            assert result.exit_code == 0
+            contents = open("custom.yaml", encoding="utf-8").read()
+            assert "input_file:" in contents or "CircleSeeker" in contents
+
+    def test_show_steps(self):
+        """Test show-steps option (no --debug needed)."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--show-steps"])
         assert result.exit_code == 0
         assert "Pipeline Steps" in result.output or "step" in result.output.lower()
-
-
-class TestCLIRunCommand:
-    """Test the run command."""
-
-    def test_run_help(self):
-        """Test run command help."""
-        runner = CliRunner()
-        result = runner.invoke(cli, ["run", "--help"])
-        assert result.exit_code == 0
-        assert "run" in result.output.lower()
-
-    def test_run_show_steps(self):
-        """Test run command show-steps."""
-        runner = CliRunner()
-        result = runner.invoke(cli, ["run", "--show-steps"])
-        assert result.exit_code == 0
-
-    def test_run_dry_run_with_missing_input(self):
-        """Test run with dry-run but missing input file."""
-        runner = CliRunner()
-        with tempfile.TemporaryDirectory() as tmpdir:
-            result = runner.invoke(cli, [
-                "--debug",
-                "-i", "/nonexistent/input.fasta",
-                "-r", "/nonexistent/ref.fa",
-                "-o", tmpdir,
-                "--dry-run"
-            ])
-            # Should fail because input file doesn't exist
-            assert result.exit_code != 0
 
 
 class TestCLIPresets:
@@ -109,8 +87,17 @@ class TestCLIPresets:
         result = runner.invoke(cli, ["--help-advanced"])
         # Preset should be documented in advanced help
         assert result.exit_code == 0
-        # The preset option may be hidden, so we check for advanced help output
         assert "--start-from" in result.output or "advanced" in result.output.lower()
+
+    def test_preset_no_debug_required(self):
+        """Test that --preset does NOT require --debug."""
+        runner = CliRunner()
+        # --preset alone should not trigger "require --debug" error
+        # (it will still fail due to missing -i/-r, but not due to --debug)
+        result = runner.invoke(cli, ["--preset", "strict"])
+        assert result.exit_code != 0
+        # Should NOT complain about --debug
+        assert "require --debug" not in result.output
 
 
 class TestCLIAdvancedOptions:
@@ -136,3 +123,49 @@ class TestCLIAdvancedOptions:
         result = runner.invoke(cli, ["--resume"])
         assert result.exit_code != 0
         assert "debug" in result.output.lower()
+
+    def test_dry_run_no_debug_required(self):
+        """Test that --dry-run does NOT require --debug."""
+        runner = CliRunner()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = runner.invoke(cli, [
+                "-i", "/nonexistent/input.fasta",
+                "-r", "/nonexistent/ref.fa",
+                "-o", tmpdir,
+                "--dry-run"
+            ])
+            # Should fail because input file doesn't exist, NOT because of --debug
+            assert result.exit_code != 0
+            assert "require --debug" not in result.output
+
+    def test_show_steps_no_debug_required(self):
+        """Test that --show-steps does NOT require --debug."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--show-steps"])
+        assert result.exit_code == 0
+        assert "Pipeline Steps" in result.output or "step" in result.output.lower()
+
+
+class TestCLISubcommandVisibility:
+    """Test that utility subcommands are visible without --debug."""
+
+    def test_init_config_visible(self):
+        """Test that init-config is visible in help."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--help"])
+        assert result.exit_code == 0
+        assert "init-config" in result.output
+
+    def test_show_checkpoint_visible(self):
+        """Test that show-checkpoint is visible in help."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--help"])
+        assert result.exit_code == 0
+        assert "show-checkpoint" in result.output
+
+    def test_validate_visible(self):
+        """Test that validate is visible in help."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--help"])
+        assert result.exit_code == 0
+        assert "validate" in result.output
