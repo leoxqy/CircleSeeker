@@ -12,10 +12,13 @@ Naming Philosophy:
 """
 
 from __future__ import annotations
+import logging
 from dataclasses import dataclass
 from typing import Optional
 import pandas as pd
 import warnings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -223,10 +226,10 @@ class ColumnStandardizer:
 
         # Log conversions if any were made
         if conversions:
-            print(f"Column standardization applied: {len(conversions)} conversions")
+            logger.info("Column standardization applied: %d conversions", len(conversions))
             for old, new in conversions.items():
                 if not old.endswith("_converted"):
-                    print(f"  {old} → {new}")
+                    logger.debug("  %s → %s", old, new)
 
         return df
 
