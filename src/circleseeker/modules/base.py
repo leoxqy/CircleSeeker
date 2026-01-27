@@ -186,7 +186,7 @@ class ModuleBase(ABC):
                     if file_path.exists():
                         file_path.unlink()
                         self.logger.debug(f"Removed temporary file: {file_path}")
-                except Exception as e:
+                except OSError as e:
                     self.logger.warning(f"Failed to remove {file_path}: {e}")
 
 

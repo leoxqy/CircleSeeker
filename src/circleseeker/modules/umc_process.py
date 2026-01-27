@@ -114,7 +114,7 @@ class BaseEccProcessor(ABC):
                 df = pd.read_csv(csv_path)
                 if not df.empty:
                     dataframes.append(df)
-            except Exception as exc:
+            except (OSError, pd.errors.ParserError, pd.errors.EmptyDataError) as exc:
                 self.logger.warning(f"Unable to read {csv_path}: {exc}")
 
         if not dataframes:
@@ -212,7 +212,75 @@ def extract_ring_sequence(seq_str: str, q_start: int, cons_len: int) -> str:
         return part1 + part2
 
 
-class UeccProcessor:
+_RC_TABLE = str.maketrans(
+    "ACGTRYMKSWBDHVNacgtrymkswbdhvn",
+    "TGCAYRKMWSVHDBNtgcayrkmwsvhdbn",
+)
+
+
+def _reverse_complement(seq: str) -> str:
+    """Reverse-complement a DNA sequence (supports common IUPAC codes)."""
+    return seq.translate(_RC_TABLE)[::-1]
+
+
+def _booth_min_rotation_start(s: str) -> int:
+    """Return start index of lexicographically minimal rotation (Booth's algorithm)."""
+    n = len(s)
+    if n <= 1:
+        return 0
+    ss = s + s
+    i, j, k = 0, 1, 0
+    while i < n and j < n and k < n:
+        a = ss[i + k]
+        b = ss[j + k]
+        if a == b:
+            k += 1
+            continue
+        if a > b:
+            i = i + k + 1
+            if i <= j:
+                i = j + 1
+        else:
+            j = j + k + 1
+            if j <= i:
+                j = i + 1
+        k = 0
+    return int(min(i, j))
+
+
+def _min_circular_rotation(seq: str) -> str:
+    """Return lexicographically minimal circular rotation of a sequence."""
+    seq = str(seq)
+    n = len(seq)
+    if n <= 1:
+        return seq
+    start = _booth_min_rotation_start(seq)
+    ss = seq + seq
+    return ss[start : start + n]
+
+
+def canonicalize_circular_sequence(seq: str) -> str:
+    """Canonicalize a circular DNA sequence to a unique linear representation.
+
+    This normalizes both:
+    - rotation (different cut points on the ring)
+    - strand (reverse-complement representation)
+
+    The canonical representation is the lexicographically smallest string among
+    all rotations of the sequence and its reverse complement.
+    """
+    seq = str(seq).strip().upper()
+    if not seq:
+        return ""
+    if len(seq) <= 1:
+        return seq
+
+    rot = _min_circular_rotation(seq)
+    rot_rc = _min_circular_rotation(_reverse_complement(seq))
+    return rot if rot <= rot_rc else rot_rc
+
+
+class UeccProcessor(BaseEccProcessor):
     """Process UeccDNA sequences (single location per query_id)."""
 
     def __init__(
@@ -222,11 +290,13 @@ class UeccProcessor:
         logger: Optional[logging.Logger] = None,
     ):
         """Initialize UeccDNA processor."""
-        self.seq_library = seq_library
-        self.config = config
-        self.logger = logger if logger else get_logger(self.__class__.__name__)
-        self.fasta_records: list[SeqRecord] = []
-        self.counter = 0
+        super().__init__(seq_library=seq_library, config=config, logger=logger)
+
+    def get_eccDNA_prefix(self) -> str:
+        return "U"
+
+    def cluster_by_signature(self, df: pd.DataFrame) -> pd.DataFrame:
+        return self.cluster_by_location(df)
 
     def cluster_by_location(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -328,9 +398,10 @@ class UeccProcessor:
             if seq_str and q_start > 0 and cons_len > 0:
                 try:
                     extracted_seq = extract_ring_sequence(seq_str, int(q_start), int(cons_len))
+                    extracted_seq = canonicalize_circular_sequence(extracted_seq)
                     df.loc[idx, "eSeq"] = extracted_seq
                     sequences_found += 1
-                except Exception as e:
+                except (ValueError, IndexError, TypeError) as e:
                     self.logger.debug(f"Failed to extract sequence for {query_id}: {e}")
                     sequences_missing += 1
             else:
@@ -376,26 +447,11 @@ class UeccProcessor:
         self.fasta_records = []
         self.counter = 0
 
-        # Load all CSV files
-        dataframes: list[pd.DataFrame] = []
-        for csv_file in csv_files:
-            if not csv_file:
-                continue
-            csv_path = Path(csv_file)
-            if not csv_path.exists() or csv_path.stat().st_size == 0:
-                continue
-            try:
-                df = pd.read_csv(csv_path)
-                if not df.empty:
-                    dataframes.append(df)
-            except Exception as exc:
-                self.logger.warning(f"Unable to read {csv_path}: {exc}")
-
-        if not dataframes:
+        df = self.load_csv_files(csv_files)
+        if df is None:
             self.logger.info("No UeccDNA inputs provided")
             return None
 
-        df = pd.concat(dataframes, ignore_index=True)
         initial_count = len(df)
 
         # Apply clustering if requested
@@ -414,16 +470,7 @@ class UeccProcessor:
                 )
                 df = df[~unassigned_mask].copy()
 
-        # Save outputs
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_csv = output_dir / f"{prefix}_UeccDNA_processed.csv"
-        df.to_csv(output_csv, index=False)
-
-        if self.fasta_records:
-            output_fasta = output_dir / f"{prefix}_UeccDNA_pre.fasta"
-            with open(output_fasta, "w") as handle:
-                SeqIO.write(self.fasta_records, handle, "fasta")
-            self.logger.debug(f"Saved {len(self.fasta_records)} UeccDNA sequences")
+        self.save_outputs(df, output_dir, prefix, ecc_type="UeccDNA")
 
         # Summary
         sequences_count = len(self.fasta_records)
@@ -434,7 +481,7 @@ class UeccProcessor:
         return df
 
 
-class MeccProcessor:
+class MeccProcessor(BaseEccProcessor):
     """Process MeccDNA sequences (multiple locations per query_id)."""
 
     def __init__(
@@ -444,11 +491,10 @@ class MeccProcessor:
         logger: Optional[logging.Logger] = None,
     ):
         """Initialize MeccDNA processor."""
-        self.seq_library = seq_library
-        self.config = config
-        self.logger = logger if logger else get_logger(self.__class__.__name__)
-        self.fasta_records: list[SeqRecord] = []
-        self.counter = 0
+        super().__init__(seq_library=seq_library, config=config, logger=logger)
+
+    def get_eccDNA_prefix(self) -> str:
+        return "M"
 
     def generate_mecc_signature(self, df_group: pd.DataFrame) -> str:
         """
@@ -479,7 +525,7 @@ class MeccProcessor:
         locations.sort(key=lambda x: (str(x[0]), x[1], x[2]))
 
         # Generate signature
-        signature = ";".join([f"{chr}:{start}-{end}" for chr, start, end in locations])
+        signature = ";".join([f"{chrom}:{start}-{end}" for chrom, start, end in locations])
         return signature
 
     def cluster_by_signature(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -571,6 +617,18 @@ class MeccProcessor:
             representative_group["cluster_size"] = cluster_size
             representative_group["cluster_members"] = ";".join(query_ids)
 
+            # Aggregate reads from all cluster members
+            if "reads" in representative_group.columns:
+                all_reads: list[str] = []
+                for qid in query_ids:
+                    group = query_id_to_group[qid]
+                    for reads_str in group["reads"].dropna().unique():
+                        if str(reads_str) not in ["", "NA"]:
+                            reads_list = str(reads_str).split(";")
+                            all_reads.extend(r.strip() for r in reads_list if r.strip())
+                unique_reads = list(dict.fromkeys(all_reads))
+                representative_group["reads"] = ";".join(unique_reads) if unique_reads else ""
+
             rows_to_keep.append(representative_group)
 
         # Handle unclustered sequences
@@ -619,6 +677,7 @@ class MeccProcessor:
             if seq_str and q_start > 0 and cons_len > 0:
                 try:
                     extracted_seq = extract_ring_sequence(seq_str, int(q_start), int(cons_len))
+                    extracted_seq = canonicalize_circular_sequence(extracted_seq)
                     df.loc[query_mask, "eSeq"] = extracted_seq
                     sequences_found += 1
                 except (ValueError, IndexError, TypeError):
@@ -708,26 +767,11 @@ class MeccProcessor:
         self.fasta_records = []
         self.counter = 0
 
-        # Load all CSV files
-        dataframes: list[pd.DataFrame] = []
-        for csv_file in csv_files:
-            if not csv_file:
-                continue
-            csv_path = Path(csv_file)
-            if not csv_path.exists() or csv_path.stat().st_size == 0:
-                continue
-            try:
-                df = pd.read_csv(csv_path)
-                if not df.empty:
-                    dataframes.append(df)
-            except Exception as exc:
-                self.logger.warning(f"Unable to read {csv_path}: {exc}")
-
-        if not dataframes:
+        df = self.load_csv_files(csv_files)
+        if df is None:
             self.logger.info("No MeccDNA inputs provided")
             return None
 
-        df = pd.concat(dataframes, ignore_index=True)
         initial_query_ids = df["query_id"].nunique()
 
         # Apply clustering if requested
@@ -752,16 +796,7 @@ class MeccProcessor:
                 )
                 df = df[~unassigned_mask].copy()
 
-        # Save outputs
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_csv = output_dir / f"{prefix}_MeccDNA_processed.csv"
-        df.to_csv(output_csv, index=False)
-
-        if self.fasta_records:
-            output_fasta = output_dir / f"{prefix}_MeccDNA_pre.fasta"
-            with open(output_fasta, "w") as handle:
-                SeqIO.write(self.fasta_records, handle, "fasta")
-            self.logger.debug(f"Saved {len(self.fasta_records)} MeccDNA sequences")
+        self.save_outputs(df, output_dir, prefix, ecc_type="MeccDNA")
 
         # Summary
         sequences_count = len(self.fasta_records)
@@ -772,7 +807,7 @@ class MeccProcessor:
         return df
 
 
-class CeccProcessor:
+class CeccProcessor(BaseEccProcessor):
     """Process CeccDNA sequences (complex multi-segment chimeras)."""
 
     def __init__(
@@ -782,17 +817,24 @@ class CeccProcessor:
         logger: Optional[logging.Logger] = None,
     ):
         """Initialize CeccDNA processor."""
-        self.seq_library = seq_library
-        self.config = config
-        self.logger = logger if logger else get_logger(self.__class__.__name__)
-        self.fasta_records: list[SeqRecord] = []
-        self.counter = 0
+        super().__init__(seq_library=seq_library, config=config, logger=logger)
+
+    def get_eccDNA_prefix(self) -> str:
+        return "C"
 
     def generate_cecc_signature(self, df_group: pd.DataFrame) -> str:
         """
-        Generate location signature for CeccDNA.
+        Generate rotation- and direction-invariant location signature for CeccDNA.
+
+        For circular DNA, the same ring can be represented with different starting points.
+        e.g., [A-B-C] can be represented as A-B-C, B-C-A, or C-A-B.
+
+        This method generates a canonical signature by:
+        1. Keeping the circular order of segments
+        2. Treating reverse traversal as equivalent
+        3. Choosing the lexicographically smallest rotation as the canonical form
+
         Signature format: chr1:start1-end1;chr2:start2-end2...
-        Sorted by segment_in_circle (the order of segments in the circular DNA)
         """
         if not all(col in df_group.columns for col in ["chr", "start0", "end0"]):
             return ""
@@ -816,7 +858,26 @@ class CeccProcessor:
             except (ValueError, TypeError):
                 continue
 
-        return ";".join(segments) if segments else ""
+        if not segments:
+            return ""
+
+        # Generate all rotations (both directions) and pick the lexicographically smallest one
+        # For a circular sequence [A, B, C], rotations are:
+        # [A, B, C], [B, C, A], [C, A, B]
+        n = len(segments)
+        rotations = []
+        for i in range(n):
+            rotated = segments[i:] + segments[:i]
+            rotations.append(";".join(rotated))
+
+        # Reverse traversal is equivalent for a circle: [A, B, C] == [C, B, A]
+        rev_segments = list(reversed(segments))
+        for i in range(n):
+            rotated = rev_segments[i:] + rev_segments[:i]
+            rotations.append(";".join(rotated))
+
+        # Return the lexicographically smallest rotation across both directions
+        return min(rotations)
 
     def cluster_by_signature(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -891,6 +952,18 @@ class CeccProcessor:
             representative_group["cluster_size"] = cluster_size
             representative_group["cluster_members"] = ";".join(query_ids)
 
+            # Aggregate reads from all cluster members
+            if "reads" in representative_group.columns:
+                all_reads: list[str] = []
+                for qid in query_ids:
+                    group = query_id_to_group[qid]
+                    for reads_str in group["reads"].dropna().unique():
+                        if str(reads_str) not in ["", "NA"]:
+                            reads_list = str(reads_str).split(";")
+                            all_reads.extend(r.strip() for r in reads_list if r.strip())
+                unique_reads = list(dict.fromkeys(all_reads))
+                representative_group["reads"] = ";".join(unique_reads) if unique_reads else ""
+
             rows_to_keep.append(representative_group)
 
         # Handle unclustered sequences
@@ -938,9 +1011,10 @@ class CeccProcessor:
             if seq_str and q_start > 0 and cons_len > 0:
                 try:
                     extracted_seq = extract_ring_sequence(seq_str, int(q_start), int(cons_len))
+                    extracted_seq = canonicalize_circular_sequence(extracted_seq)
                     df.loc[query_mask, "eSeq"] = extracted_seq
                     sequences_found += 1
-                except Exception as e:
+                except (ValueError, IndexError, TypeError) as e:
                     self.logger.debug(f"Failed to extract sequence for {query_id}: {e}")
                     sequences_missing += 1
             else:
@@ -1045,26 +1119,11 @@ class CeccProcessor:
         self.fasta_records = []
         self.counter = 0
 
-        # Load all CSV files
-        dataframes: list[pd.DataFrame] = []
-        for csv_file in csv_files:
-            if not csv_file:
-                continue
-            csv_path = Path(csv_file)
-            if not csv_path.exists() or csv_path.stat().st_size == 0:
-                continue
-            try:
-                df = pd.read_csv(csv_path)
-                if not df.empty:
-                    dataframes.append(df)
-            except Exception as exc:
-                self.logger.warning(f"Unable to read {csv_path}: {exc}")
-
-        if not dataframes:
+        df = self.load_csv_files(csv_files)
+        if df is None:
             self.logger.info("No CeccDNA inputs provided")
             return None
 
-        df = pd.concat(dataframes, ignore_index=True)
         initial_query_ids = df["query_id"].nunique()
 
         # Apply clustering if requested
@@ -1083,16 +1142,7 @@ class CeccProcessor:
                 )
                 df = df[~unassigned_mask].copy()
 
-        # Save outputs
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_csv = output_dir / f"{prefix}_CeccDNA_processed.csv"
-        df.to_csv(output_csv, index=False)
-
-        if self.fasta_records:
-            output_fasta = output_dir / f"{prefix}_CeccDNA_pre.fasta"
-            with open(output_fasta, "w") as handle:
-                SeqIO.write(self.fasta_records, handle, "fasta")
-            self.logger.debug(f"Saved {len(self.fasta_records)} CeccDNA sequences")
+        self.save_outputs(df, output_dir, prefix, ecc_type="CeccDNA")
 
         # Summary
         sequences_count = len(self.fasta_records)
@@ -1130,7 +1180,7 @@ class XeccExporter:
                 if "query_id" in df.columns:
                     unique_ids = df["query_id"].dropna().unique()
                     classified_ids.update(unique_ids)
-            except Exception as e:
+            except (OSError, pd.errors.ParserError, pd.errors.EmptyDataError) as e:
                 self.logger.warning(f"Error reading {csv_file}: {e}")
 
         return classified_ids

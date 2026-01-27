@@ -1,6 +1,6 @@
-# CircleSeeker CLI 使用手册（v1.0.0）
+# CircleSeeker CLI 使用手册（v1.1.0）
 
-本手册针对 CircleSeeker 1.0.0 的命令行界面，涵盖常用参数、调试选项、运行时行为与输出结构。默认安装后可通过 `circleseeker` 或 `CircleSeeker` 两个入口调用。
+本手册针对 CircleSeeker 1.1.0 的命令行界面，涵盖常用参数、调试选项、运行时行为与输出结构。默认安装后可通过 `circleseeker` 或 `CircleSeeker` 两个入口调用。
 
 ---
 
@@ -71,12 +71,12 @@ circleseeker --debug show-checkpoint -o results/ -p sample
 
 ## 5. 执行生命周期
 
-1. **依赖检查** 启动时自动检测必需的外部工具（minimap2、samtools、cd-hit-est）以及至少一个推断引擎（cresil 或 cyrcular）。若缺少依赖，程序会给出清晰的错误提示和安装建议。
+1. **依赖检查** 启动时自动检测必需的外部工具（minimap2、samtools、cd-hit-est、lastal）。SplitReads-Core 是内置模块，仅需 `mappy` Python 包。若缺少依赖，程序会给出清晰的错误提示和安装建议。
 2. **临时目录** 运行时所有中间文件写入 `<output>/.tmp_work/`（可通过 `runtime.tmp_dir` 配置，支持相对路径或绝对路径）。完成后根据 `--keep-tmp` 选择是否保留。
 3. **配置与检查点** 运行期间在输出目录保存 `config.yaml` 与 `<prefix>.checkpoint`；成功完成后会自动清理。使用 `--keep-tmp` 可保留这些文件以便调试或恢复中断的运行。
 4. **自动索引**
    - 若找不到参考基因组 `.mmi` 索引，会调用 `minimap2 -d` 自动生成；
-   - 若 Cresil 推断阶段缺少 `.fai`，会尝试通过 `samtools faidx` 自动创建。
+   - 若 SplitReads-Core 推断阶段缺少 `.fai`，会尝试通过 `samtools faidx` 自动创建。
 5. **最终输出** `ecc_packager` 会将确认与推断结果、报告和汇总拷贝到 `<output>/<prefix>_*/` 目录结构，布局与 README 中的"Output Files"一致。
 
 ---
@@ -87,7 +87,7 @@ circleseeker --debug show-checkpoint -o results/ -p sample
 
 - **CtcReads**：含 **Ctc**（**C**oncatemeric **t**andem **c**opies）信号的 reads（在 `tandem_to_ring.csv` 中以 CtcR-* 分类体现）。
 - **CtcReads-Caller**（步骤 1-10）：基于 CtcReads 证据产出 **Confirmed** U/M/C eccDNA。
-- **SplitReads-Caller**（步骤 11-13）：基于 split-reads/junction 证据推断 eccDNA（Cresil 优先，Cyrcular 备用），产出 **Inferred** eccDNA。
+- **SplitReads-Caller**（步骤 11-13）：基于 split-reads/junction 证据使用内置 SplitReads-Core 推断 eccDNA，产出 **Inferred** eccDNA。
 - **Integration**（步骤 14-16）：对 Confirmed/Inferred 做去冗余合并、统计与打包交付。
 
 ## 7. 16 个步骤一览
@@ -106,8 +106,8 @@ circleseeker --debug show-checkpoint -o results/ -p sample
 | 8 | `cd_hit` | 去除冗余序列 |
 | 9 | `ecc_dedup` | 合并并标准化坐标 |
 |10 | `read_filter` | 过滤 CtcR reads，生成推断输入 FASTA |
-|11 | `minimap2` | 构建参考索引；Cresil 时可跳过比对 |
-|12 | `ecc_inference` | Cresil 优先的推断流程（失败时回退 Cyrcular） |
+|11 | `minimap2` | 构建参考索引供 SplitReads-Core 使用 |
+|12 | `ecc_inference` | 使用内置 SplitReads-Core 进行推断 |
 |13 | `curate_inferred_ecc` | 整理推断结果（内部调用 `iecc_curator`） |
 |14 | `ecc_unify` | 合并确认与推断数据，使用片段重叠算法检测冗余嵌合体 eccDNA |
 |15 | `ecc_summary` | 统计并生成 HTML/TXT 报告（含合并 FASTA） |

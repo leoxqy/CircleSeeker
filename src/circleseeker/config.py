@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Optional, Any, cast, Literal, Union, Callable, TYPE_CHECKING
+from typing import Optional, Any, cast, Literal, Union, Callable, TYPE_CHECKING, TypeVar
 import yaml
 from circleseeker.exceptions import ConfigurationError
 
@@ -14,6 +14,48 @@ def _default_threads() -> int:
     """Calculate default threads: min(8, cpu_count * 2) to avoid exceeding resources."""
     cpu_count = os.cpu_count() or 4
     return min(8, cpu_count * 2)
+
+
+def _is_gzip_file(path: Path) -> bool:
+    """Return True if the file looks like gzip based on the magic header."""
+    try:
+        with open(path, "rb") as handle:
+            return handle.read(2) == b"\x1f\x8b"
+    except OSError:
+        return False
+
+
+def _detect_sequence_file_format(path: Path) -> str:
+    """Detect basic sequence file format (FASTA/FASTQ/empty/unknown/gzip)."""
+    if _is_gzip_file(path):
+        return "gzip"
+
+    try:
+        with open(path, "rb") as handle:
+            while True:
+                raw = handle.readline()
+                if not raw:
+                    return "empty"
+                line = raw.strip()
+                if not line:
+                    continue
+                if line.startswith(b"\xef\xbb\xbf"):
+                    line = line[3:]
+                if line.startswith((b";", b"#")):
+                    continue
+                if line.startswith(b">"):
+                    return "fasta"
+                if line.startswith(b"@"):
+                    # FASTQ typically begins with '@' header.
+                    # Confirm quickly by checking for a '+' line.
+                    _ = handle.readline()  # sequence
+                    plus = handle.readline()
+                    if plus.lstrip().startswith(b"+"):
+                        return "fastq"
+                    return "unknown"
+                return "unknown"
+    except OSError:
+        return "unreadable"
 
 
 # ================== Preset Definitions ==================
@@ -176,8 +218,10 @@ class ToolConfigMixin:
         """Convert to dictionary."""
         return asdict(self)  # type: ignore[call-overload, no-any-return]
 
+    _TToolConfig = TypeVar("_TToolConfig", bound="ToolConfigMixin")
+
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ToolConfigMixin":
+    def from_dict(cls: type[_TToolConfig], data: dict[str, Any]) -> _TToolConfig:
         """Create from dictionary, ignoring unknown keys."""
         valid_keys = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
         filtered = {k: v for k, v in data.items() if k in valid_keys}
@@ -302,11 +346,45 @@ class SamtoolsConfig(ToolConfigMixin):
     pass
 
 
+@dataclass
+class SplitReadsConfig(ToolConfigMixin):
+    """SplitReads-Core configuration.
+
+    This is the built-in split-reads based eccDNA detection module.
+    It uses mappy for alignment and networkx for circular structure detection.
+    """
+
+    # Trim phase parameters
+    mapq_threshold: int = 30  # Minimum mapping quality
+    gap_tolerance: int = 10  # Allowed gap length between alignments (bp)
+    overlap_tolerance: int = 10  # Allowed overlap between alignments (bp)
+
+    # Identify phase parameters
+    min_region_size: int = 200  # Minimum region size (bp)
+    overlap_check_size: int = 50  # Breakpoint detection window (bp)
+    min_breakpoint_depth: int = 3  # Minimum breakpoint support reads
+    min_avg_depth: float = 5.0  # Minimum average coverage depth
+
+    # Post-processing / curation filters (applied to inferred CeccDNA)
+    # Chimeric (Cecc) candidates with only 2 segments are prone to artifacts in
+    # split-read graph inference; default keeps >=3 segments for precision.
+    min_inferred_chimeric_segments: int = 3
+    # Optional: allow 2-segment inferred Cecc when split-read support is high.
+    # Set to 0 to disable.
+    min_inferred_two_segment_split_reads: int = 0
+
+    # Merge parameters
+    ref_merge_distance: int = 1000  # Max reference distance (bp) for merging adjacent alignments
+
+    # Other parameters
+    exclude_chrs: str = ""  # Comma-separated chromosomes to exclude
+
+
 # Type alias for tool config that can be either typed class or dict
 ToolConfigValue = Union[
     TideHunterConfig, TandemToRingConfig, UMClassifyConfig, CeccBuildConfig,
     AlignmentConfig, Minimap2AlignConfig, Minimap2Config, SamtoolsConfig,
-    dict[str, Any]
+    SplitReadsConfig, dict[str, Any]
 ]
 
 
@@ -353,6 +431,9 @@ class ToolConfig:
     samtools: Union[SamtoolsConfig, dict[str, Any]] = field(
         default_factory=SamtoolsConfig
     )
+    splitreads: Union[SplitReadsConfig, dict[str, Any]] = field(
+        default_factory=SplitReadsConfig
+    )
 
     def __post_init__(self) -> None:
         """Convert dict values to typed configs after initialization."""
@@ -379,6 +460,9 @@ class ToolConfig:
         )
         self.samtools = _ensure_tool_config(
             self.samtools, SamtoolsConfig, SamtoolsConfig
+        )
+        self.splitreads = _ensure_tool_config(
+            self.splitreads, SplitReadsConfig, SplitReadsConfig
         )
 
 
@@ -432,6 +516,47 @@ class Config:
             raise ConfigurationError(f"Input file not found: {self.input_file}")
         if not self.reference.exists():
             raise ConfigurationError(f"Reference file not found: {self.reference}")
+
+        # Basic file format checks (fail fast with actionable errors).
+        # TideHunter is known to crash on invalid/FASTQ input in some environments.
+        input_fmt = _detect_sequence_file_format(self.input_file)
+        if input_fmt != "fasta":
+            if input_fmt == "fastq":
+                raise ConfigurationError(
+                    "Input file appears to be FASTQ, but CircleSeeker requires FASTA. "
+                    "Convert first (e.g. seqtk seq -A reads.fastq > reads.fasta). "
+                    f"Got: {self.input_file}"
+                )
+            if input_fmt == "gzip":
+                raise ConfigurationError(
+                    "Input file appears to be gzip-compressed. Please provide an "
+                    f"uncompressed FASTA file. Got: {self.input_file}"
+                )
+            if input_fmt == "empty":
+                raise ConfigurationError(f"Input FASTA file is empty: {self.input_file}")
+            raise ConfigurationError(
+                "Input file does not look like FASTA (expected '>' header). "
+                f"Got: {self.input_file}"
+            )
+
+        ref_fmt = _detect_sequence_file_format(self.reference)
+        if ref_fmt != "fasta":
+            if ref_fmt == "fastq":
+                raise ConfigurationError(
+                    "Reference genome appears to be FASTQ, but CircleSeeker requires FASTA. "
+                    f"Got: {self.reference}"
+                )
+            if ref_fmt == "gzip":
+                raise ConfigurationError(
+                    "Reference genome appears to be gzip-compressed. Please provide an "
+                    f"uncompressed FASTA file. Got: {self.reference}"
+                )
+            if ref_fmt == "empty":
+                raise ConfigurationError(f"Reference FASTA file is empty: {self.reference}")
+            raise ConfigurationError(
+                "Reference genome does not look like FASTA (expected '>' header). "
+                f"Got: {self.reference}"
+            )
 
         # Validate numeric ranges
         if self.performance.threads < 1:
@@ -628,6 +753,12 @@ def load_config(path: Path) -> Config:
                     if isinstance(existing, dict) and isinstance(params, dict):
                         # Deep merge: update existing dict with new values
                         existing.update(params)
+                    elif isinstance(params, dict) and hasattr(existing, "__dataclass_fields__"):
+                        # Typed tool configs: update dataclass fields in-place
+                        # (ignore unknown keys for forward/backward compatibility).
+                        for key, value in params.items():
+                            if hasattr(existing, key):
+                                setattr(existing, key, value)
                     else:
                         # Non-dict values: replace entirely
                         setattr(cfg.tools, tool, params)

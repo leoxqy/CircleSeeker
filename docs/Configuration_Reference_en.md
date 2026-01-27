@@ -1,6 +1,6 @@
 # CircleSeeker Configuration Reference
 
-This manual provides a complete list of all configuration options for CircleSeeker v1.0.0, including default values, valid ranges, and usage instructions.
+This manual provides a complete list of all configuration options for CircleSeeker v1.1.0, including default values, valid ranges, and usage instructions.
 
 ---
 
@@ -143,7 +143,7 @@ Notes:
 
 ### 4.4 CeccDNA Builder (`tools.cecc_build`)
 
-CeccBuild v4 prefers LAST; it falls back to a graph-based method if LAST or inputs are missing.
+CeccBuild prefers LAST; it falls back to a graph-based method if LAST or inputs are missing.
 
 | Parameter | Type | Default | Range | Description |
 |-----------|------|---------|-------|-------------|
@@ -211,6 +211,27 @@ tools:
 ```
 
 ---
+
+### 4.9 SplitReads-Caller (`tools.splitreads`)
+
+Built-in split-read/graph inference module optimized for HiFi data. Requires the `mappy` Python package.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `mapq_threshold` | int | `30` | Minimum MAPQ for split alignments |
+| `gap_tolerance` | int | `10` | Merge tolerance on read coordinates (bp) |
+| `overlap_tolerance` | int | `10` | Merge tolerance for overlaps (bp) |
+| `min_region_size` | int | `200` | Minimum merged region size (bp) |
+| `overlap_check_size` | int | `50` | Breakpoint window size (bp) |
+| `min_breakpoint_depth` | int | `3` | Minimum support for each junction/breakpoint |
+| `min_avg_depth` | float | `5.0` | Minimum average depth for merged regions |
+| `min_inferred_chimeric_segments` | int | `3` | Minimum segment count for inferred CeccDNA (reduces FP) |
+| `min_inferred_two_segment_split_reads` | int | `0` | If >0, allow 2-segment CeccDNA when `num_split_reads` >= this value |
+| `exclude_chrs` | string | `""` | Comma-separated chromosomes to exclude |
+
+Notes:
+- `min_inferred_chimeric_segments=3` is a precision-oriented default for inferred chimeric circles.
+- Set `min_inferred_chimeric_segments=2` to keep 2-segment inferred CeccDNA; or set `min_inferred_two_segment_split_reads` to allow only well-supported 2-segment candidates.
 
 ## 5. Full Configuration Example
 

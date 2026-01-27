@@ -43,7 +43,7 @@ def run_circleseeker_pipeline(
     Note: This is a simplified version focused on the U/M/C classification path.
     The main CircleSeeker pipeline uses minimap2 twice:
       - `minimap2_align` (PAF -> TSV) for candidate alignment (default preset: `sr`)
-      - `minimap2` (SAM/BAM) for inference/Cyrcular (default preset: `map-hifi`)
+      - `minimap2` (SAM/BAM) for inference/SplitReads-Core (default preset: `map-hifi`)
     This simulation validator only needs the former to compute recall/precision.
     """
     print("\n" + "=" * 60)

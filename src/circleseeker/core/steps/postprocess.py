@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import argparse
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
+
+import pandas as pd
 
 from circleseeker.core.pipeline_types import ResultKeys
 from circleseeker.exceptions import PipelineError
@@ -75,7 +76,7 @@ def ecc_unify(pipeline: Pipeline) -> None:
 
         merged_df.to_csv(unified_csv, index=False)
         pipeline.logger.info(f"Unified {len(merged_df)} eccDNA entries")
-    except Exception as e:
+    except (OSError, pd.errors.ParserError, ValueError, KeyError) as e:
         pipeline.logger.error(f"ecc_unify failed: {e}")
         raise PipelineError(f"ecc_unify failed: {e}") from e
 
@@ -99,7 +100,6 @@ def ecc_summary(pipeline: Pipeline) -> None:
     confirmed_csv_path = pipeline._resolve_stored_path(
         pipeline.state.results.get(ResultKeys.CONFIRMED_CSV),
         [
-            f"{pipeline.config.prefix}_unified.csv",
             f"{pipeline.config.prefix}_confirmed.csv",
             f"{pipeline.config.prefix}_eccDNA_Confirmed.csv",
         ],
@@ -126,7 +126,7 @@ def ecc_summary(pipeline: Pipeline) -> None:
 
             with open(stats_json, "w") as f:
                 _json.dump({"overlap_stats": {}}, f)
-        except Exception as e:
+        except OSError as e:
             pipeline.logger.warning(f"Failed to create stats file {stats_json}: {e}")
 
     output_dir = pipeline.config.output_dir / "summary_output"
@@ -155,7 +155,14 @@ def ecc_summary(pipeline: Pipeline) -> None:
 
 
 def ecc_packager(pipeline: Pipeline) -> None:
-    """Step 15: Package output files using ecc_packager module."""
+    """Step 15: Package output files using ecc_packager module.
+
+    Generates standardized output format:
+    - eccDNA_summary.csv: One row per eccDNA with key metrics
+    - eccDNA_regions.csv: All genomic regions
+    - eccDNA_reads.csv: Read-level support
+    - Type-specific BED and FASTA files in Uecc/, Mecc/, Cecc/ subdirs
+    """
     from circleseeker.modules import ecc_packager as ecc_packager_module
 
     final_output_root = pipeline.final_output_dir
@@ -186,21 +193,21 @@ def ecc_packager(pipeline: Pipeline) -> None:
         if inferred_dir and not inferred_dir.exists():
             inferred_dir = None
 
-    merged_csv_path = pipeline._resolve_stored_path(
+    # Get unified CSV (required for new output format)
+    unified_csv_path = pipeline._resolve_stored_path(
         pipeline.state.results.get(ResultKeys.UNIFIED_CSV),
         [f"{pipeline.config.prefix}_unified.csv"],
     )
-    if not merged_csv_path or not merged_csv_path.exists():
-        merged_csv_path = pipeline._resolve_stored_path(
-            pipeline.state.results.get(ResultKeys.CONFIRMED_CSV),
-            [
-                f"{pipeline.config.prefix}_unified.csv",
-                f"{pipeline.config.prefix}_confirmed.csv",
-                f"{pipeline.config.prefix}_eccDNA_Confirmed.csv",
-            ],
-        )
+    unified_csv = unified_csv_path if unified_csv_path and unified_csv_path.exists() else None
 
-    merged_csv = merged_csv_path if merged_csv_path and merged_csv_path.exists() else None
+    confirmed_csv_path = pipeline._resolve_stored_path(
+        pipeline.state.results.get(ResultKeys.CONFIRMED_CSV),
+        [
+            f"{pipeline.config.prefix}_confirmed.csv",
+            f"{pipeline.config.prefix}_eccDNA_Confirmed.csv",
+        ],
+    )
+    confirmed_csv = confirmed_csv_path if confirmed_csv_path and confirmed_csv_path.exists() else None
 
     summary_dir = pipeline.config.output_dir / "summary_output"
     html_report_path = summary_dir / f"{pipeline.config.prefix}_report.html"
@@ -208,96 +215,64 @@ def ecc_packager(pipeline: Pipeline) -> None:
     text_summary_path = summary_dir / f"{pipeline.config.prefix}_summary.txt"
     text_summary: Optional[Path] = text_summary_path if text_summary_path.exists() else None
 
-    packager_inputs_available = any(
-        candidate is not None
-        for candidate in (
-            uecc_dir,
-            mecc_dir,
-            cecc_dir,
-            inferred_dir,
-            merged_csv,
-            html_report,
-            text_summary,
-        )
-    )
-
-    if packager_inputs_available:
-        self_config = pipeline.config
-
-        class MockArgs(argparse.Namespace):
-            def __init__(self) -> None:
-                self.sample_name = self_config.prefix
-                self.output_dir = str(final_output_root)
-                self.out_dir = str(final_output_root)
-                self.uecc_dir = str(uecc_dir) if uecc_dir else None
-                self.mecc_dir = str(mecc_dir) if mecc_dir else None
-                self.cecc_dir = str(cecc_dir) if cecc_dir else None
-                self.inferred_dir = str(inferred_dir) if inferred_dir else None
-                self.merged_csv = str(merged_csv) if merged_csv else None
-                self.html = str(html_report) if html_report else None
-                self.text = str(text_summary) if text_summary else None
-                self.overwrite = True
-                self.dry_run = False
-                runtime = getattr(self_config, "runtime", None)
-                debug_verbose = bool(getattr(runtime, "debug_verbose", False)) if runtime else False
-                self.verbose = debug_verbose
-
-        mock_args = MockArgs()
-
-        pipeline.logger.info("Running ecc_packager module to organize final results")
-        packager_success = False
-        try:
-            result_code = ecc_packager_module.run(mock_args)
-            if result_code == 0:
-                packager_success = True
-                pipeline.logger.info(f"Results successfully packaged in: {final_output_root}")
-            else:
-                pipeline.logger.warning("ecc_packager completed with warnings")
-        except Exception as exc:
-            pipeline.logger.warning(f"ecc_packager encountered issues: {exc}")
-
-        if packager_success:
-            packaged_root = Path(mock_args.out_dir) / mock_args.sample_name
-            if packaged_root.exists() and packaged_root != final_output_root:
-                for item in packaged_root.iterdir():
-                    destination = final_output_root / item.name
-                    try:
-                        if destination.exists():
-                            if destination.is_dir():
-                                shutil.rmtree(destination)
-                            else:
-                                destination.unlink()
-                        shutil.move(str(item), str(destination))
-                    except Exception as exc:
-                        pipeline.logger.warning(f"Could not relocate {item} to {destination}: {exc}")
-                try:
-                    shutil.rmtree(packaged_root)
-                except Exception as exc:
-                    pipeline.logger.warning(f"Could not remove intermediate directory {packaged_root}: {exc}")
-            pipeline._rename_inferred_simple_file(final_output_root)
-        else:
-            pipeline._create_basic_output_structure(
-                final_output_root,
-                uecc_dir=uecc_dir,
-                mecc_dir=mecc_dir,
-                cecc_dir=cecc_dir,
-                inferred_dir=inferred_dir,
-                merged_csv=merged_csv,
-                html_report=html_report,
-                text_summary=text_summary,
-            )
-    else:
-        pipeline.logger.info("No inputs available for ecc_packager; using fallback organizer")
+    # Check if we have the minimum required input (unified CSV)
+    if unified_csv is None:
+        pipeline.logger.warning("No unified CSV found, cannot run ecc_packager")
         pipeline._create_basic_output_structure(
             final_output_root,
             uecc_dir=uecc_dir,
             mecc_dir=mecc_dir,
             cecc_dir=cecc_dir,
             inferred_dir=inferred_dir,
-            merged_csv=merged_csv,
+            merged_csv=confirmed_csv,
+            html_report=html_report,
+            text_summary=text_summary,
+        )
+        pipeline._set_result(ResultKeys.FINAL_RESULTS, str(final_output_root))
+        return
+
+    self_config = pipeline.config
+    runtime = getattr(self_config, "runtime", None)
+    debug_verbose = bool(getattr(runtime, "debug_verbose", False)) if runtime else False
+
+    mock_args = argparse.Namespace(
+        sample_name=self_config.prefix,
+        out_dir=str(final_output_root),
+        unified_csv=str(unified_csv),
+        uecc_dir=str(uecc_dir) if uecc_dir else None,
+        mecc_dir=str(mecc_dir) if mecc_dir else None,
+        cecc_dir=str(cecc_dir) if cecc_dir else None,
+        inferred_dir=str(inferred_dir) if inferred_dir else None,
+        html=str(html_report) if html_report else None,
+        text=str(text_summary) if text_summary else None,
+        id_width=4,  # Zero-padding width for IDs
+        overwrite=True,
+        dry_run=False,
+        verbose=debug_verbose,
+    )
+
+    pipeline.logger.info("Running ecc_packager module to organize final results")
+    packager_success = False
+    try:
+        result_code = ecc_packager_module.run(mock_args)
+        if result_code == 0:
+            packager_success = True
+            pipeline.logger.info(f"Results successfully packaged in: {final_output_root}")
+        else:
+            pipeline.logger.warning("ecc_packager completed with warnings")
+    except (OSError, ValueError, RuntimeError) as exc:
+        pipeline.logger.warning(f"ecc_packager encountered issues: {exc}")
+
+    if not packager_success:
+        pipeline._create_basic_output_structure(
+            final_output_root,
+            uecc_dir=uecc_dir,
+            mecc_dir=mecc_dir,
+            cecc_dir=cecc_dir,
+            inferred_dir=inferred_dir,
+            merged_csv=unified_csv,
             html_report=html_report,
             text_summary=text_summary,
         )
 
     pipeline._set_result(ResultKeys.FINAL_RESULTS, str(final_output_root))
-

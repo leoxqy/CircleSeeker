@@ -45,6 +45,13 @@ tests/simulation/batch_validation_results/
 *.tar.gz
 run_*.sh
 
+# Ad-hoc test output directories
+test_*/
+tests/simulation/_sanity_batch_validation/
+
+# Ad-hoc test scripts (project root)
+test_last_*.py
+
 # OS
 .DS_Store
 Col/

@@ -49,7 +49,7 @@ def _validate_required_columns(path: Path, spec: ArtifactSpec) -> None:
 
     try:
         header = _read_header(path, delimiter=spec.sep)
-    except Exception as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         raise PipelineError(f"Failed to read header for {path}: {exc}") from exc
 
     if not header:

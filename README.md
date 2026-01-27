@@ -4,7 +4,7 @@
 
 # CircleSeeker
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/leoxqy/CircleSeeker)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/leoxqy/CircleSeeker)
 [![CI](https://github.com/leoxqy/CircleSeeker/actions/workflows/ci.yml/badge.svg)](https://github.com/leoxqy/CircleSeeker/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-≥3.9-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
@@ -58,28 +58,15 @@ conda install -c conda-forge -y \
 
 # 3. Bioinformatics tools (bioconda)
 conda install -c bioconda -c conda-forge -y \
-  minimap2 samtools bcftools \
-  tidehunter cd-hit last \
-  varlociraptor cyrcular \
-  bedtools mappy
+  minimap2 samtools tidehunter cd-hit last \
+  bedtools mappy pybedtools
 
 # 4. Install CircleSeeker
 cd CircleSeeker
 pip install -e .
 ```
 
-### Install Cresil (Recommended Inference Engine)
-
-Cresil provides **higher accuracy** for eccDNA inference compared to Cyrcular. Install from source:
-
-```bash
-git clone https://github.com/visanuwan/cresil.git
-cd cresil
-pip install -e .
-cresil --help   # Verify installation
-```
-
-> **Note**: CircleSeeker automatically detects available inference engines (Cresil or Cyrcular) and uses the best option. Cresil is preferred for its higher precision.
+> **Note**: CircleSeeker includes SplitReads-Core as a built-in inference module (HiFi optimized). No external inference tools are required.
 
 ## Quick Start
 
@@ -94,6 +81,14 @@ circleseeker \
     -o results \
     -p sample_name \
     -t 16
+
+# High-performance mode (requires sufficient /dev/shm space)
+circleseeker \
+    -i sample.hifi.fasta \
+    -r hg38.fa \
+    -o results \
+    -t 32 \
+    --turbo
 ```
 
 ## Usage
@@ -112,6 +107,7 @@ circleseeker \
 - `-v, --verbose` - Increase verbosity (-v for INFO, -vv for DEBUG)
 - `-h, --help` - Show help message
 - `--keep-tmp` - Keep temporary files
+- `--turbo` - Enable turbo mode (use RAM-backed `/dev/shm` for faster I/O)
 
 ## Pipeline Overview
 
@@ -144,14 +140,14 @@ CircleSeeker implements a 16-step analysis pipeline with two evidence-driven cal
 | 7 | umc_process | Process and cluster U/M/C types |
 | 8 | cd_hit | Remove redundancy (99% identity threshold) |
 | 9 | ecc_dedup | Deduplicate and standardize coordinates |
-| 10 | read_filter | Filter confirmed eccDNA reads |
+| 10 | read_filter | Filter reads for inference (exclude CtcReads) |
 
 ### SplitReads-Caller (Steps 11-13)
 
 | Step | Module | Description |
 |------|--------|-------------|
 | 11 | minimap2 | Prepare reference index |
-| 12 | ecc_inference | Detect eccDNA (Cresil preferred, Cyrcular fallback) |
+| 12 | ecc_inference | Detect eccDNA using SplitReads-Core (built-in) |
 | 13 | curate_inferred_ecc | Curate inferred eccDNA |
 
 ### Integration (Steps 14-16)
@@ -204,9 +200,12 @@ The merged output file (`sample_name_merged_output.csv`) contains:
 | eccDNA_type | Classification (UeccDNA/MeccDNA/CeccDNA) |
 | State | Detection method (Confirmed/Inferred) |
 | Seg_total | Number of segments (for chimeric eccDNA) |
-| Hit_count | Number of genomic hits |
+| Hit_count | Number of supporting reads |
+| reads_count | Number of reads supporting this eccDNA |
+| confidence_score | Detection confidence (0-1 scale, from prob_present for Inferred) |
+| copy_number | Estimated copy number (from coverage for Inferred) |
 
-> Note: confidence/evidence fields are recorded in the per-type `*.core.csv` files under `Confirmed_*` directories.
+> Note: Detailed per-type information is also available in `*.core.csv` files under `Confirmed_*` directories.
 
 ## Configuration
 
@@ -265,30 +264,32 @@ For a complete list of configuration options, see the [Configuration Reference](
 | intervaltree | ≥3.1 | Interval operations |
 | click | ≥8.1 | CLI framework |
 | pyyaml | ≥6.0 | Configuration parsing |
+| packaging | ≥23.0 | Version parsing utilities |
 
 ### External Tools (Required)
 
 | Tool | Version | Description |
 |------|---------|-------------|
-| TideHunter | ≥1.4.0 | Tandem repeat detection |
+| TideHunter | ≥1.5.0 | Tandem repeat detection |
 | minimap2 | ≥2.24 | Sequence alignment and read mapping |
 | samtools | ≥1.17 | BAM file processing |
 | CD-HIT | ≥4.8.1 | Sequence clustering (cd-hit-est) |
-| LAST | ≥1250 | High-accuracy CeccDNA detection |
+| LAST | ≥1250 | High-accuracy CeccDNA detection (lastal, lastdb, last-split) |
+| bedtools | ≥2.30 | Genomic interval operations (required by pybedtools) |
 
-### External Tools (Optional - for Cyrcular inference)
+### Additional Python Packages
 
-| Tool | Version | Description |
-|------|---------|-------------|
-| bcftools | ≥1.17 | BCF/VCF processing |
-| varlociraptor | ≥5.0.0 | Variant calling |
+| Package | Description |
+|---------|-------------|
+| mappy | Python bindings for minimap2 (used by SplitReads-Core) |
+| pybedtools | Python wrapper for bedtools |
 
-### Inference Engines (At least one required)
+### Built-in Modules
 
-| Tool | Description |
-|------|-------------|
-| Cresil | **Recommended** - Higher accuracy for eccDNA inference |
-| Cyrcular | Fallback option, requires varlociraptor |
+| Module | Description |
+|--------|-------------|
+| CtcReads-Core | TideHunter-based confirmed eccDNA detection |
+| SplitReads-Core | Built-in split-read inference (HiFi optimized) |
 
 ## Troubleshooting
 
@@ -334,7 +335,7 @@ circleseeker -i input.fa -r ref.fa -t 4
 **Missing Tools**: Install via conda
 ```bash
 conda install -c bioconda -c conda-forge \
-  tidehunter minimap2 samtools bcftools cd-hit last varlociraptor
+  tidehunter minimap2 samtools cd-hit last bedtools mappy pybedtools
 ```
 
 ## Documentation
@@ -342,6 +343,8 @@ conda install -c bioconda -c conda-forge \
 For detailed documentation, see the `docs/` directory:
 
 - [Pipeline Modules](docs/Pipeline_Modules.md) - Detailed algorithm descriptions
+- [UMC Classification Model](docs/UMC_Classification_Model.md) - U/M/C classification and CeccBuild algorithm
+- [SplitReads-Core Algorithm](docs/SplitReads_Core_Algorithm.md) - Built-in split-read inference algorithm
 - [CLI Reference](docs/CLI_Reference.md) - Complete command-line options
 - [Validation Methodology](docs/Validation_Methodology_en.md) - Synthetic U/M/C validation and recall benchmark
 
@@ -364,4 +367,4 @@ CircleSeeker is dual-licensed: GNU GPL v3.0 (see [LICENSE](LICENSE)) or a commer
 
 ## Acknowledgments
 
-We thank the developers of TideHunter, Cresil, Cyrcular, LAST, and other integrated tools.
+We thank the developers of TideHunter, LAST, bedtools, and other integrated tools.

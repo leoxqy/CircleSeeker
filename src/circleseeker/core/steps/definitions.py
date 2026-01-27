@@ -29,7 +29,7 @@ PIPELINE_STEPS: list[PipelineStep] = [
     PipelineStep("minimap2", "Prepare alignments / reference index"),
     PipelineStep(
         "ecc_inference",
-        "Detect circular DNA (Cresil preferred, Cyrcular fallback)",
+        "Detect circular DNA using SplitReads-Core (built-in)",
         display_name="ecc_inference",
     ),
     PipelineStep("curate_inferred_ecc", "Curate inferred eccDNA tables"),

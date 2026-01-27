@@ -14,7 +14,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from circleseeker.modules.cecc_build import CeccBuild
+from circleseeker.modules.cecc_build import CeccBuild, LastAlignment
 from circleseeker.modules.um_classify import UMeccClassifier
 
 from .eccdna_simulator import (
@@ -329,14 +329,83 @@ def run_synthetic_validation(
 
     cecc_csv = results_dir / "cecc.csv"
     builder = CeccBuild()
-    try:
-        cecc_df = builder.run_pipeline(
-            input_csv=unclassified_csv,
-            output_csv=cecc_csv,
-            **(cecc_kwargs or {}),
-        )
-    except ValueError:
+
+    def _double_cecc_alignments(df: pd.DataFrame) -> dict[str, list[LastAlignment]]:
+        """Build LAST-like alignments with doubled-sequence query coordinates.
+
+        CeccBuild's graph-based detector expects the query to be a doubled sequence
+        (seq+seq) so the locus pattern repeats. For simulation we don't run LAST;
+        instead, we expand the synthetic BLAST-like alignments into a doubled query.
+        """
+        if df.empty:
+            return {}
+
+        alignments: dict[str, list[LastAlignment]] = {}
+        for query_id, group in df.groupby("query_id"):
+            q_end = pd.to_numeric(group.get("q_end"), errors="coerce").dropna()
+            if q_end.empty:
+                continue
+            cons_len = int(q_end.max())
+            if cons_len <= 0:
+                continue
+
+            query_len = cons_len * 2
+            for _, row in group.iterrows():
+                try:
+                    chrom = str(row.get("chr", row.get("subject_id", "")))
+                    ref_start = int(row.get("start0", row.get("s_start", 0)))
+                    ref_end = int(row.get("end0", row.get("s_end", 0)))
+                    # Synthetic alignments use BLAST-like query coords: 1-based start, end inclusive.
+                    # Convert to 0-based half-open for CeccBuild's internal logic.
+                    q_start0 = int(row.get("q_start", 1)) - 1
+                    q_end0 = int(row.get("q_end", 0))
+                    strand = str(row.get("strand", "+"))
+                    identity = float(row.get("identity", 99.0))
+                except (TypeError, ValueError):
+                    continue
+
+                base = LastAlignment(
+                    chrom=chrom,
+                    ref_start=ref_start,
+                    ref_end=ref_end,
+                    query_start=q_start0,
+                    query_end=q_end0,
+                    query_len=query_len,
+                    score=0,
+                    identity=identity,
+                    strand=strand,
+                )
+                dup = LastAlignment(
+                    chrom=chrom,
+                    ref_start=ref_start,
+                    ref_end=ref_end,
+                    query_start=q_start0 + cons_len,
+                    query_end=q_end0 + cons_len,
+                    query_len=query_len,
+                    score=0,
+                    identity=identity,
+                    strand=strand,
+                )
+                alignments.setdefault(str(query_id), []).extend([base, dup])
+
+        return alignments
+
+    # Synthetic Cecc validation: avoid requiring LAST by using the graph-based detector
+    # directly on expanded (doubled) synthetic alignments.
+    if unclassified_df is None or unclassified_df.empty:
         cecc_df = pd.DataFrame()
+        _write_pred(cecc_df, cecc_csv)
+    else:
+        cecc_alignments = _double_cecc_alignments(unclassified_df)
+        cecc_metadata = builder._get_metadata_from_csv(unclassified_df)
+        try:
+            cecc_df = builder.detect_cecc_with_closure_and_loci(
+                cecc_alignments,
+                cecc_metadata,
+                min_distinct_loci=int((cecc_kwargs or {}).get("min_segments", 2)),
+            )
+        except Exception:
+            cecc_df = pd.DataFrame()
         _write_pred(cecc_df, cecc_csv)
 
     if not cecc_df.empty and "eccDNA_id" not in cecc_df.columns:

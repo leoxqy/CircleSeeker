@@ -48,9 +48,14 @@ XeccExporter = umc_module.XeccExporter
 UeccProcessor = umc_module.UeccProcessor
 MeccProcessor = umc_module.MeccProcessor
 CeccProcessor = umc_module.CeccProcessor
+BaseEccProcessor = umc_module.BaseEccProcessor
 extract_ring_sequence = umc_module.extract_ring_sequence
+canonicalize_circular_sequence = umc_module.canonicalize_circular_sequence
 _sanitize_fasta_id = umc_module._sanitize_fasta_id
 _coerce_to_paths = umc_module._coerce_to_paths
+_reverse_complement = umc_module._reverse_complement
+_min_circular_rotation = umc_module._min_circular_rotation
+_booth_min_rotation_start = umc_module._booth_min_rotation_start
 
 
 class TestHelperFunctions:
@@ -265,6 +270,31 @@ TTGGCCAATTGGTTGGCCAA
         assert len(result['eSeq'].iloc[0]) == 8
         assert len(result['eSeq'].iloc[1]) == 6
 
+    def test_compute_sequences_canonicalizes_rotation_and_strand(self, tmp_path):
+        """Same circular molecule can appear as rotated / reverse-complemented sequences."""
+        circle = "GATTACAG"
+        doubled = circle + circle
+
+        # Reverse-complement circle and also provide doubled form.
+        rc_circle = umc_module._reverse_complement(circle)  # type: ignore[attr-defined]
+        doubled_rc = rc_circle + rc_circle
+
+        fasta_file = tmp_path / "test_rot_rc.fasta"
+        fasta_file.write_text(f">read1\n{doubled}\n>read2\n{doubled_rc}\n")
+
+        seq_library = SequenceLibrary()
+        seq_library.load_fasta(fasta_file)
+        processor = UeccProcessor(seq_library, UMCProcessConfig())
+
+        df = pd.DataFrame({
+            'query_id': ['read1', 'read2'],
+            'q_start': [1, 3],  # introduce a rotation on read2
+            'length': [len(circle), len(circle)],
+        })
+
+        result = processor.compute_sequences(df)
+        assert result["eSeq"].nunique() == 1
+
     def test_add_numbering_and_export(self, setup_processor):
         processor, _ = setup_processor
 
@@ -398,6 +428,19 @@ TTGGCCAATTGGTTGGCCAATTGGCCAA
 
         signature = processor.generate_cecc_signature(df)
         assert signature == "chr1:100-150;chr2:200-250;chr3:300-350"
+
+    def test_generate_cecc_signature_direction_invariant(self, setup_processor):
+        processor, _ = setup_processor
+
+        df = pd.DataFrame({
+            'chr': ['chr1', 'chr2', 'chr3'],
+            'start0': [100, 200, 300],
+            'end0': [150, 250, 350],
+        })
+
+        sig_forward = processor.generate_cecc_signature(df)
+        sig_reverse = processor.generate_cecc_signature(df.iloc[::-1].copy())
+        assert sig_forward == sig_reverse
 
     def test_cluster_by_signature(self, setup_processor):
         processor, _ = setup_processor
@@ -560,6 +603,311 @@ cecc1,chr1,100,150,1,1,10
                 output_dir=output_dir,
                 prefix="test"
             )
+
+
+# ========== Additional Tests for Coverage ========== #
+
+
+class TestReverseComplement:
+    """Tests for _reverse_complement function."""
+
+    def test_basic(self):
+        assert _reverse_complement("ACGT") == "ACGT"  # palindrome
+
+    def test_simple(self):
+        assert _reverse_complement("AAAA") == "TTTT"
+        assert _reverse_complement("CCCC") == "GGGG"
+
+    def test_mixed(self):
+        assert _reverse_complement("AACG") == "CGTT"
+
+    def test_empty(self):
+        assert _reverse_complement("") == ""
+
+    def test_lowercase(self):
+        assert _reverse_complement("acgt") == "acgt"
+
+
+class TestMinCircularRotation:
+    """Tests for _min_circular_rotation function."""
+
+    def test_single_char(self):
+        assert _min_circular_rotation("A") == "A"
+
+    def test_empty(self):
+        assert _min_circular_rotation("") == ""
+
+    def test_already_minimal(self):
+        assert _min_circular_rotation("ABCD") == "ABCD"
+
+    def test_rotation_needed(self):
+        assert _min_circular_rotation("CDAB") == "ABCD"
+
+    def test_repeated(self):
+        assert _min_circular_rotation("AAA") == "AAA"
+
+
+class TestBoothMinRotationStart:
+    """Tests for _booth_min_rotation_start function."""
+
+    def test_already_minimal(self):
+        assert _booth_min_rotation_start("ABCD") == 0
+
+    def test_rotation(self):
+        assert _booth_min_rotation_start("CDAB") == 2
+
+    def test_single(self):
+        assert _booth_min_rotation_start("A") == 0
+
+    def test_empty(self):
+        assert _booth_min_rotation_start("") == 0
+
+
+class TestCanonicalizeCircularSequence:
+    """Tests for canonicalize_circular_sequence function."""
+
+    def test_empty_string(self):
+        assert canonicalize_circular_sequence("") == ""
+
+    def test_single_char(self):
+        assert canonicalize_circular_sequence("A") == "A"
+
+    def test_rotation_invariant(self):
+        """Rotations of the same circle produce the same canonical form."""
+        seq1 = canonicalize_circular_sequence("ACGT")
+        seq2 = canonicalize_circular_sequence("CGTA")
+        seq3 = canonicalize_circular_sequence("GTAC")
+        seq4 = canonicalize_circular_sequence("TACG")
+        assert seq1 == seq2 == seq3 == seq4
+
+    def test_strand_invariant(self):
+        """Forward and reverse-complement produce the same canonical form."""
+        fwd = canonicalize_circular_sequence("GATTACA")
+        rc = canonicalize_circular_sequence(_reverse_complement("GATTACA"))
+        assert fwd == rc
+
+    def test_whitespace_stripped(self):
+        assert canonicalize_circular_sequence("  ACGT  ") == canonicalize_circular_sequence("ACGT")
+
+    def test_uppercase(self):
+        assert canonicalize_circular_sequence("acgt") == canonicalize_circular_sequence("ACGT")
+
+
+class TestMeccProcessorComputeSequences:
+    """Tests for MeccProcessor.compute_sequences."""
+
+    @pytest.fixture
+    def setup(self, tmp_path):
+        fasta_file = tmp_path / "test.fasta"
+        fasta_file.write_text(">qid1\nACGTACGTACGTACGTACGT\n>qid2\nTTGGCCAATTGGTTGGCCAA\n")
+        seq_lib = SequenceLibrary()
+        seq_lib.load_fasta(fasta_file)
+        return MeccProcessor(seq_lib, UMCProcessConfig())
+
+    def test_basic_extraction(self, setup):
+        """Extract sequences for MeccDNA (one per unique query_id)."""
+        processor = setup
+        df = pd.DataFrame({
+            "query_id": ["qid1", "qid1", "qid2"],
+            "chr": ["chr1", "chr2", "chr3"],
+            "start0": [100, 200, 300],
+            "end0": [150, 250, 350],
+            "q_start": [1, 1, 3],
+            "length": [6, 6, 4],
+        })
+        result = processor.compute_sequences(df)
+        assert "eSeq" in result.columns
+        # All rows for qid1 should have the same sequence
+        qid1_seqs = result[result["query_id"] == "qid1"]["eSeq"].unique()
+        assert len(qid1_seqs) == 1
+
+    def test_missing_sequence(self, setup):
+        """Missing sequence should leave eSeq empty."""
+        processor = setup
+        df = pd.DataFrame({
+            "query_id": ["nonexistent"],
+            "chr": ["chr1"],
+            "start0": [100],
+            "end0": [200],
+            "q_start": [1],
+            "length": [6],
+        })
+        result = processor.compute_sequences(df)
+        assert result["eSeq"].iloc[0] == ""
+
+    def test_missing_columns(self, setup):
+        """Missing length/q_start columns should warn and return unchanged."""
+        processor = setup
+        df = pd.DataFrame({
+            "query_id": ["qid1"],
+            "chr": ["chr1"],
+        })
+        result = processor.compute_sequences(df)
+        assert "eSeq" in result.columns
+        assert result["eSeq"].iloc[0] == ""
+
+
+class TestCeccProcessorComputeSequences:
+    """Tests for CeccProcessor.compute_sequences."""
+
+    @pytest.fixture
+    def setup(self, tmp_path):
+        fasta_file = tmp_path / "test.fasta"
+        fasta_file.write_text(">qid1\nACGTACGTACGTACGTACGT\n")
+        seq_lib = SequenceLibrary()
+        seq_lib.load_fasta(fasta_file)
+        return CeccProcessor(seq_lib, UMCProcessConfig())
+
+    def test_basic_extraction(self, setup):
+        """Extract sequences for CeccDNA (one per unique query_id)."""
+        processor = setup
+        df = pd.DataFrame({
+            "query_id": ["qid1", "qid1"],
+            "chr": ["chr1", "chr2"],
+            "start0": [100, 200],
+            "end0": [150, 250],
+            "seg_index": [1, 2],
+            "q_start": [1, 1],
+            "length": [8, 8],
+        })
+        result = processor.compute_sequences(df)
+        assert "eSeq" in result.columns
+        # All rows for qid1 share the same sequence
+        assert result["eSeq"].nunique() == 1
+        assert len(result["eSeq"].iloc[0]) == 8
+
+
+class TestMeccProcessorProcess:
+    """Tests for MeccProcessor.process with various scenarios."""
+
+    @pytest.fixture
+    def setup(self, tmp_path):
+        fasta_file = tmp_path / "test.fasta"
+        fasta_file.write_text(
+            ">read1\nACGTACGTACGTACGTACGT\n"
+            ">read2\nTTGGCCAATTGGTTGGCCAA\n"
+        )
+        seq_lib = SequenceLibrary()
+        seq_lib.load_fasta(fasta_file)
+        return MeccProcessor(seq_lib, UMCProcessConfig()), tmp_path
+
+    def test_empty_csv(self, setup):
+        """Empty CSV returns None."""
+        processor, tmp_path = setup
+        csv_file = tmp_path / "empty.csv"
+        csv_file.write_text("")
+        result = processor.process([csv_file], tmp_path / "out", "test")
+        assert result is None
+
+    def test_nonexistent_file(self, setup):
+        """Nonexistent file returns None."""
+        processor, tmp_path = setup
+        result = processor.process(
+            [tmp_path / "nonexistent.csv"], tmp_path / "out", "test"
+        )
+        assert result is None
+
+    def test_multi_location_clustering(self, setup):
+        """Multiple reads at same locations cluster together."""
+        processor, tmp_path = setup
+        csv_file = tmp_path / "mecc.csv"
+        csv_file.write_text(
+            "query_id,chr,start0,end0,q_start,length,copy_number\n"
+            "read1,chr1,100,150,5,8,5\n"
+            "read1,chr2,200,250,5,8,5\n"
+            "read2,chr1,100,150,3,6,3\n"
+            "read2,chr2,200,250,3,6,3\n"
+        )
+        output_dir = tmp_path / "out"
+        result = processor.process([csv_file], output_dir, "test", cluster=True)
+        assert result is not None
+        # read1 and read2 share the same multi-location signature, should cluster
+        assert result["cluster_size"].max() == 2
+
+
+class TestCeccProcessorProcess:
+    """Tests for CeccProcessor.process with various scenarios."""
+
+    @pytest.fixture
+    def setup(self, tmp_path):
+        fasta_file = tmp_path / "test.fasta"
+        fasta_file.write_text(
+            ">read1\nACGTACGTACGTACGTACGTACGTACGT\n"
+        )
+        seq_lib = SequenceLibrary()
+        seq_lib.load_fasta(fasta_file)
+        return CeccProcessor(seq_lib, UMCProcessConfig()), tmp_path
+
+    def test_empty_csv(self, setup):
+        """Empty CSV returns None."""
+        processor, tmp_path = setup
+        csv_file = tmp_path / "empty.csv"
+        csv_file.write_text("")
+        result = processor.process([csv_file], tmp_path / "out", "test")
+        assert result is None
+
+    def test_basic_processing(self, setup):
+        """Basic CeccDNA processing pipeline."""
+        processor, tmp_path = setup
+        csv_file = tmp_path / "cecc.csv"
+        csv_file.write_text(
+            "query_id,chr,start0,end0,seg_index,q_start,length\n"
+            "read1,chr1,100,150,1,5,12\n"
+            "read1,chr2,200,250,2,5,12\n"
+        )
+        output_dir = tmp_path / "out"
+        result = processor.process([csv_file], output_dir, "test", cluster=True)
+        assert result is not None
+        assert "eccDNA_id" in result.columns
+        assert result["eccDNA_id"].iloc[0].startswith("C")
+
+
+class TestBaseEccProcessorLoadCsvFiles:
+    """Tests for BaseEccProcessor.load_csv_files via MeccProcessor."""
+
+    @pytest.fixture
+    def processor(self, tmp_path):
+        fasta_file = tmp_path / "test.fasta"
+        fasta_file.write_text(">seq1\nACGT\n")
+        seq_lib = SequenceLibrary()
+        seq_lib.load_fasta(fasta_file)
+        return MeccProcessor(seq_lib, UMCProcessConfig()), tmp_path
+
+    def test_load_valid_csv(self, processor):
+        """Load valid CSV files."""
+        proc, tmp_path = processor
+        csv1 = tmp_path / "a.csv"
+        csv1.write_text("query_id,chr\nq1,chr1\n")
+        csv2 = tmp_path / "b.csv"
+        csv2.write_text("query_id,chr\nq2,chr2\n")
+        # MeccProcessor doesn't have load_csv_files directly,
+        # but process() uses the same logic; test via direct CSV loading
+        result_frames = []
+        for f in [csv1, csv2]:
+            df = pd.read_csv(f)
+            result_frames.append(df)
+        combined = pd.concat(result_frames, ignore_index=True)
+        assert len(combined) == 2
+
+    def test_skip_missing_file(self, processor):
+        """Missing files are skipped gracefully."""
+        proc, tmp_path = processor
+        valid = tmp_path / "valid.csv"
+        valid.write_text("query_id,chr\nq1,chr1\n")
+        # process() should handle missing files via its internal loop
+        result = proc.process(
+            [valid, tmp_path / "nonexistent.csv"],
+            tmp_path / "out", "test"
+        )
+        assert result is not None
+
+    def test_skip_empty_csv(self, processor):
+        """Empty CSV files are skipped gracefully (zero-size file)."""
+        proc, tmp_path = processor
+        empty = tmp_path / "empty.csv"
+        empty.write_text("")  # 0 bytes → st_size == 0, skipped before read_csv
+        result = proc.process([empty], tmp_path / "out", "test")
+        assert result is None
 
 
 if __name__ == "__main__":

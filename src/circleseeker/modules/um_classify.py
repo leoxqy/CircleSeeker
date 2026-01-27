@@ -74,6 +74,7 @@ class UMeccClassifier:
         u_high_mapq_threshold: int = 50,
         theta_locus: float = 0.95,
         pos_tol_bp: int = 50,
+        span_ratio_min: float = 0.95,
         logger: Optional[logging.Logger] = None,
     ) -> None:
         """
@@ -115,6 +116,11 @@ class UMeccClassifier:
                 part of the same locus when attempting to call Uecc (default: 1000).
             theta_locus: Locus clustering reciprocal-overlap threshold (default: 0.95).
             pos_tol_bp: Locus clustering boundary tolerance in bp (default: 50).
+            span_ratio_min: Minimum ratio of genomic span to cons_len for Uecc classification
+                (default: 0.95). This helps reject CeccDNA that are misclassified as Uecc
+                when minimap2 fails to detect small chimeric fragments. For true Uecc,
+                the genomic span should approximately equal the eccDNA length. For Cecc
+                with missing fragments, the span will be smaller than the full length.
             logger: Optional logger instance
         """
         self.gap_threshold = gap_threshold
@@ -157,6 +163,7 @@ class UMeccClassifier:
         self.u_high_mapq_threshold = int(u_high_mapq_threshold)
         self.theta_locus = self._as_fraction(theta_locus)
         self.pos_tol_bp = int(pos_tol_bp)
+        self.span_ratio_min = self._as_fraction(span_ratio_min)
         self.stats: dict[str, int] = {}
 
         # Setup logger
@@ -376,7 +383,7 @@ class UMeccClassifier:
                 # Filter out invalid entries
                 df = df[~invalid_length].copy()
 
-        except Exception as e:
+        except (ValueError, KeyError, AttributeError) as e:
             self.logger.error(f"Failed to parse query IDs: {e}")
             raise
 
@@ -627,7 +634,7 @@ class UMeccClassifier:
         except pd.errors.EmptyDataError:
             self.logger.error(f"Alignment file is empty: {alignment_file}")
             raise
-        except Exception as e:
+        except (OSError, pd.errors.ParserError) as e:
             self.logger.error(f"Failed to read alignment file: {e}")
             raise
 
@@ -849,9 +856,6 @@ class UMeccClassifier:
                     if second_lid is not None
                     else float(best_id_min)
                 )
-                low_mapq = mapq_best < int(self.MAPQ_LOW_THRESHOLD)
-                low_identity = identity_best < float(self.IDENTITY_LOW_THRESHOLD)
-
                 # MAPQ ambiguity check for Mecc: if ALL loci have low MAPQ,
                 # this might be a Uecc from a repetitive region, not a true Mecc.
                 # Skip classification and leave as unclassified.
@@ -909,24 +913,11 @@ class UMeccClassifier:
                             continue
                         rep_row = locus_df.iloc[0]
 
-                    row = dict(rep_row.to_dict())
-                    row["eccdna_type"] = "Mecc"
-                    row["classification_reason"] = ">=2 loci with full ring coverage"
-                    row["locus_id"] = int(lid)
-                    row["locus_cov"] = round(float(locus_cov[lid]), 6)
-                    row["U_cov"] = round(float(u_cov), 6)
-                    row["U_cov_2nd"] = round(float(u_cov_2nd), 6)
-                    row["M_count"] = int(m_count)
-                    row[ColumnStandard.MAPQ_BEST] = int(mapq_best)
-                    row[ColumnStandard.MAPQ_MIN] = int(mapq_min)
-                    row[ColumnStandard.IDENTITY_BEST] = round(float(identity_best), 3)
-                    row[ColumnStandard.IDENTITY_MIN] = round(float(identity_min), 3)
-                    row[ColumnStandard.QUERY_COV_BEST] = round(float(u_cov), 6)
-                    row[ColumnStandard.QUERY_COV_2ND] = round(float(u_cov_2nd), 6)
-                    row[ColumnStandard.CONFIDENCE_SCORE] = round(float(conf), 6)
-                    row[ColumnStandard.LOW_MAPQ] = bool(low_mapq)
-                    row[ColumnStandard.LOW_IDENTITY] = bool(low_identity)
-                    mecc_rows.append(row)
+                    mecc_rows.append(self._build_classification_row(
+                        rep_row, "Mecc", ">=2 loci with full ring coverage",
+                        lid, locus_cov[lid], u_cov, u_cov_2nd, m_count,
+                        mapq_best, mapq_min, identity_best, identity_min, conf,
+                    ))
                 classified_queries.add(query_id)
                 continue
 
@@ -956,6 +947,18 @@ class UMeccClassifier:
                 except (TypeError, ValueError):
                     best_start0 = 0
                     best_end0 = 0
+
+                # Check span_ratio: genomic span / cons_len
+                # This helps reject CeccDNA misclassified as Uecc when minimap2 fails
+                # to detect small chimeric fragments. True Uecc should have span ≈ cons_len.
+                best_span = best_end0 - best_start0
+                span_ratio = best_span / cons_len if cons_len > 0 else 0.0
+                if span_ratio < float(self.span_ratio_min):
+                    self.stats["uecc_vetoed_low_span_ratio"] = self.stats.get(
+                        "uecc_vetoed_low_span_ratio", 0
+                    ) + 1
+                    continue
+
                 all_idx = all_groups.get(query_id)
                 all_alignments = df.loc[all_idx] if all_idx is not None else group
                 if self._u_has_significant_secondary_mapping(
@@ -978,8 +981,6 @@ class UMeccClassifier:
                     rep_row = locus_df.iloc[0]
 
                 mapq_best, mapq_min, identity_best, identity_min = locus_evidence(lid)
-                low_mapq = mapq_best < int(self.MAPQ_LOW_THRESHOLD)
-                low_identity = identity_best < float(self.IDENTITY_LOW_THRESHOLD)
                 denom = float(max(theta_u2_max, 0.05))
                 uniq = self._clamp01(1.0 - (float(u_cov_2nd) / denom)) if denom > 0 else 1.0
                 conf = self._geom_mean(
@@ -990,24 +991,11 @@ class UMeccClassifier:
                         uniq,
                     ]
                 )
-                row = dict(rep_row.to_dict())
-                row["eccdna_type"] = "Uecc"
-                row["classification_reason"] = "single locus with full ring coverage"
-                row["locus_id"] = int(lid)
-                row["locus_cov"] = round(float(locus_cov[lid]), 6)
-                row["U_cov"] = round(float(u_cov), 6)
-                row["U_cov_2nd"] = round(float(u_cov_2nd), 6)
-                row["M_count"] = int(m_count)
-                row[ColumnStandard.MAPQ_BEST] = int(mapq_best)
-                row[ColumnStandard.MAPQ_MIN] = int(mapq_min)
-                row[ColumnStandard.IDENTITY_BEST] = round(float(identity_best), 3)
-                row[ColumnStandard.IDENTITY_MIN] = round(float(identity_min), 3)
-                row[ColumnStandard.QUERY_COV_BEST] = round(float(u_cov), 6)
-                row[ColumnStandard.QUERY_COV_2ND] = round(float(u_cov_2nd), 6)
-                row[ColumnStandard.CONFIDENCE_SCORE] = round(float(conf), 6)
-                row[ColumnStandard.LOW_MAPQ] = bool(low_mapq)
-                row[ColumnStandard.LOW_IDENTITY] = bool(low_identity)
-                uecc_rows.append(row)
+                uecc_rows.append(self._build_classification_row(
+                    rep_row, "Uecc", "single locus with full ring coverage",
+                    lid, locus_cov[lid], u_cov, u_cov_2nd, m_count,
+                    mapq_best, mapq_min, identity_best, identity_min, conf,
+                ))
                 classified_queries.add(query_id)
                 continue
 
@@ -1017,7 +1005,50 @@ class UMeccClassifier:
         self.logger.info("Uecc: %d queries", uecc_df["query_id"].nunique() if not uecc_df.empty else 0)
         self.logger.info("Mecc: %d queries", mecc_df["query_id"].nunique() if not mecc_df.empty else 0)
 
-        # Log filtering statistics
+        self._log_classification_stats()
+
+        return uecc_df, mecc_df, classified_queries
+
+    @staticmethod
+    def _build_classification_row(
+        rep_row: pd.Series,
+        eccdna_type: str,
+        reason: str,
+        lid: int,
+        locus_cov_val: float,
+        u_cov: float,
+        u_cov_2nd: float,
+        m_count: int,
+        mapq_best: int,
+        mapq_min: int,
+        identity_best: float,
+        identity_min: float,
+        conf: float,
+    ) -> dict:
+        """Build a classification result row for Uecc or Mecc."""
+        row = dict(rep_row.to_dict())
+        row["eccdna_type"] = eccdna_type
+        row["classification_reason"] = reason
+        row["locus_id"] = int(lid)
+        row["locus_cov"] = round(float(locus_cov_val), 6)
+        row["U_cov"] = round(float(u_cov), 6)
+        row["U_cov_2nd"] = round(float(u_cov_2nd), 6)
+        row["M_count"] = int(m_count)
+        row[ColumnStandard.MAPQ_BEST] = int(mapq_best)
+        row[ColumnStandard.MAPQ_MIN] = int(mapq_min)
+        row[ColumnStandard.IDENTITY_BEST] = round(float(identity_best), 3)
+        row[ColumnStandard.IDENTITY_MIN] = round(float(identity_min), 3)
+        row[ColumnStandard.QUERY_COV_BEST] = round(float(u_cov), 6)
+        row[ColumnStandard.QUERY_COV_2ND] = round(float(u_cov_2nd), 6)
+        row[ColumnStandard.CONFIDENCE_SCORE] = round(float(conf), 6)
+        low_mapq = mapq_best < int(UMeccClassifier.MAPQ_LOW_THRESHOLD)
+        low_identity = identity_best < float(UMeccClassifier.IDENTITY_LOW_THRESHOLD)
+        row[ColumnStandard.LOW_MAPQ] = bool(low_mapq)
+        row[ColumnStandard.LOW_IDENTITY] = bool(low_identity)
+        return row
+
+    def _log_classification_stats(self) -> None:
+        """Log filtering statistics from the classification run."""
         if self.stats.get("mecc_vetoed_low_mapq", 0) > 0:
             self.logger.info(
                 "Mecc vetoed due to low MAPQ (all loci < %d): %d queries",
@@ -1036,8 +1067,12 @@ class UMeccClassifier:
                 self.mapq_u_min,
                 self.stats["uecc_vetoed_low_mapq"],
             )
-
-        return uecc_df, mecc_df, classified_queries
+        if self.stats.get("uecc_vetoed_low_span_ratio", 0) > 0:
+            self.logger.info(
+                "Uecc vetoed due to low span ratio (< %.2f): %d queries",
+                self.span_ratio_min,
+                self.stats["uecc_vetoed_low_span_ratio"],
+            )
 
     def _process_overlaps_for_query(self, group: pd.DataFrame) -> pd.DataFrame:
         """

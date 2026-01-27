@@ -322,7 +322,7 @@ class TestPipeline:
             prefix="sample",
         )
         pipeline = Pipeline(config)
-        pipeline._inference_tool = "cyrcular"
+        pipeline._inference_tool = "splitreads_core"
 
         pipeline._step_minimap2()
 
@@ -333,8 +333,8 @@ class TestPipeline:
         assert ResultKeys.MINIMAP2_BAM not in pipeline.state.results
 
         pipeline._step_ecc_inference()
-        assert pipeline.state.results[ResultKeys.CYRCULAR_RESULT_COUNT] == 0
-        assert pipeline.state.results[ResultKeys.CYRCULAR_OVERVIEW] is None
+        assert pipeline.state.results[ResultKeys.INFERENCE_RESULT_COUNT] == 0
+        assert pipeline.state.results[ResultKeys.INFERENCE_OVERVIEW] is None
 
     def test_inference_failure_does_not_abort_pipeline_state(self, tmp_path):
         """Inference step should soft-fail so confirmed eccDNA can still be output."""
@@ -358,22 +358,22 @@ class TestPipeline:
         all_fasta.write_text(">r1\nACGT\n")
         pipeline.state.results[ResultKeys.ALL_FILTERED_FASTA] = str(all_fasta)
 
-        pipeline._inference_tool = "cresil"
-        with patch.object(pipeline, "_run_cresil_inference", side_effect=RuntimeError("boom")):
+        pipeline._inference_tool = "splitreads_core"
+        with patch.object(pipeline, "_run_splitreads_core_inference", side_effect=RuntimeError("boom")):
             pipeline._step_ecc_inference()
 
         assert pipeline.state.results.get(ResultKeys.INFERENCE_FAILED) is True
         assert "boom" in str(pipeline.state.results.get(ResultKeys.INFERENCE_ERROR))
-        assert pipeline.state.results.get(ResultKeys.CYRCULAR_OVERVIEW) is None
-        assert pipeline.state.results.get(ResultKeys.CYRCULAR_RESULT_COUNT) == 0
+        assert pipeline.state.results.get(ResultKeys.INFERENCE_OVERVIEW) is None
+        assert pipeline.state.results.get(ResultKeys.INFERENCE_RESULT_COUNT) == 0
 
         marker = pipeline.state.results.get(ResultKeys.INFERENCE_ERROR_FILE)
         assert marker
         marker_path = pipeline._resolve_stored_path(marker, [])
         assert marker_path and marker_path.exists()
 
-    def test_inference_failure_soft_fails_for_cyrcular(self, tmp_path):
-        """Cyrcular inference errors should also soft-fail."""
+    def test_inference_failure_soft_fails_for_splitreads(self, tmp_path):
+        """SplitReads-Core inference errors should also soft-fail."""
         input_fasta = tmp_path / "input.fa"
         reference = tmp_path / "ref.fa"
 
@@ -393,8 +393,8 @@ class TestPipeline:
         all_fasta.write_text(">r1\nACGT\n")
         pipeline.state.results[ResultKeys.ALL_FILTERED_FASTA] = str(all_fasta)
 
-        pipeline._inference_tool = "cyrcular"
-        with patch.object(pipeline, "_run_cyrcular_inference", side_effect=RuntimeError("boom")):
+        pipeline._inference_tool = "splitreads_core"
+        with patch.object(pipeline, "_run_splitreads_core_inference", side_effect=RuntimeError("boom")):
             pipeline._step_ecc_inference()
 
         assert pipeline.state.results.get(ResultKeys.INFERENCE_FAILED) is True
@@ -566,7 +566,7 @@ def test_cecc_build_uses_unclassified_only(tmp_path):
         {"query_id": "read_c", "C_cov_best": 0.97, "C_cov_2nd": 0.50},
     ]
 
-    with patch("circleseeker.core.pipeline.CeccBuild") as mock_cecc_build:
+    with patch("circleseeker.modules.cecc_build.CeccBuild") as mock_cecc_build:
         def fake_run_pipeline(*, input_csv, output_csv, **_kwargs):
             assert str(input_csv).endswith("um_classify.unclassified.csv")
             pd.DataFrame(cecc_rows).to_csv(output_csv, index=False)

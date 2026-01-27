@@ -29,7 +29,7 @@ def show_checkpoint(output: Path, prefix: str) -> None:
             checkpoint_files = list(output.glob("*.checkpoint"))
             if len(checkpoint_files) == 1:
                 detected_prefix = checkpoint_files[0].name.replace(".checkpoint", "")
-    except Exception as exc:
+    except OSError as exc:
         # Log but continue with default prefix
         logging.getLogger("cli").debug(f"Could not auto-detect prefix: {exc}")
 

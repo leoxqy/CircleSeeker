@@ -107,8 +107,8 @@ class TestEccPackager:
         with caplog.at_level(logging.INFO, logger="circleseeker.ecc_packager"):
             ecc_packager.copy_file(None, dst_file, overwrite=True, dry=False, verbose=True)
         assert not dst_file.exists()
-
-        assert "Missing source: <None>" in caplog.text
+        # No log is emitted for None sources (treated as optional inputs)
+        assert caplog.text == ""
 
     def test_copy_file_dry_run(self, tmp_path):
         """Test file copying in dry-run mode."""
@@ -139,6 +139,12 @@ class TestEccPackager:
 
     def test_run_basic_packaging(self, tmp_path):
         """Test basic packaging functionality."""
+        unified_csv = tmp_path / "unified.csv"
+        unified_csv.write_text(
+            "eccDNA_id,eccDNA_type,State,Length\n"
+            "UeccDNA1,UeccDNA,Confirmed,100\n"
+        )
+
         # Create mock args with correct attribute name
         class MockArgs:
             def __init__(self):
@@ -148,11 +154,12 @@ class TestEccPackager:
                 self.mecc_dir = None
                 self.cecc_dir = None
                 self.inferred_dir = None
-                self.merged_csv = None
+                self.unified_csv = str(unified_csv)
                 self.html = None
                 self.text = None
                 self.overwrite = True
                 self.dry_run = False
+                self.id_width = 4
                 self.verbose = False
 
         args = MockArgs()
@@ -164,6 +171,7 @@ class TestEccPackager:
         # Check output directory was created
         output_dir = Path(args.out_dir)
         assert output_dir.exists()
+        assert (output_dir / "eccDNA_summary.csv").exists()
 
     def test_run_with_files(self, tmp_path):
         """Test packaging with actual files."""
@@ -173,11 +181,17 @@ class TestEccPackager:
 
         uecc_dir = source_dir / "uecc"
         uecc_dir.mkdir()
-        (uecc_dir / "test_UeccDNA_C.fasta").write_text(">seq1\nATCG")
-        (uecc_dir / "test_UeccDNA.bed").write_text("chr1\t100\t200")
+        (uecc_dir / "test_UeccDNA_C.fasta").write_text(">UeccDNA1\nATCG\n")
+        (uecc_dir / "test_UeccDNA.core.csv").write_text(
+            "eccDNA_id,chr,start0,end0,strand,length\n"
+            "UeccDNA1,chr1,100,200,+,100\n"
+        )
 
-        merged_csv = source_dir / "merged.csv"
-        merged_csv.write_text("ecc_id,type\nUECC_001,UECC")
+        unified_csv = source_dir / "unified.csv"
+        unified_csv.write_text(
+            "eccDNA_id,eccDNA_type,State,Length\n"
+            "UeccDNA1,UeccDNA,Confirmed,100\n"
+        )
 
         html_report = source_dir / "report.html"
         html_report.write_text("<html><body>Test Report</body></html>")
@@ -191,11 +205,12 @@ class TestEccPackager:
                 self.mecc_dir = None
                 self.cecc_dir = None
                 self.inferred_dir = None
-                self.merged_csv = str(merged_csv)
+                self.unified_csv = str(unified_csv)
                 self.html = str(html_report)
                 self.text = None
                 self.overwrite = True
                 self.dry_run = False
+                self.id_width = 4
                 self.verbose = False
 
         args = MockArgs()
@@ -209,8 +224,8 @@ class TestEccPackager:
         assert output_dir.exists()
 
         # Check for organized structure
-        sample_dir = output_dir / args.sample_name
-        assert sample_dir.exists()
+        assert (output_dir / "Uecc").exists()
+        assert (output_dir / "eccDNA_summary.csv").exists()
 
     def test_run_dry_run(self, tmp_path):
         """Test packaging in dry-run mode."""
@@ -228,11 +243,12 @@ class TestEccPackager:
                 self.mecc_dir = None
                 self.cecc_dir = None
                 self.inferred_dir = None
-                self.merged_csv = str(test_file)
+                self.unified_csv = str(test_file)
                 self.html = None
                 self.text = None
                 self.overwrite = True
                 self.dry_run = True
+                self.id_width = 4
                 self.verbose = True
 
         args = MockArgs()
@@ -244,6 +260,88 @@ class TestEccPackager:
         # Output directory structure should not be created in dry run
         output_dir = Path(args.out_dir)
         # Note: The function might still create the base output directory
+
+
+class TestExtractBaseId:
+    """Test cases for extract_base_id."""
+
+    def test_uecc_simple(self):
+        assert ecc_packager.extract_base_id("UeccDNA1|Chr1:100-200(+)|length=1000") == "UeccDNA1"
+
+    def test_mecc_with_underscore_padding(self):
+        assert ecc_packager.extract_base_id("MeccDNA_000001.1_1") == "MeccDNA1"
+
+    def test_cecc_with_underscore(self):
+        assert ecc_packager.extract_base_id("CeccDNA_000001") == "CeccDNA1"
+
+    def test_with_gt_prefix(self):
+        assert ecc_packager.extract_base_id(">UeccDNA42|info") == "UeccDNA42"
+
+    def test_no_match_returns_first_part(self):
+        assert ecc_packager.extract_base_id("unknown_header") == "unknown_header"
+
+    def test_multidigit(self):
+        assert ecc_packager.extract_base_id("UeccDNA0123") == "UeccDNA123"
+
+
+class TestLoadFasta:
+    """Test cases for load_fasta."""
+
+    def test_load_single_sequence(self, tmp_path):
+        fa = tmp_path / "test.fasta"
+        fa.write_text(">UeccDNA1|info\nATCG\nGGCC\n")
+        result = ecc_packager.load_fasta(fa)
+        assert result == {"UeccDNA1": "ATCGGGCC"}
+
+    def test_load_multiple_sequences(self, tmp_path):
+        fa = tmp_path / "test.fasta"
+        fa.write_text(">UeccDNA1\nATCG\n>MeccDNA2\nGGCC\n")
+        result = ecc_packager.load_fasta(fa)
+        assert len(result) == 2
+        assert result["UeccDNA1"] == "ATCG"
+        assert result["MeccDNA2"] == "GGCC"
+
+    def test_load_empty_file(self, tmp_path):
+        fa = tmp_path / "empty.fasta"
+        fa.write_text("")
+        result = ecc_packager.load_fasta(fa)
+        assert result == {}
+
+    def test_load_nonexistent_file(self, tmp_path):
+        fa = tmp_path / "missing.fasta"
+        result = ecc_packager.load_fasta(fa)
+        assert result == {}
+
+    def test_load_none_path(self):
+        result = ecc_packager.load_fasta(None)
+        assert result == {}
+
+
+class TestBuildArgparser:
+    """Test cases for build_argparser."""
+
+    def test_parser_creation(self):
+        parser = ecc_packager.build_argparser()
+        assert parser is not None
+
+    def test_required_args(self):
+        parser = ecc_packager.build_argparser()
+        args = parser.parse_args([
+            "-s", "sample1",
+            "--unified-csv", "/path/to/unified.csv",
+        ])
+        assert args.sample_name == "sample1"
+        assert args.unified_csv == "/path/to/unified.csv"
+
+    def test_default_values(self):
+        parser = ecc_packager.build_argparser()
+        args = parser.parse_args([
+            "-s", "sample1",
+            "--unified-csv", "/path/to/unified.csv",
+        ])
+        assert args.out_dir == "."
+        assert args.id_width == 4
+        assert args.dry_run is False
 
 
 @pytest.fixture

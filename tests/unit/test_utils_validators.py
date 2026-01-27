@@ -110,8 +110,7 @@ class TestValidateInstallation:
 
         # Check that external tools were checked (actual list from validators.py)
         expected_tools = [
-            'TideHunter', 'minimap2', 'cd-hit-est', 'samtools',
-            'bcftools', 'cyrcular', 'varlociraptor', 'cresil'
+            'TideHunter', 'minimap2', 'cd-hit-est', 'samtools', 'lastal'
         ]
         actual_calls = [call[0][0] for call in mock_shutil.which.call_args_list]
 
@@ -146,7 +145,7 @@ class TestValidateInstallation:
 
         # Mock multiple missing tools - use correct case from validators.py
         def which_side_effect(tool_name):
-            if tool_name in {"TideHunter", "tidehunter", "cyrcular"}:
+            if tool_name in {"TideHunter", "tidehunter", "lastal"}:
                 return None  # Tools not found (including TideHunter alt name)
             return "/usr/bin/tool"
 
@@ -155,7 +154,7 @@ class TestValidateInstallation:
         issues = validate_installation(full_check=True)
         assert len(issues) == 2
         assert any("TideHunter" in issue for issue in issues)
-        assert any("cyrcular" in issue for issue in issues)
+        assert any("lastal" in issue for issue in issues)
 
     @patch("circleseeker.utils.validators.shutil")
     @patch("circleseeker.utils.validators.importlib")
@@ -207,8 +206,7 @@ class TestValidateInstallation:
 
         # Verify specific tools are included (using correct case from validators.py)
         expected_tools = [
-            'TideHunter', 'minimap2', 'cd-hit-est', 'samtools',
-            'bcftools', 'cyrcular', 'varlociraptor', 'cresil'
+            'TideHunter', 'minimap2', 'cd-hit-est', 'samtools', 'lastal'
         ]
 
         for tool in expected_tools:
@@ -283,7 +281,7 @@ class TestValidateInstallationIntegration:
         issues = validate_installation(full_check=True)
 
         # Should have issues for missing tools
-        missing_tools = {'TideHunter', 'bcftools', 'cyrcular', 'varlociraptor', 'cresil'}
+        missing_tools = {'TideHunter', 'lastal'}
         for tool in missing_tools:
             assert any(tool in issue for issue in issues)
 
@@ -310,5 +308,6 @@ class TestValidateInstallationIntegration:
 
         issues = validate_installation(full_check=True)
 
-        # Should have issues for all 8 external tools
-        assert len(issues) == 8
+        # Should have issues for all 5 external tools
+        # (TideHunter, minimap2, cd-hit-est, samtools, lastal)
+        assert len(issues) == 5

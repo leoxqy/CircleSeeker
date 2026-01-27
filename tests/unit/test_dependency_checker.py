@@ -18,8 +18,10 @@ from circleseeker.utils.dependency_checker import (
     get_tool_version,
     compare_versions,
     _basic_version_compare,
+    check_dependencies,
     TOOLS,
 )
+from circleseeker.exceptions import DependencyError
 
 
 class TestTool:
@@ -213,22 +215,6 @@ class TestDependencyChecker:
         # Should have version warnings for tools with min_version > 1.0
         assert len(checker.version_warnings) > 0
 
-    @patch("circleseeker.utils.dependency_checker.get_tool_version", return_value="999.0")
-    @patch("shutil.which")
-    def test_missing_inference_tools(self, mock_which, _mock_version):
-        """Test when both cresil and cyrcular are missing."""
-        def which_side_effect(name):
-            if name in ("cresil", "cyrcular"):
-                return None
-            return f"/usr/bin/{name}"
-
-        mock_which.side_effect = which_side_effect
-
-        checker = DependencyChecker()
-        result = checker.check_all()
-        assert result is False
-        assert len(checker.missing_inference) == 2
-
     def test_print_report(self, capsys):
         """Test print_report output."""
         checker = DependencyChecker()
@@ -240,6 +226,29 @@ class TestDependencyChecker:
         assert "CircleSeeker Dependency Check" in captured.out
         assert "minimap2" in captured.out
         assert "samtools" in captured.out
+
+    def test_raise_if_missing_required_raises_dependency_error(self):
+        """raise_if_missing_required should raise instead of exiting."""
+        checker = DependencyChecker()
+        checker.missing_required = [
+            Tool(
+                name="minimap2",
+                required=True,
+                purpose="Sequence alignment",
+                install_hint="conda install -c bioconda minimap2",
+            )
+        ]
+        with pytest.raises(DependencyError):
+            checker.raise_if_missing_required()
+
+
+class TestCheckDependenciesConvenience:
+    """Tests for check_dependencies() convenience function."""
+
+    @patch("shutil.which", return_value=None)
+    def test_check_dependencies_raises_dependency_error(self, _mock_which):
+        with pytest.raises(DependencyError):
+            check_dependencies()
 
 
 class TestToolDefinitions:
@@ -258,11 +267,10 @@ class TestToolDefinitions:
     def test_required_tools_exist(self):
         """Test that expected required tools are defined."""
         required_names = {t.name for t in TOOLS if t.required}
-        expected = {"TideHunter", "minimap2", "samtools", "cd-hit-est"}
+        expected = {"TideHunter", "minimap2", "samtools", "cd-hit-est", "lastal"}
         assert expected.issubset(required_names)
 
-    def test_inference_tools_defined(self):
-        """Test that inference tools (cresil, cyrcular) are defined."""
+    def test_last_tool_defined(self):
+        """Test that LAST aligner tools are defined."""
         tool_names = {t.name for t in TOOLS}
-        assert "cresil" in tool_names
-        assert "cyrcular" in tool_names
+        assert "lastal" in tool_names

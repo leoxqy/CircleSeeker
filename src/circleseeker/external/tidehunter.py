@@ -135,21 +135,51 @@ class TideHunter(ExternalTool):
                 self.logger.error("Last TideHunter log output:\n%s", stderr_tail[-2000:])
             from circleseeker.exceptions import ExternalToolError
 
+            signal_hint = ""
+            if e.returncode is not None and e.returncode < 0:
+                signum = -e.returncode
+                try:
+                    import signal as _signal
+
+                    signal_name = _signal.Signals(signum).name
+                except Exception:
+                    signal_name = None
+                if signal_name:
+                    signal_hint = f" (signal {signum} {signal_name})"
+                else:
+                    signal_hint = f" (signal {signum})"
+
+            hint = ""
+            if e.returncode == -11:
+                hint = (
+                    " TideHunter crashed (SIGSEGV). This is commonly triggered by invalid inputs "
+                    "(e.g. FASTQ/compressed/empty) or a TideHunter bug. Ensure the input is a "
+                    "plain FASTA file and consider rerunning with fewer threads."
+                )
+
             raise ExternalToolError(
-                "TideHunter failed",
+                f"TideHunter failed (exit code {e.returncode}){signal_hint}. Log: {log_file}.{hint}",
                 command=cmd,
                 returncode=e.returncode,
                 stderr=stderr_tail or None,
             ) from e
 
 
-class TideHunterRunner(TideHunter):
-    """Backward compatibility wrapper for existing code."""
+class TideHunterRunner:
+    """Backward compatibility wrapper for legacy code.
+
+    Note: This wrapper intentionally does not inherit from TideHunter/ExternalTool so that it
+    can expose a legacy high-level `run(input_fasta, output_path)` method without
+    violating the ExternalTool.run contract.
+    """
 
     def __init__(self, num_threads: int = 8) -> None:
-        super().__init__(threads=num_threads)
         self.num_threads = num_threads
+        self._tool = TideHunter(threads=num_threads)
 
-    def run(self, input_fasta: Path, output_path: Path) -> None:  # type: ignore[override]
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._tool, name)
+
+    def run(self, input_fasta: Path | str, output_path: Path | str) -> None:
         """Run TideHunter with legacy interface."""
-        return self.run_analysis(input_file=Path(input_fasta), output_file=Path(output_path))
+        return self._tool.run_analysis(input_file=Path(input_fasta), output_file=Path(output_path))

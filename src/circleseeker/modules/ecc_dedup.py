@@ -25,6 +25,7 @@ import logging
 from circleseeker.utils.logging import get_logger
 import re
 import shutil
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional
 import pandas as pd
@@ -257,6 +258,158 @@ def normalize_column_names(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# Confidence/evidence columns carried through aggregation
+_CONFIDENCE_COLUMNS = (
+    ColumnStandard.CONFIDENCE_SCORE,
+    ColumnStandard.QUERY_COV_BEST,
+    ColumnStandard.QUERY_COV_2ND,
+    ColumnStandard.MAPQ_BEST,
+    ColumnStandard.IDENTITY_BEST,
+    ColumnStandard.LOW_MAPQ,
+    ColumnStandard.LOW_IDENTITY,
+)
+
+# Standard output columns for confirmed tables
+_CONFIRMED_OUTPUT_COLUMNS = [
+    "eccDNA_id", "Regions", "Strand", "Length",
+    "eccDNA_type", "State", "Seg_total", "Hit_count",
+]
+
+
+def _build_confirmed_table_base(
+    input_df: pd.DataFrame,
+    eccdna_type: str,
+    error_label: str,
+    *,
+    segment_separator: Optional[str] = None,
+    sort_keys: Optional[list[str]] = None,
+    hit_count_from_group_size: bool = False,
+    include_seg_total_agg: bool = False,
+) -> pd.DataFrame:
+    """Build confirmed table from segments (shared logic for U/M/C types).
+
+    Args:
+        input_df: DataFrame with columns: eccDNA_id, chr, start0, end0, length
+        eccdna_type: Type string ("UeccDNA", "MeccDNA", "CeccDNA")
+        error_label: Label for error messages (e.g., "U", "Mecc", "Cecc segments")
+        segment_separator: None = take "first" (single-segment);
+            str = join regions/strands with this separator
+        sort_keys: Columns to sort by within each eccDNA_id before aggregation
+        hit_count_from_group_size: If True, compute Hit_count from group size
+        include_seg_total_agg: If True, aggregate seg_total using "max" from data
+
+    Returns:
+        DataFrame with standardized confirmed columns
+    """
+    df = normalize_column_names(input_df)
+
+    req = ["eccDNA_id", "chr", "start0", "end0", "length"]
+    for c in req:
+        if c not in df.columns:
+            raise ValueError(f"{error_label} confirmed table missing column: {c}")
+
+    df = df.copy()
+
+    # Handle eccDNA_id aliases
+    if "eccDNA_id" not in df.columns:
+        for alt in ("eccdna_id", "ecc_id", "id"):
+            if alt in df.columns:
+                df["eccDNA_id"] = df[alt]
+                if alt != "eccDNA_id":
+                    df = df.drop(columns=[alt])
+                break
+
+    if len(df) == 0:
+        return pd.DataFrame(columns=_CONFIRMED_OUTPUT_COLUMNS)
+
+    # Create region strings
+    df["_region"] = df.apply(
+        lambda r: region_str(r["chr"], r["start0"], r["end0"]), axis=1,
+    )
+
+    # Type-specific pre-aggregation sort
+    if sort_keys:
+        full_sort = ["eccDNA_id"] + sort_keys
+        if "__chr" in sort_keys:
+            df["__chr"] = df["chr"].astype(str)
+        if "__start" in sort_keys:
+            df["__start"] = df["start0"].astype(int)
+        df = df.sort_values(full_sort)
+
+    # Compute Hit_count from group size (MeccDNA)
+    if hit_count_from_group_size:
+        hit_counts = df.groupby("eccDNA_id").size().rename("_Hit_count")
+        df = df.merge(hit_counts, on="eccDNA_id", how="left")
+
+    # Calculate reads_count from reads column if available
+    if "reads_count" not in df.columns and "reads" in df.columns:
+        reads_count = (
+            df.groupby("eccDNA_id")["reads"]
+            .first()
+            .apply(lambda x: len(str(x).split(";")) if pd.notna(x) and str(x) not in ["", "NA"] else 1)
+            .rename("reads_count")
+        )
+        df = df.merge(reads_count, on="eccDNA_id", how="left")
+
+    # Build aggregation dict
+    if segment_separator is None:
+        region_agg: object = "first"
+        strand_agg: object = "first"
+    else:
+        sep = segment_separator
+        region_agg = lambda x, _s=sep: _s.join(list(x))
+        strand_agg = lambda x, _s=sep: _s.join(list(x))
+
+    agg_dict: dict[str, object] = {"_region": region_agg, "length": "first"}
+
+    if hit_count_from_group_size:
+        agg_dict["_Hit_count"] = "first"
+    if include_seg_total_agg and "seg_total" in df.columns:
+        agg_dict["seg_total"] = "max"
+    if ColumnStandard.STRAND in df.columns:
+        agg_dict[ColumnStandard.STRAND] = strand_agg
+
+    for col in _CONFIDENCE_COLUMNS:
+        if col in df.columns:
+            agg_dict[col] = "max"
+    if "reads_count" in df.columns:
+        agg_dict["reads_count"] = "first"
+
+    g = df.groupby("eccDNA_id", sort=False).agg(agg_dict).reset_index()
+
+    # Rename to standard output names
+    rename_map: dict[str, str] = {"_region": "Regions", "length": "Length"}
+    if include_seg_total_agg and "seg_total" in g.columns:
+        rename_map["seg_total"] = "Seg_total"
+    if ColumnStandard.STRAND in g.columns:
+        rename_map[ColumnStandard.STRAND] = "Strand"
+    if "_Hit_count" in g.columns:
+        rename_map["_Hit_count"] = "Hit_count"
+    g = g.rename(columns=rename_map)
+
+    if "Strand" not in g.columns:
+        g["Strand"] = "."
+
+    # Fixed metadata fields
+    g["eccDNA_type"] = eccdna_type
+    g["State"] = "Confirmed"
+    if "Hit_count" not in g.columns:
+        g["Hit_count"] = 1
+    if "Seg_total" not in g.columns:
+        g["Seg_total"] = 1
+
+    g = natural_sort_eccdna_id(g)
+
+    # Select output columns
+    cols = list(_CONFIRMED_OUTPUT_COLUMNS)
+    if "reads_count" in g.columns:
+        cols.append("reads_count")
+    for col in _CONFIDENCE_COLUMNS:
+        if col in g.columns:
+            cols.append(col)
+    return g[cols]
+
+
 def build_u_confirmed_table(u_df: pd.DataFrame) -> pd.DataFrame:
     """Build UeccDNA confirmed table from segments.
 
@@ -266,111 +419,7 @@ def build_u_confirmed_table(u_df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         DataFrame with standardized confirmed columns including strand
     """
-    # Normalize column names
-    u_df = normalize_column_names(u_df)
-
-    req = [
-        "eccDNA_id",
-        ColumnStandard.CHR,
-        ColumnStandard.START0,
-        ColumnStandard.END0,
-        ColumnStandard.LENGTH,
-    ]
-    for c in req:
-        if c not in u_df.columns:
-            raise ValueError(f"U confirmed table missing column: {c}")
-
-    df = u_df.copy()
-
-    if "eccDNA_id" not in df.columns:
-        for alt in ("eccdna_id", "ecc_id", "id"):
-            if alt in df.columns:
-                df["eccDNA_id"] = df[alt]
-                if alt != "eccDNA_id":
-                    df = df.drop(columns=[alt])
-                break
-
-    # Handle empty DataFrame case
-    if len(df) == 0:
-        return pd.DataFrame(
-            columns=[
-                "eccDNA_id",
-                "Regions",
-                "Strand",
-                "Length",
-                "eccDNA_type",
-                "State",
-                "Seg_total",
-                "Hit_count",
-            ]
-        )
-
-    df["regions"] = df.apply(
-        lambda r: region_str(
-            r[ColumnStandard.CHR], r[ColumnStandard.START0], r[ColumnStandard.END0]
-        ),
-        axis=1,
-    )
-
-    # Group by eccDNA_id and aggregate, maintaining order
-    agg_dict = {"regions": "first", ColumnStandard.LENGTH: "first"}
-
-    # Include strand if available
-    if ColumnStandard.STRAND in df.columns:
-        agg_dict[ColumnStandard.STRAND] = "first"
-
-    # Optional confidence/evidence columns (max over merged members).
-    for col in (
-        ColumnStandard.CONFIDENCE_SCORE,
-        ColumnStandard.QUERY_COV_BEST,
-        ColumnStandard.QUERY_COV_2ND,
-        ColumnStandard.MAPQ_BEST,
-        ColumnStandard.IDENTITY_BEST,
-        ColumnStandard.LOW_MAPQ,
-        ColumnStandard.LOW_IDENTITY,
-    ):
-        if col in df.columns:
-            agg_dict[col] = "max"
-
-    g = df.groupby("eccDNA_id", as_index=False, sort=False).agg(agg_dict)
-
-    # Add standard fields
-    g = g.rename(columns={"regions": "Regions", ColumnStandard.LENGTH: "Length"})
-    if ColumnStandard.STRAND in g.columns:
-        g = g.rename(columns={ColumnStandard.STRAND: "Strand"})
-    else:
-        g["Strand"] = "."  # Default strand if not available
-
-    g["eccDNA_type"] = "UeccDNA"
-    g["State"] = "Confirmed"
-    g["Seg_total"] = 1
-    g["Hit_count"] = 1
-
-    # Apply natural sorting by eccDNA_id
-    g = natural_sort_eccdna_id(g)
-
-    cols = [
-        "eccDNA_id",
-        "Regions",
-        "Strand",
-        "Length",
-        "eccDNA_type",
-        "State",
-        "Seg_total",
-        "Hit_count",
-    ]
-    for col in (
-        ColumnStandard.CONFIDENCE_SCORE,
-        ColumnStandard.QUERY_COV_BEST,
-        ColumnStandard.QUERY_COV_2ND,
-        ColumnStandard.MAPQ_BEST,
-        ColumnStandard.IDENTITY_BEST,
-        ColumnStandard.LOW_MAPQ,
-        ColumnStandard.LOW_IDENTITY,
-    ):
-        if col in g.columns:
-            cols.append(col)
-    return g[cols]
+    return _build_confirmed_table_base(u_df, "UeccDNA", "U")
 
 
 def build_m_confirmed_table(m_df: pd.DataFrame) -> pd.DataFrame:
@@ -378,117 +427,16 @@ def build_m_confirmed_table(m_df: pd.DataFrame) -> pd.DataFrame:
 
     Args:
         m_df: DataFrame with columns: eccDNA_id, chr, start0, end0, strand, length
-        Optional: Hit_count or hit_count
 
     Returns:
         DataFrame with standardized confirmed columns including strand
     """
-    # Normalize column names
-    m_df = normalize_column_names(m_df)
-
-    req = ["eccDNA_id", "chr", "start0", "end0", "length"]
-    for c in req:
-        if c not in m_df.columns:
-            raise ValueError(f"Mecc confirmed table missing column: {c}")
-
-    df = m_df.copy()
-
-    if "eccDNA_id" not in df.columns:
-        for alt in ("eccdna_id", "ecc_id", "id"):
-            if alt in df.columns:
-                df["eccDNA_id"] = df[alt]
-                if alt != "eccDNA_id":
-                    df = df.drop(columns=[alt])
-                break
-
-    # Handle empty DataFrame case
-    if len(df) == 0:
-        return pd.DataFrame(
-            columns=[
-                "eccDNA_id",
-                "Regions",
-                "Strand",
-                "Length",
-                "eccDNA_type",
-                "State",
-                "Seg_total",
-                "Hit_count",
-            ]
-        )
-
-    # Create region strings
-    df["region"] = df.apply(lambda r: region_str(r["chr"], r["start0"], r["end0"]), axis=1)
-
-    # Sort by chromosome and position for consistent ordering
-    df["__chr"] = df["chr"].astype(str)
-    df["__start"] = df["start0"].astype(int)
-    df = df.sort_values(["eccDNA_id", "__chr", "__start"])
-
-    # Calculate hit count for each eccDNA_id (number of sites)
-    hit_counts = df.groupby("eccDNA_id").size().rename("Hit_count")
-    df = df.merge(hit_counts, on="eccDNA_id", how="left")
-
-    # Aggregate by eccDNA_id, maintaining order
-    agg: dict[str, object] = {
-        "region": lambda x: "|".join(list(x)),  # Use | separator for MeccDNA
-        "length": "first",
-        "Hit_count": "first",  # Use the calculated hit count
-    }
-
-    # Include strand if available
-    if ColumnStandard.STRAND in df.columns:
-        agg[ColumnStandard.STRAND] = lambda x: "|".join(list(x))  # Join multiple strands with |
-
-    for col in (
-        ColumnStandard.CONFIDENCE_SCORE,
-        ColumnStandard.QUERY_COV_BEST,
-        ColumnStandard.QUERY_COV_2ND,
-        ColumnStandard.MAPQ_BEST,
-        ColumnStandard.IDENTITY_BEST,
-        ColumnStandard.LOW_MAPQ,
-        ColumnStandard.LOW_IDENTITY,
-    ):
-        if col in df.columns:
-            agg[col] = "max"
-
-    out = df.groupby("eccDNA_id", sort=False).agg(agg).reset_index()
-
-    # Add standard fields
-    out = out.rename(columns={"region": "Regions", "length": "Length"})
-    if ColumnStandard.STRAND in out.columns:
-        out = out.rename(columns={ColumnStandard.STRAND: "Strand"})
-    else:
-        out["Strand"] = "."  # Default strand if not available
-
-    out["eccDNA_type"] = "MeccDNA"
-    out["State"] = "Confirmed"
-    out["Seg_total"] = 1  # MeccDNA is counted as single unit despite multiple sites
-
-    # Apply natural sorting by eccDNA_id
-    out = natural_sort_eccdna_id(out)
-
-    cols = [
-        "eccDNA_id",
-        "Regions",
-        "Strand",
-        "Length",
-        "eccDNA_type",
-        "State",
-        "Seg_total",
-        "Hit_count",
-    ]
-    for col in (
-        ColumnStandard.CONFIDENCE_SCORE,
-        ColumnStandard.QUERY_COV_BEST,
-        ColumnStandard.QUERY_COV_2ND,
-        ColumnStandard.MAPQ_BEST,
-        ColumnStandard.IDENTITY_BEST,
-        ColumnStandard.LOW_MAPQ,
-        ColumnStandard.LOW_IDENTITY,
-    ):
-        if col in out.columns:
-            cols.append(col)
-    return out[cols]
+    return _build_confirmed_table_base(
+        m_df, "MeccDNA", "Mecc",
+        segment_separator="|",
+        sort_keys=["__chr", "__start"],
+        hit_count_from_group_size=True,
+    )
 
 
 def build_c_confirmed_table(c_df: pd.DataFrame) -> pd.DataFrame:
@@ -501,114 +449,20 @@ def build_c_confirmed_table(c_df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         DataFrame with standardized confirmed columns including strand
     """
-    # Normalize column names
     c_df = normalize_column_names(c_df)
 
-    req = ["eccDNA_id", "chr", "start0", "end0", "length"]
-    for c in req:
-        if c not in c_df.columns:
-            raise ValueError(f"Cecc segments confirmed table missing column: {c}")
-
-    # Handle seg_total and seg_index - these might be computed from existing data
+    # Auto-compute seg_total and seg_index if missing
     if "seg_total" not in c_df.columns:
         c_df["seg_total"] = c_df.groupby("eccDNA_id")["eccDNA_id"].transform("size")
     if "seg_index" not in c_df.columns:
         c_df["seg_index"] = c_df.groupby("eccDNA_id").cumcount() + 1
 
-    df = c_df.copy()
-
-    if "eccDNA_id" not in df.columns:
-        for alt in ("eccdna_id",):
-            if alt in df.columns:
-                df["eccDNA_id"] = df[alt]
-                if alt != "eccDNA_id":
-                    df = df.drop(columns=[alt])
-                break
-
-    # Handle empty DataFrame case
-    if len(df) == 0:
-        return pd.DataFrame(
-            columns=[
-                "eccDNA_id",
-                "Regions",
-                "Strand",
-                "Length",
-                "eccDNA_type",
-                "State",
-                "Seg_total",
-                "Hit_count",
-            ]
-        )
-
-    # Create region strings
-    df["region"] = df.apply(lambda r: region_str(r["chr"], r["start0"], r["end0"]), axis=1)
-
-    # Sort by segment index to maintain canonical order
-    df = df.sort_values(["eccDNA_id", "seg_index"])
-
-    # Aggregate by eccDNA_id
-    agg_dict = {
-        "region": lambda x: ";".join(list(x)),  # Use ; separator for CeccDNA segments
-        "length": "first",
-        "seg_total": "max",
-    }
-
-    # Include strand if available
-    if ColumnStandard.STRAND in df.columns:
-        agg_dict[ColumnStandard.STRAND] = lambda x: ";".join(
-            list(x)
-        )  # Join multiple strands with ;
-
-    for col in (
-        ColumnStandard.CONFIDENCE_SCORE,
-        ColumnStandard.QUERY_COV_BEST,
-        ColumnStandard.QUERY_COV_2ND,
-        ColumnStandard.MAPQ_BEST,
-        ColumnStandard.IDENTITY_BEST,
-        ColumnStandard.LOW_MAPQ,
-        ColumnStandard.LOW_IDENTITY,
-    ):
-        if col in df.columns:
-            agg_dict[col] = "max"
-
-    out = df.groupby("eccDNA_id", sort=False).agg(agg_dict).reset_index()
-
-    # Add standard fields
-    out = out.rename(columns={"region": "Regions", "length": "Length", "seg_total": "Seg_total"})
-    if ColumnStandard.STRAND in out.columns:
-        out = out.rename(columns={ColumnStandard.STRAND: "Strand"})
-    else:
-        out["Strand"] = "."  # Default strand if not available
-
-    out["eccDNA_type"] = "CeccDNA"
-    out["State"] = "Confirmed"
-    out["Hit_count"] = 1
-
-    # Apply natural sorting by eccDNA_id
-    out = natural_sort_eccdna_id(out)
-
-    cols = [
-        "eccDNA_id",
-        "Regions",
-        "Strand",
-        "Length",
-        "eccDNA_type",
-        "State",
-        "Seg_total",
-        "Hit_count",
-    ]
-    for col in (
-        ColumnStandard.CONFIDENCE_SCORE,
-        ColumnStandard.QUERY_COV_BEST,
-        ColumnStandard.QUERY_COV_2ND,
-        ColumnStandard.MAPQ_BEST,
-        ColumnStandard.IDENTITY_BEST,
-        ColumnStandard.LOW_MAPQ,
-        ColumnStandard.LOW_IDENTITY,
-    ):
-        if col in out.columns:
-            cols.append(col)
-    return out[cols]
+    return _build_confirmed_table_base(
+        c_df, "CeccDNA", "Cecc segments",
+        segment_separator=";",
+        sort_keys=["seg_index"],
+        include_seg_total_agg=True,
+    )
 
 
 def detect_related_files(base_dir: Path | str, prefix: str, ecc_type: str) -> list[Path]:
@@ -867,11 +721,11 @@ class CDHitClusters:
 
 
 # ================== Main ECC Dedup Class ==================
-class eccDedup:
+class EccDedup:
     """eccDNA cluster deduplication processor with confirmed tables generation."""
 
     def __init__(self, logger: Optional[logging.Logger] = None) -> None:
-        """Initialize eccDedup."""
+        """Initialize EccDedup."""
         self.logger = logger or get_logger(self.__class__.__name__)
 
     def normalize_coordinates(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -1505,78 +1359,376 @@ class eccDedup:
 
         return df
 
-    def merge_cecc_by_original_base_id(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Merge Cecc entries that belong to the same original eccDNA.
+    def dedupe_cecc_segments(
+        self, df: pd.DataFrame, position_tolerance: int = 100
+    ) -> pd.DataFrame:
+        """Deduplicate CeccDNA segments by genomic position, ignoring strand.
 
-        When the same eccDNA has multiple reads that end up in different CD-HIT clusters,
-        this function merges them into a single eccDNA entry by using the original
-        eccDNA base ID (e.g., CeccDNA_000001) from the read_name column.
+        When multiple reads from the same eccDNA are merged, they may contain
+        duplicate segments at the same genomic position but different strands
+        (e.g., one read from + strand, another from - strand). This function
+        removes such duplicates, keeping one representative segment per position.
 
-        This ensures that the final output has one entry per unique eccDNA, not one
-        entry per CD-HIT cluster.
+        The deduplication ignores strand because:
+        1. The same physical location can be read from either strand
+        2. For CeccDNA detection, the position matters more than the strand
+        3. Different strand reads of the same position represent the same segment
+
+        Args:
+            df: DataFrame with CeccDNA segments (must have eccDNA_id, chr, start0, end0)
+            position_tolerance: Maximum distance (bp) to consider same position (default 100)
+
+        Returns:
+            DataFrame with deduplicated segments
         """
         if df.empty:
             return df
 
+        # Check required columns
+        required_cols = [ColumnStandard.CHR, ColumnStandard.START0, ColumnStandard.END0]
+        # Use eccDNA_id for grouping
+        if "eccDNA_id" in df.columns:
+            id_col = "eccDNA_id"
+        elif ColumnStandard.ECCDNA_ID in df.columns:
+            id_col = ColumnStandard.ECCDNA_ID
+        else:
+            id_col = "cluster_id"
+        if id_col not in df.columns:
+            self.logger.warning("Cannot dedupe segments: missing id column")
+            return df
+        for col in required_cols:
+            if col not in df.columns:
+                self.logger.warning(f"Cannot dedupe segments: missing {col} column")
+                return df
+
         df = df.copy()
 
-        # Try to find original base ID from read_name or reads column
-        read_col = None
-        for col in ["read_name", ColumnStandard.READS, "reads"]:
-            if col in df.columns and df[col].notna().any():
-                read_col = col
-                break
+        # Track rows to keep
+        rows_to_keep = []
 
-        if read_col is None:
-            self.logger.warning("Cannot find read_name/reads column for base ID merge")
+        for eccdna_id, group in df.groupby(id_col, sort=False):
+            if len(group) <= 1:
+                rows_to_keep.extend(group.index.tolist())
+                continue
+
+            # Sort by chr, start0 for consistent ordering
+            group = group.sort_values([ColumnStandard.CHR, ColumnStandard.START0])
+
+            # Track which positions we've seen
+            seen_positions: list[tuple[str, int, int]] = []
+            keep_indices: list[int] = []
+
+            for idx, row in group.iterrows():
+                chr_val = str(row[ColumnStandard.CHR])
+                start0 = int(row[ColumnStandard.START0])
+                end0 = int(row[ColumnStandard.END0])
+
+                # Check if this position is already covered
+                is_duplicate = False
+                for seen_chr, seen_start, seen_end in seen_positions:
+                    if chr_val != seen_chr:
+                        continue
+
+                    # Check overlap with tolerance
+                    # Two positions are considered the same if they overlap significantly
+                    overlap_start = max(start0, seen_start)
+                    overlap_end = min(end0, seen_end)
+                    overlap_len = max(0, overlap_end - overlap_start)
+
+                    len_a = max(1, end0 - start0)
+                    len_b = max(1, seen_end - seen_start)
+
+                    # If overlap is >50% of either segment, consider it a duplicate
+                    if overlap_len > 0.5 * len_a or overlap_len > 0.5 * len_b:
+                        is_duplicate = True
+                        break
+
+                    # Also check if positions are very close (within tolerance)
+                    if abs(start0 - seen_start) < position_tolerance and abs(end0 - seen_end) < position_tolerance:
+                        is_duplicate = True
+                        break
+
+                if not is_duplicate:
+                    seen_positions.append((chr_val, start0, end0))
+                    keep_indices.append(idx)
+
+            rows_to_keep.extend(keep_indices)
+
+        # Filter to keep only deduplicated rows
+        result = df.loc[rows_to_keep].copy()
+
+        # Log deduplication stats
+        original_count = len(df)
+        final_count = len(result)
+        if original_count > final_count:
+            removed = original_count - final_count
+            self.logger.info(
+                f"Deduplicated CeccDNA segments: removed {removed} duplicate segments "
+                f"({original_count} -> {final_count})"
+            )
+
+        return result
+
+    def merge_cecc_by_tolerance(
+        self, df: pd.DataFrame, tolerance_bp: int = 10
+    ) -> pd.DataFrame:
+        """Merge near-identical CeccDNA entries by coordinate tolerance.
+
+        CD-HIT clusters by sequence identity, but CeccDNA calls originating from the
+        same circle can differ slightly in reported segment boundaries (e.g. +/- a few bp),
+        leading to duplicated entries that look like false positives in benchmarks.
+
+        This method merges CeccDNA entries when:
+        - they have the same number of segments
+        - after sorting segments by (chr, start0, end0), each corresponding segment
+          matches on chromosome and start/end within `tolerance_bp`.
+
+        Strand is ignored for merging.
+        """
+        if df.empty:
+            return df
+        try:
+            tol = int(tolerance_bp)
+        except (TypeError, ValueError):
+            tol = 0
+        if tol <= 0:
             return df
 
-        # Extract base ID for each row
-        df["_orig_base_id"] = df[read_col].apply(extract_eccDNA_base_id)
-
-        # Check if there are duplicate base IDs (indicating same eccDNA in multiple clusters)
-        base_id_counts = df.groupby("_orig_base_id")[ColumnStandard.ECCDNA_ID].nunique()
-        duplicates = base_id_counts[base_id_counts > 1]
-
-        if duplicates.empty:
-            df = df.drop(columns=["_orig_base_id"])
+        required = [ColumnStandard.ECCDNA_ID, ColumnStandard.CHR, ColumnStandard.START0, ColumnStandard.END0]
+        missing = [c for c in required if c not in df.columns]
+        if missing:
+            self.logger.warning(
+                "Skipping Cecc tolerance merge: missing columns %s", ",".join(missing)
+            )
             return df
 
-        self.logger.info(f"Found {len(duplicates)} base IDs with multiple clusters, merging...")
+        df = self.normalize_coordinates(df).copy()
 
-        # For each duplicate base ID, merge the clusters
-        new_cluster_map = {}
-        for base_id in duplicates.index:
-            # Get all cluster IDs for this base ID
-            clusters = df[df["_orig_base_id"] == base_id]["cluster_id"].unique()
-            # Use the first cluster as the merged cluster
-            merged_cluster = clusters[0]
-            for cluster in clusters[1:]:
-                new_cluster_map[cluster] = merged_cluster
+        reads_col = ColumnStandard.READS if ColumnStandard.READS in df.columns else None
 
-        # Remap cluster IDs
-        df["cluster_id"] = df["cluster_id"].apply(
-            lambda x: new_cluster_map.get(x, x)
+        def _segments_for_group(group: pd.DataFrame) -> list[tuple[str, int, int]]:
+            segs: list[tuple[str, int, int]] = []
+            seg_df = group[[ColumnStandard.CHR, ColumnStandard.START0, ColumnStandard.END0]].dropna()
+            seg_df = seg_df.drop_duplicates()
+            for _, row in seg_df.iterrows():
+                try:
+                    segs.append(
+                        (str(row[ColumnStandard.CHR]), int(row[ColumnStandard.START0]), int(row[ColumnStandard.END0]))
+                    )
+                except (TypeError, ValueError):
+                    continue
+            segs.sort(key=lambda x: (x[0], x[1], x[2]))
+            return segs
+
+        # Build per-eccDNA segment sets and simple metadata for tie-breaking.
+        segs_by_id: dict[str, list[tuple[str, int, int]]] = {}
+        reads_by_id: dict[str, str] = {}
+        conf_by_id: dict[str, float] = {}
+        num_merged_by_id: dict[str, int] = {}
+        cluster_id_by_id: dict[str, str] = {}
+        merged_from_by_id: dict[str, str] = {}
+
+        for ecc_id, group in df.groupby(ColumnStandard.ECCDNA_ID, sort=False):
+            ecc_id_str = str(ecc_id)
+            segs = _segments_for_group(group)
+            if not segs:
+                continue
+            segs_by_id[ecc_id_str] = segs
+
+            if reads_col:
+                reads_by_id[ecc_id_str] = merge_read_lists(group[reads_col])
+            else:
+                reads_by_id[ecc_id_str] = ""
+
+            if ColumnStandard.CONFIDENCE_SCORE in group.columns:
+                conf_val = pd.to_numeric(group[ColumnStandard.CONFIDENCE_SCORE], errors="coerce").max()
+                conf_by_id[ecc_id_str] = float(conf_val) if pd.notna(conf_val) else 0.0
+            else:
+                conf_by_id[ecc_id_str] = 0.0
+
+            if "num_merged" in group.columns:
+                nm = pd.to_numeric(group["num_merged"], errors="coerce").max()
+                num_merged_by_id[ecc_id_str] = int(nm) if pd.notna(nm) else 1
+            else:
+                num_merged_by_id[ecc_id_str] = 1
+
+            if ColumnStandard.CLUSTER_ID in group.columns:
+                cluster_id_by_id[ecc_id_str] = str(group[ColumnStandard.CLUSTER_ID].iloc[0])
+            else:
+                cluster_id_by_id[ecc_id_str] = ecc_id_str
+
+            if "merged_from_ids" in group.columns:
+                merged_from_by_id[ecc_id_str] = str(group["merged_from_ids"].iloc[0])
+            else:
+                merged_from_by_id[ecc_id_str] = ecc_id_str
+
+        if len(segs_by_id) <= 1:
+            return df
+
+        # Candidate grouping by (segment count, chromosome multiset) to reduce comparisons.
+        buckets: dict[tuple[int, tuple[str, ...]], list[str]] = defaultdict(list)
+        for ecc_id, segs in segs_by_id.items():
+            chroms = tuple(sorted([s[0] for s in segs]))
+            buckets[(len(segs), chroms)].append(ecc_id)
+
+        parent: dict[str, str] = {k: k for k in segs_by_id.keys()}
+
+        def _find(x: str) -> str:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def _union(a: str, b: str) -> None:
+            ra = _find(a)
+            rb = _find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        def _segs_match(a: list[tuple[str, int, int]], b: list[tuple[str, int, int]]) -> bool:
+            if len(a) != len(b):
+                return False
+            for (ca, sa, ea), (cb, sb, eb) in zip(a, b):
+                if ca != cb:
+                    return False
+                if abs(sa - sb) > tol or abs(ea - eb) > tol:
+                    return False
+            return True
+
+        merged_pairs = 0
+        for _, ids in buckets.items():
+            if len(ids) <= 1:
+                continue
+            # Deterministic order for reproducibility.
+            ids = list(dict.fromkeys(ids))
+            for i in range(len(ids)):
+                for j in range(i + 1, len(ids)):
+                    a = ids[i]
+                    b = ids[j]
+                    if _segs_match(segs_by_id[a], segs_by_id[b]):
+                        _union(a, b)
+                        merged_pairs += 1
+
+        if merged_pairs == 0:
+            return df
+
+        groups: dict[str, list[str]] = defaultdict(list)
+        for ecc_id in segs_by_id.keys():
+            groups[_find(ecc_id)].append(ecc_id)
+
+        def _choose_rep(members: list[str]) -> str:
+            def key(eid: str) -> tuple[int, int, float, str]:
+                reads_count = count_reads_from_string(reads_by_id.get(eid, ""))
+                nm = int(num_merged_by_id.get(eid, 1))
+                conf = float(conf_by_id.get(eid, 0.0))
+                return (reads_count, nm, conf, eid)
+
+            # Pick max by (reads_count, num_merged, confidence_score), then stable by id.
+            return max(members, key=key)
+
+        out_groups: list[pd.DataFrame] = []
+        merged_groups = 0
+        for root, members in groups.items():
+            if len(members) == 1:
+                out_groups.append(df[df[ColumnStandard.ECCDNA_ID] == members[0]].copy())
+                continue
+
+            merged_groups += 1
+            rep_id = _choose_rep(members)
+            rep_rows = df[df[ColumnStandard.ECCDNA_ID] == rep_id].copy()
+            group_rows = df[df[ColumnStandard.ECCDNA_ID].isin(members)]
+
+            # Aggregate metadata across members (avoid segment-multiplication by collapsing per member first).
+            merged_reads = merge_read_lists(group_rows[reads_col]) if reads_col else ""
+
+            # merged_from_ids: union of member IDs + any existing merged_from_ids.
+            merged_from_set: set[str] = set()
+            for mid in members:
+                merged_from_set.add(str(mid))
+                raw = merged_from_by_id.get(mid, "")
+                for token in str(raw).split(";"):
+                    token = token.strip()
+                    if token:
+                        merged_from_set.add(token)
+            merged_from_ids = ";".join(sorted(merged_from_set))
+
+            num_merged_total = sum(int(num_merged_by_id.get(mid, 1)) for mid in members)
+
+            # copy_number: sum per-member max (represents total support across merged calls).
+            if ColumnStandard.COPY_NUMBER in group_rows.columns:
+                per_member_cn = (
+                    pd.to_numeric(group_rows[ColumnStandard.COPY_NUMBER], errors="coerce")
+                    .groupby(group_rows[ColumnStandard.ECCDNA_ID])
+                    .max()
+                )
+                copy_number = float(per_member_cn.sum()) if len(per_member_cn) else pd.NA
+            else:
+                copy_number = pd.NA
+
+            # Numeric evidence fields
+            def _agg_numeric(col: str, how: str) -> object:
+                if col not in group_rows.columns:
+                    return pd.NA
+                series = pd.to_numeric(group_rows[col], errors="coerce")
+                if how == "min":
+                    val = series.min()
+                else:
+                    val = series.max()
+                return val if pd.notna(val) else pd.NA
+
+            mapq_best = _agg_numeric(ColumnStandard.MAPQ_BEST, "max")
+            mapq_min = _agg_numeric(ColumnStandard.MAPQ_MIN, "min")
+            identity_best = _agg_numeric(ColumnStandard.IDENTITY_BEST, "max")
+            identity_min = _agg_numeric(ColumnStandard.IDENTITY_MIN, "min")
+            qcov_best = _agg_numeric(ColumnStandard.QUERY_COV_BEST, "max")
+            qcov_2nd = _agg_numeric(ColumnStandard.QUERY_COV_2ND, "max")
+            conf_score = _agg_numeric(ColumnStandard.CONFIDENCE_SCORE, "max")
+            match_degree = _agg_numeric(ColumnStandard.MATCH_DEGREE, "max")
+
+            # Update representative rows with merged metadata.
+            if reads_col:
+                rep_rows[reads_col] = merged_reads
+            if ColumnStandard.COPY_NUMBER in rep_rows.columns:
+                rep_rows[ColumnStandard.COPY_NUMBER] = copy_number
+            rep_rows["num_merged"] = num_merged_total
+            rep_rows["merged_from_ids"] = merged_from_ids
+
+            for col, val in (
+                (ColumnStandard.MAPQ_BEST, mapq_best),
+                (ColumnStandard.MAPQ_MIN, mapq_min),
+                (ColumnStandard.IDENTITY_BEST, identity_best),
+                (ColumnStandard.IDENTITY_MIN, identity_min),
+                (ColumnStandard.QUERY_COV_BEST, qcov_best),
+                (ColumnStandard.QUERY_COV_2ND, qcov_2nd),
+                (ColumnStandard.CONFIDENCE_SCORE, conf_score),
+                (ColumnStandard.MATCH_DEGREE, match_degree),
+            ):
+                if col in rep_rows.columns:
+                    rep_rows[col] = val
+
+            # Recompute low_mapq/low_identity based on merged best values (if present).
+            if ColumnStandard.MAPQ_BEST in rep_rows.columns:
+                mb = pd.to_numeric(rep_rows[ColumnStandard.MAPQ_BEST], errors="coerce").fillna(0).astype(int)
+                rep_rows[ColumnStandard.LOW_MAPQ] = mb < int(CONF_MAPQ_LOW_THRESHOLD)
+            if ColumnStandard.IDENTITY_BEST in rep_rows.columns:
+                ib = pd.to_numeric(rep_rows[ColumnStandard.IDENTITY_BEST], errors="coerce").fillna(0.0)
+                rep_rows[ColumnStandard.LOW_IDENTITY] = ib < float(CONF_IDENTITY_LOW_THRESHOLD)
+
+            # Keep representative cluster_id; record merged_from_ids for provenance.
+            if ColumnStandard.CLUSTER_ID in rep_rows.columns:
+                rep_rows[ColumnStandard.CLUSTER_ID] = cluster_id_by_id.get(rep_id, rep_id)
+
+            out_groups.append(rep_rows)
+
+        merged_df = pd.concat(out_groups, ignore_index=True) if out_groups else df
+        self.logger.info(
+            "Cecc tolerance merge (±%dbp): %d -> %d eccDNA entries (%d merged groups)",
+            tol,
+            df[ColumnStandard.ECCDNA_ID].nunique(),
+            merged_df[ColumnStandard.ECCDNA_ID].nunique(),
+            merged_groups,
         )
-
-        # Update merged_from_ids to include all original IDs
-        merged_ids = df.groupby("cluster_id")["merged_from_ids"].apply(
-            lambda s: ";".join(sorted(set(";".join(s.dropna().astype(str)).split(";"))))
-        )
-        df["merged_from_ids"] = df["cluster_id"].map(merged_ids).fillna(df["merged_from_ids"])
-
-        # Update read_name to include all reads
-        if read_col in df.columns:
-            merged_reads = df.groupby("cluster_id")[read_col].apply(merge_read_lists)
-            df[read_col] = df["cluster_id"].map(merged_reads).fillna(df[read_col])
-
-        # Update num_merged
-        cluster_counts = df.groupby("cluster_id")[ColumnStandard.ECCDNA_ID].nunique()
-        df["num_merged"] = df["cluster_id"].map(cluster_counts).fillna(1).astype(int)
-
-        df = df.drop(columns=["_orig_base_id"])
-
-        return df
+        return merged_df
 
     def write_uecc_outputs(
         self, df: pd.DataFrame, output_dir: Path, prefix: Optional[str], drop_seq: bool = False
@@ -2070,7 +2222,13 @@ class eccDedup:
         bed.to_csv(bed_file, sep="\t", header=False, index=False)
         self.logger.info(f"Wrote {bed_file}")
 
-        # Write Junctions BEDPE
+        self._write_cecc_bedpe(core, output_dir, prefix)
+        self._write_cecc_fasta(df, core, output_dir, prefix)
+
+    def _write_cecc_bedpe(
+        self, core: pd.DataFrame, output_dir: Path, prefix: Optional[str]
+    ) -> None:
+        """Write CeccDNA junctions BEDPE file."""
         junction_rows = []
         for eid, sub in core.sort_values(["eccDNA_id", "seg_index"]).groupby("eccDNA_id"):
             rows = list(sub.to_dict("records"))
@@ -2103,7 +2261,14 @@ class eccDedup:
         else:
             self.logger.info("No junctions to output for Cecc")
 
-        # Write FASTA
+    def _write_cecc_fasta(
+        self,
+        df: pd.DataFrame,
+        core: pd.DataFrame,
+        output_dir: Path,
+        prefix: Optional[str],
+    ) -> None:
+        """Write CeccDNA FASTA file."""
         fa_file = (
             output_dir / f"{prefix}_CeccDNA_C.fasta" if prefix else output_dir / "CeccDNA_C.fasta"
         )
@@ -2186,7 +2351,7 @@ class eccDedup:
                     f"Generated confirmed entries for {ecc_type}: {len(confirmed_df)} entries"
                 )
 
-            except Exception as e:
+            except (KeyError, ValueError, TypeError) as e:
                 self.logger.warning(f"Failed to generate confirmed table for {ecc_type}: {e}")
 
         # Combine all confirmed tables
@@ -2395,9 +2560,10 @@ class eccDedup:
                     cecc_df["eccDNA_id"] = cecc_df["eccdna_id"]
 
                 processed_cecc = self.process_mecc_cecc(cecc_df, cecc_clusters, "Cecc")
-                # Merge Cecc entries that belong to the same original eccDNA
-                # (different reads from same eccDNA may end up in different clusters)
-                processed_cecc = self.merge_cecc_by_original_base_id(processed_cecc)
+                # Merge near-identical Cecc calls with small boundary jitter (±10bp).
+                processed_cecc = self.merge_cecc_by_tolerance(processed_cecc, tolerance_bp=10)
+                # Deduplicate segments at same genomic position (different strands)
+                processed_cecc = self.dedupe_cecc_segments(processed_cecc)
                 processed_cecc = self.renumber_eccdna_ids(processed_cecc, "Cecc")
 
                 results["Cecc"] = processed_cecc
@@ -2523,7 +2689,7 @@ def main() -> None:
     prefix = output_prefix.name
 
     # Create and run ECC dedup
-    dedup = eccDedup(logger=logger)
+    dedup = EccDedup(logger=logger)
 
     try:
         # Run deduplication
@@ -2546,7 +2712,7 @@ def main() -> None:
             if not df.empty:
                 logger.info(f"  {file_type}: {len(df)} records")
 
-    except Exception as e:
+    except (OSError, pd.errors.ParserError, ValueError, KeyError) as e:
         logger.error(f"ECC dedup failed: {e}")
         raise
 

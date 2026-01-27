@@ -1,6 +1,6 @@
 # CircleSeeker 输出格式参考手册
 
-本手册定义 CircleSeeker v1.0.0 的主要输出文件结构与字段说明。
+本手册定义 CircleSeeker v1.1.0 的主要输出文件结构与字段说明。
 
 ---
 
@@ -53,7 +53,10 @@
 | `eccDNA_type` | string | `UeccDNA` / `MeccDNA` / `CeccDNA` |
 | `State` | string | `Confirmed` / `Inferred` |
 | `Seg_total` | int | 片段数（U/M 为 1） |
-| `Hit_count` | int | 基因组命中数（Mecc 典型 >1） |
+| `Hit_count` | int | 支持的 reads 数量 |
+| `reads_count` | int | 支持的 reads 数量（同 Hit_count） |
+| `confidence_score` | float | 检测置信度（0-1，Inferred 来自 prob_present） |
+| `copy_number` | float | 估计拷贝数（Confirmed 来自重复数，Inferred 来自覆盖度） |
 
 ---
 

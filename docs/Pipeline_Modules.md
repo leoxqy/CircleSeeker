@@ -1,6 +1,6 @@
-# CircleSeeker Pipeline 模块说明（v1.0.0）
+# CircleSeeker Pipeline 模块说明（v1.1.0）
 
-本文件概述 CircleSeeker 1.0.0 的 16 个管线步骤、输入输出关系以及关键实现要点，帮助使用者理解整体流程与模块职责。
+本文件概述 CircleSeeker 1.1.0 的 16 个管线步骤、输入输出关系以及关键实现要点，帮助使用者理解整体流程与模块职责。
 
 ---
 
@@ -12,14 +12,14 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 |------|----------|------|
 | **检测阶段** | 1-6 | 基于 HiFi reads 和参考基因组，识别潜在的环状 DNA 候选 |
 | **处理阶段** | 7-10 | 对 U/M/C 三类候选进行聚合、去重与过滤 |
-| **推断阶段** | 11-13 | 使用 Cresil（或 Cyrcular）补充推断结果并进行整理 |
+| **推断阶段** | 11-13 | 使用 SplitReads-Core（内置）补充推断结果并进行整理 |
 | **整合阶段** | 14-16 | 合并所有信息、生成报告并打包产物 |
 
 从证据来源角度，16 个步骤也可以更直观地理解为“两条 Caller + 一个整合阶段”：
 
 - **CtcReads**：含 **Ctc**（**C**oncatemeric **t**andem **c**opies）信号的 reads（对应 `tandem_to_ring.csv` 中的 CtcR-* 分类）。
 - **CtcReads-Caller**（步骤 1-10）：基于 CtcReads 证据产出 **Confirmed** U/M/C eccDNA。
-- **SplitReads-Caller**（步骤 11-13）：基于 split-reads/junction 证据进行推断（Cresil 优先，Cyrcular 备用），产出 **Inferred** eccDNA。
+- **SplitReads-Core**（步骤 11-13）：基于 split-reads/junction 证据进行推断（内置，HiFi优化），产出 **Inferred** eccDNA。
 - **Integration**（步骤 14-16）：对 Confirmed/Inferred 做去冗余合并、统计与打包交付。
 
 运行过程中，所有中间文件写入 `<output>/.tmp_work/`，最终由 `ecc_packager` 复制到目标目录结构。
@@ -41,7 +41,7 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 | 9 | ecc_dedup | 内部 | 各类 CSV/FASTA | 去重后的坐标与序列 |
 |10 | read_filter | 内部 | 原始 reads、tandem_to_ring.csv | 推断输入 FASTA |
 |11 | minimap2 | 外部（minimap2） | 参考基因组 | `.mmi` 索引（必要时自动生成） |
-|12 | ecc_inference | 外部 + 内部 | Cresil/Cyrcular 所需文件 | 推断结果 TSV/FASTA |
+|12 | ecc_inference | 内部 | 过滤后的 reads FASTA | 推断结果 TSV/FASTA |
 |13 | curate_inferred_ecc | 内部 | 推断结果 | 精炼后的表格与 FASTA（内部调用 `iecc_curator`） |
 |14 | ecc_unify | 内部 | 确认/推断 CSV | 合并表格、重叠统计 |
 |15 | ecc_summary | 内部 | 合并表、原始统计 | HTML 报告、TXT 摘要 |
@@ -54,7 +54,7 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 ### 3.1 检测阶段（CtcReads-Caller，步骤 1-6）
 
 1. **check_dependencies**
-   启动时预检外部工具与推断引擎（至少需要 Cresil 或 Cyrcular 之一）。缺失依赖会中止运行并给出安装提示。
+   启动时预检外部工具。推断引擎 SplitReads-Core 已内置，无需额外安装。
 
 2. **tidehunter**
    调用 TideHunter 检测 reads 中的串联重复，识别潜在滚环扩增事件，生成共识序列与 repeat 信息。
@@ -88,15 +88,17 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 ### 3.3 推断阶段（SplitReads-Caller，步骤 11-13）
 
 11. **minimap2**
-    检查并生成参考基因组 `.mmi` 索引，用于推断阶段。若选择 Cresil，则通常跳过 BAM 比对，仅保留索引。
+    检查并生成参考基因组 `.mmi` 索引，用于推断阶段。SplitReads-Core 使用 mappy 直接进行比对，不需要生成 BAM 文件。
 
 12. **ecc_inference**
-    - 优先调用 Cresil：对 reads 进行 trim/identify，若缺失 `.fai` 会尝试执行 `samtools faidx` 自动补建。
-    - 若 Cresil 不可用或执行失败，则尝试 Cyrcular 作为备选。
+    - 使用内置的 SplitReads-Core 进行推断：基于 split-reads 比对模式检测 eccDNA。
+    - 算法分两阶段：Trim（比对与过滤）+ Identify（图算法检测环状结构）。
+    - 若缺失 `.fai` 会尝试执行 `samtools faidx` 自动补建。
     - 推断失败会写入 `<prefix>_inference_failed.txt` 供排查。
+    - 详细算法说明请参阅 [`docs/SplitReads_Core_Algorithm.md`](SplitReads_Core_Algorithm.md)。
 
 13. **curate_inferred_ecc**
-    对推断结果进行清洗、格式化，生成简单/嵌合 CSV；若参考基因组可用且 pysam 可用，会额外生成 FASTA（内部调用 `iecc_curator` 模块）。
+    对推断结果进行清洗、格式化，生成简单/嵌合 CSV；若参考基因组可用且 pysam 可用，会额外生成 FASTA（内部调用 `iecc_curator` 模块）。输出的推断数据包含 `num_split_reads`（支持 reads 数）、`prob_present`（存在概率）、`hifi_abundance`（覆盖度估计）等指标。
 
 ### 3.4 整合阶段（Integration，步骤 14-16）
 
@@ -115,7 +117,7 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 
 ## 4. 运行时注意事项
 
-- **外部依赖** 请确认 `tidehunter`, `cd-hit-est`, `minimap2`, `samtools`, `cresil`（或 `cyrcular`）均在 `PATH` 内。若启用 LAST（`tools.alignment.aligner=last` 或 CeccBuild v4），需额外安装 LAST（`lastdb`/`lastal`）。
+- **外部依赖** 请确认 `tidehunter`, `cd-hit-est`, `minimap2`, `samtools` 均在 `PATH` 内。推断引擎 SplitReads-Core 已内置，无需额外安装。若启用 LAST 检测，需额外安装 LAST（`lastdb`/`lastal`）。
 - **检查点机制** 每个步骤开始前都会写入 `<prefix>.checkpoint`，一旦失败可通过 `--resume` 从最近步骤继续；`--force` 可清除状态后重跑。
 - **配置继承** 所有参数均由 `circleseeker.config.Config` 驱动，可通过 YAML 或 CLI 覆写。文档中的默认值等同于仓库内置配置。
 - **调试工具** `circleseeker --debug --show-steps` 可查看当前步骤状态；`show-checkpoint` 子命令能列出历史执行记录。
@@ -124,9 +126,12 @@ CircleSeeker 以 4 个阶段串联 16 个步骤，既包含外部工具调用，
 
 ## 5. 深入阅读
 
-- `src/circleseeker/core/pipeline.py` 主管线实现与状态管理
-- `src/circleseeker/config.py` 配置结构及默认值
-- `src/circleseeker/modules/` 各内部模块的详细算法
-- `tests/unit/` 单元测试示例，有助于理解输入输出契约
+- [`docs/UMC_Classification_Model.md`](UMC_Classification_Model.md) - U/M/C 分类模型与 CeccBuild 算法
+- [`docs/SplitReads_Core_Algorithm.md`](SplitReads_Core_Algorithm.md) - SplitReads-Core 推断算法详解
+- [`docs/Output_Format_Reference.md`](Output_Format_Reference.md) - 输出文件格式参考
+- `src/circleseeker/core/pipeline.py` - 主管线实现与状态管理
+- `src/circleseeker/config.py` - 配置结构及默认值
+- `src/circleseeker/modules/` - 各内部模块的详细算法
+- `tests/unit/` - 单元测试示例，有助于理解输入输出契约
 
 如文档与实际行为存在差异，欢迎提交 issue 或 pull request。

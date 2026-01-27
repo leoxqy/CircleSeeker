@@ -1,6 +1,6 @@
 # U/M/C eccDNA Coverage Model and CeccBuild Documentation
 
-This document describes the U/M classification coverage model and CeccBuild v4 detection strategy implemented in CircleSeeker. U/M classification is based on coverage and locus clustering; Cecc detection is primarily driven by LAST-based repeat pattern detection, with a graph-based chain model as fallback.
+This document describes the U/M classification coverage model and CeccBuild detection strategy implemented in CircleSeeker. U/M classification is based on coverage and locus clustering; Cecc detection is primarily driven by LAST-based repeat pattern detection, with a graph-based chain model as fallback.
 
 > Note: This document focuses on the actual logic of um_classify/cecc_build. For complete code details, please refer to `src/circleseeker/modules/um_classify.py` and `src/circleseeker/modules/cecc_build.py`.
 
@@ -54,6 +54,10 @@ Classification conditions:
 Additional constraints (optional):
 
 - `mapq_u_min`: Require best locus MAPQ >= threshold
+- `span_ratio_min`: Require genomic span / consensus length ratio >= threshold (default 0.95)
+  - Used to reduce CeccDNA being misclassified as UeccDNA
+  - When eccDNA is actually composed of multiple segments, a single locus span is typically smaller than consensus length
+  - Formula: `span_ratio = best_genomic_span / cons_len`
 - Secondary alignment veto (prevent multi-chromosome/non-contiguous mapping):
   - `u_secondary_min_frac` / `u_secondary_min_bp`
   - `u_contig_gap_bp`
@@ -74,28 +78,83 @@ Optional filters (disabled by default):
 
 ## 4. Cecc Detection
 
-### 4.1 CeccBuild v4 (LAST-first)
+### 4.1 CeccBuild Overview
 
-CeccBuild v4 uses LAST for high-precision alignment of doubled sequences, looking for repeat patterns where "first half and second half align to the same genomic location" to identify complex circles.
+CeccBuild uses LAST for high-precision alignment of doubled sequences, identifying chimeric eccDNA through graph structure analysis.
 
-Key inputs:
-- `reference_fasta`
-- `tandem_to_ring.fasta` (doubled sequences)
+**Core Concept**:
+- Input: Doubled sequence `Q = S + S` (length `2L`)
+- Alignment: Use LAST (lastal | last-split) for high-precision, optimal chain alignment
+- Analysis: Graph-based circular pattern detection
 
-Key parameters:
-- `min_match_degree` (or `theta_chain`)
-- `overlap_threshold`
-- `min_segments`
-- `half_query_buffer`
+### 4.2 Graph-based Algorithm
 
-### 4.2 Graph-based Fallback (when LAST unavailable)
+#### 4.2.1 Locus Clustering
 
-When LAST is missing or key inputs are unavailable, falls back to chain coverage model:
+Merge adjacent alignments into loci (same as U/M classification):
+- Same chromosome, same strand
+- Genomic coordinates overlap or adjacent (tolerance `position_tolerance`)
 
-- Build candidate chains based on alignment segments
-- Control adjacent gaps via `tau_gap`
-- Ensure coverage via `min_match_degree`
-- Require at least `min_segments` different loci
+#### 4.2.2 Building Directed Graph
+
+```
+G = (V, E)
+V = {locus_1, locus_2, ..., locus_n}
+E = {(locus_i, locus_j, strand_trans) | adjacent in query sequence}
+```
+
+- **Nodes**: Each locus as a node, carrying `(chr, start, end, strand)` information
+- **Edges**: Connect adjacent loci after sorting by query coordinates
+- **Strand Transitions**: Record strand direction changes between adjacent alignments (`+_+`, `+_-`, `-_+`, `-_-`)
+
+#### 4.2.3 Cycle Detection (Doubled Sequence Pattern)
+
+For doubled sequence `[A-B-C][A-B-C]`:
+- Alignment pattern should be: `A' → B → C → A → B'` (`'` indicates partial alignment)
+- Detection method: Find repeated locus sequence pattern
+- Validation conditions:
+  - First half and second half locus sequences should match (rotation equivalent)
+  - Strand transitions must satisfy closure condition (even number of flips)
+
+#### 4.2.4 Strand Closure Validation
+
+```python
+# Strand transition closure check
+flips = count(trans for trans in transitions if trans in ["+_-", "-_+"])
+valid = (flips % 2 == 0)  # Even number of flips for valid closure
+```
+
+### 4.3 LAST Alignment Pipeline
+
+```bash
+# 1. Build index
+lastdb -P threads db_prefix reference.fa
+
+# 2. Alignment + optimal chain selection
+lastal -P threads db_prefix query.fa | last-split > output.maf
+```
+
+**Role of last-split**: Selects optimal alignment chain for each query region, filtering multi-mapping noise.
+
+### 4.4 Key Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `min_match_degree` | Minimum match degree (coverage × 100) | 90.0 |
+| `overlap_threshold` | Reciprocal overlap threshold | 0.95 |
+| `min_segments` | Minimum segment count | 2 |
+| `position_tolerance` | Locus merge position tolerance | 100 bp |
+| `edge_tolerance` | Query boundary tolerance | 10 bp |
+| `half_query_buffer` | Doubled sequence midpoint buffer | 50 bp |
+
+### 4.5 Output
+
+Each detected CeccDNA includes:
+- `eccDNA_id`: Unique identifier
+- `segments`: List of genomic coordinates for each segment
+- `junction_roles`: Segment roles (head/middle/tail)
+- `match_degree`: Match degree score
+- `CeccClass`: Classification (`Cecc-InterChr` / `Cecc-IntraChr`)
 
 ---
 
@@ -108,6 +167,7 @@ When LAST is missing or key inputs are unavailable, falls back to chain coverage
 | `theta_locus` | Locus reciprocal overlap threshold | 0.95 |
 | `pos_tol_bp` | Locus boundary tolerance | 50 |
 | `mapq_u_min` | U minimum MAPQ threshold | 0 |
+| `span_ratio_min` | U genomic span / consensus length ratio minimum | 0.95 |
 | `u_secondary_min_frac` / `u_secondary_min_bp` | Secondary alignment thresholds | 0.01 / 50 |
 | `u_contig_gap_bp` | U contiguity threshold | 1000 |
 | `u_secondary_max_ratio` | Secondary/primary coverage ratio | 0.05 |

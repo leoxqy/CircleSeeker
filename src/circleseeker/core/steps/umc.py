@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Optional
 
 from circleseeker.core.pipeline_types import ResultKeys
 from circleseeker.exceptions import PipelineError
@@ -81,7 +82,7 @@ def um_classify(pipeline: Pipeline) -> None:
     try:
         query_ids = alignment_df.iloc[:, 0].astype(str)
         valid_mask = query_ids.str.count(r"\|") >= 3
-    except Exception as exc:
+    except (pd.errors.ParserError, KeyError, TypeError) as exc:
         pipeline.logger.error(f"Failed to validate alignment query IDs: {exc}")
         raise PipelineError("Alignment query_id validation failed") from exc
 
@@ -129,7 +130,6 @@ def um_classify(pipeline: Pipeline) -> None:
 def cecc_build(pipeline: Pipeline) -> None:
     """Step 5: Process Cecc candidates using cecc_build module."""
     import pandas as pd
-    import circleseeker.core.pipeline as pipeline_module
 
     unclass_input = pipeline.config.output_dir / "um_classify.unclassified.csv"
     input_csv = unclass_input
@@ -160,13 +160,9 @@ def cecc_build(pipeline: Pipeline) -> None:
 
     output_file = pipeline.config.output_dir / "cecc_build.csv"
 
-    from circleseeker.modules.cecc_build import CeccBuild as DefaultCeccBuild
+    from circleseeker.modules.cecc_build import CeccBuild
 
-    builder_cls = getattr(pipeline_module, "CeccBuild", None)
-    if builder_cls is None:
-        builder_cls = DefaultCeccBuild
-
-    builder = cast(type[Any], builder_cls)(logger=pipeline.logger.getChild("cecc_build"))
+    builder = CeccBuild(logger=pipeline.logger.getChild("cecc_build"))
     if hasattr(builder, "tmp_dir"):
         # Use the same temp directory as pipeline (no nested subdirectory)
         builder.tmp_dir = pipeline.config.output_dir
@@ -272,7 +268,7 @@ def cecc_build(pipeline: Pipeline) -> None:
             if (not df_cecc.empty and "query_id" in df_cecc.columns)
             else 0,
         )
-    except Exception as e:
+    except (OSError, ValueError, KeyError) as e:
         pipeline.logger.warning(f"cecc_build failed: {e}")
         pd.DataFrame().to_csv(output_file, index=False)
         pipeline._set_result(ResultKeys.CECC_BUILD_OUTPUT, str(output_file))
@@ -354,7 +350,7 @@ def cd_hit(pipeline: Pipeline) -> None:
 
         try:
             clstr_path = cd_hit_tool.cluster_sequences(input_fasta, output_path)
-        except Exception as e:
+        except (subprocess.CalledProcessError, OSError) as e:
             pipeline.logger.warning(f"cd-hit failed for {input_name}: {e}")
             continue
 
@@ -408,7 +404,7 @@ def _collect_ecc_dedup_inputs(pipeline: Pipeline) -> dict[str, Optional[Path]]:
 
 
 def _rename_dedup_outputs(pipeline: Pipeline) -> None:
-    """Rename eccDedup output files to standard names.
+    """Rename EccDedup output files to standard names.
 
     Args:
         pipeline: The pipeline instance
@@ -429,9 +425,9 @@ def _rename_dedup_outputs(pipeline: Pipeline) -> None:
 
 def ecc_dedup(pipeline: Pipeline) -> None:
     """Step 8: Coordinate and deduplicate results using ecc_dedup module."""
-    from circleseeker.modules.ecc_dedup import eccDedup, organize_umc_files
+    from circleseeker.modules.ecc_dedup import EccDedup, organize_umc_files
 
-    harmonizer = eccDedup(pipeline.logger.getChild("ecc_dedup"))
+    harmonizer = EccDedup(pipeline.logger.getChild("ecc_dedup"))
     output_dir = Path(pipeline.config.output_dir)
 
     # Collect input files
@@ -504,8 +500,8 @@ def ecc_dedup(pipeline: Pipeline) -> None:
                 mapped = dir_key_map.get(key.upper())
                 if mapped and directory.exists():
                     pipeline._set_result(f"ecc_dedup_{mapped}_dir", str(directory))
-        except Exception as exc:
-            pipeline.logger.warning(f"Failed to organize eccDedup outputs: {exc}")
+        except (OSError, KeyError, ValueError) as exc:
+            pipeline.logger.warning(f"Failed to organize EccDedup outputs: {exc}")
             umc_dirs = {}
 
     def _locate_output(filename: str, ecc_code: str | None = None) -> Optional[Path]:
@@ -538,7 +534,7 @@ def ecc_dedup(pipeline: Pipeline) -> None:
             pipeline._set_result(f"ecc_dedup_{ecc_type}_fasta", str(fasta_file))
             pipeline.logger.debug(f"Found harmonizer output: {fasta_file}")
         else:
-            pipeline.logger.warning(f"eccDedup output not found: {filename}")
+            pipeline.logger.warning(f"EccDedup output not found: {filename}")
 
     for ecc_type in ["Uecc", "Mecc", "Cecc"]:
         harmonized_csv = pipeline.config.output_dir / f"{pipeline.config.prefix}_{ecc_type}_harmonized.csv"

@@ -18,16 +18,12 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow, pytest.mark.external]
 
 
 def _has_inference_toolchain() -> bool:
-    has_cresil = shutil.which("cresil") is not None
-    has_cyrcular = shutil.which("cyrcular") is not None
-
-    if has_cresil:
+    # SplitReads-Core is built-in, only need mappy which is a Python package
+    try:
+        import mappy
         return True
-
-    if has_cyrcular:
-        return shutil.which("bcftools") is not None and shutil.which("varlociraptor") is not None
-
-    return False
+    except ImportError:
+        return False
 
 
 def _has_required_tools() -> bool:
