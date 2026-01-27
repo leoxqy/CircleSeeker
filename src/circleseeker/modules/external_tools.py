@@ -270,26 +270,36 @@ class Minimap2Module(ExternalToolModule):
             ]
 
             # Use Popen to safely pipe minimap2 output to samtools
+            _PIPE_TIMEOUT = 86400  # 24 hours
             minimap2_proc = None
             samtools_proc = None
             try:
-                minimap2_proc = subprocess.Popen(minimap2_cmd, stdout=subprocess.PIPE)
+                minimap2_proc = subprocess.Popen(
+                    minimap2_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
                 samtools_proc = subprocess.Popen(
                     samtools_cmd, stdin=minimap2_proc.stdout,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                 )
                 # Allow minimap2 to receive SIGPIPE if samtools exits early
                 if minimap2_proc.stdout is not None:
                     minimap2_proc.stdout.close()
 
-                _, samtools_stderr = samtools_proc.communicate()
-                minimap2_proc.wait()
+                _, samtools_stderr = samtools_proc.communicate(timeout=_PIPE_TIMEOUT)
+                minimap2_proc.wait(timeout=60)  # should already be done
+                minimap2_stderr = minimap2_proc.stderr.read() if minimap2_proc.stderr else b""
 
                 if minimap2_proc.returncode != 0 or samtools_proc.returncode != 0:
+                    stderr_parts = []
+                    if minimap2_stderr:
+                        stderr_parts.append(f"minimap2 stderr:\n{minimap2_stderr.decode(errors='replace')}")
+                    if samtools_stderr:
+                        stderr_parts.append(f"samtools stderr:\n{samtools_stderr.decode(errors='replace')}")
+                    combined_stderr = "\n".join(stderr_parts)
                     raise subprocess.CalledProcessError(
-                        samtools_proc.returncode or minimap2_proc.returncode,
+                        minimap2_proc.returncode if minimap2_proc.returncode != 0 else samtools_proc.returncode,
                         minimap2_cmd + ["|"] + samtools_cmd,
-                        stderr=samtools_stderr.decode() if samtools_stderr else ""
+                        stderr=combined_stderr,
                     )
             finally:
                 # Ensure processes are properly cleaned up with graceful termination
@@ -312,7 +322,7 @@ class Minimap2Module(ExternalToolModule):
             subprocess.run(
                 ["samtools", "index", str(output_bam)],
                 check=True,
-                timeout=600,  # 10-minute timeout for indexing
+                timeout=3600,  # 1-hour timeout for indexing
             )
 
             result.success = True
@@ -334,6 +344,10 @@ class Minimap2Module(ExternalToolModule):
                         break
 
             self.logger.info(f"Alignment completed: {output_bam}")
+
+        except subprocess.TimeoutExpired as e:
+            result.error_message = f"Alignment timed out after {e.timeout}s"
+            self.logger.error(result.error_message)
 
         except subprocess.CalledProcessError as e:
             result.error_message = f"Minimap2 failed: {e.stderr}"

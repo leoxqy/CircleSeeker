@@ -953,7 +953,7 @@ class Pipeline:
 
                     step_duration = time.time() - step_start_time
                     self.logger.error(f"Step {step_number} failed: {step_label} ({step_duration:.1f}s)")
-                    self.logger.error(f"Error: {error_msg}")
+                    self.logger.error(f"Error: {error_msg}", exc_info=True)
 
                     # Save state with failure info
                     self._save_state()
