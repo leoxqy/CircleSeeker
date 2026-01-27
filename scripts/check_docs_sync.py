@@ -27,9 +27,6 @@ BILINGUAL_PAIRS = {
 SINGLE_LANGUAGE_DOCS = {
     "UMC_Classification_Model.md",
     "Validation_Report.md",
-    "Code_Review_Report_v0.10.0.md",
-    "Implementation_Plan.md",
-    "Bilingual_Documentation_Guide.md",
 }
 
 # Maximum allowed time difference between paired documents (in days)

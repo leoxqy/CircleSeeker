@@ -80,8 +80,6 @@ exclude = ["tests*"]
 
 [tool.setuptools.package-data]
 circleseeker = [
-    "templates/*.html",
-    "templates/*.css",
     "py.typed",
 ]
 
