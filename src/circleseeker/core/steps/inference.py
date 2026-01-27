@@ -14,6 +14,7 @@ from circleseeker.exceptions import PipelineError
 
 if TYPE_CHECKING:
     from circleseeker.core.pipeline import Pipeline
+    from circleseeker.modules.splitreads_core import SplitReadsConfig
 
 
 def _get_xecc_source_read_names(xecc_fasta: Path, logger: logging.Logger) -> set[str]:
@@ -358,7 +359,7 @@ _SPLITREADS_FIELD_MAP: dict[str, str] = {
 }
 
 
-def _build_splitreads_config(raw_cfg: object, config_cls: type) -> object:
+def _build_splitreads_config(raw_cfg: object, config_cls: type[SplitReadsConfig]) -> SplitReadsConfig:
     """Create module SplitReadsConfig from pipeline config, bridging field name differences."""
     if raw_cfg is None:
         return config_cls()

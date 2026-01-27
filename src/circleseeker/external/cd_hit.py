@@ -9,7 +9,7 @@ CD-HIT-EST integrated wrapper:
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Any
+from typing import Optional, Any, Union
 import csv
 import subprocess
 import sys
@@ -413,7 +413,7 @@ class CDHitRunner:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._tool, name)
 
-    def run(self, input_fasta: Path | str, output_prefix: Path | str) -> Path:
+    def run(self, input_fasta: "Union[Path, str]", output_prefix: "Union[Path, str]") -> Path:
         """Run CD-HIT-EST with legacy interface."""
         return self._tool.cluster_sequences(Path(input_fasta), Path(output_prefix))
 

@@ -2,7 +2,7 @@
 
 import shutil
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from circleseeker.external.base import ExternalTool
 
@@ -180,6 +180,6 @@ class TideHunterRunner:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._tool, name)
 
-    def run(self, input_fasta: Path | str, output_path: Path | str) -> None:
+    def run(self, input_fasta: "Union[Path, str]", output_path: "Union[Path, str]") -> None:
         """Run TideHunter with legacy interface."""
         return self._tool.run_analysis(input_file=Path(input_fasta), output_file=Path(output_path))
