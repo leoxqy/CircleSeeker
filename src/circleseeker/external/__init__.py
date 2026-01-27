@@ -5,10 +5,8 @@ This package provides Python wrappers for external bioinformatics tools:
 - Minimap2: Sequence alignment
 - Samtools: BAM/SAM manipulation
 - CDHitEst: Sequence clustering
-- Bcftools: Variant calling utilities
-- Varlociraptor: Variant calling
-- Cyrcular: Circular DNA detection
-- Cresil: Circular DNA detection (alternative)
+
+Note: SplitReads-Core is built-in and doesn't require external tools.
 """
 
 from circleseeker.external.base import ExternalTool
@@ -17,10 +15,6 @@ from circleseeker.external.minimap2 import Minimap2
 from circleseeker.external.minimap2_align import Minimap2Aligner
 from circleseeker.external.samtools import Samtools
 from circleseeker.external.cd_hit import CDHitEst
-from circleseeker.external.bcftools import Bcftools
-from circleseeker.external.varlociraptor import Varlociraptor
-from circleseeker.external.cyrcular import Cyrcular
-from circleseeker.external.cresil import Cresil
 
 __all__ = [
     "ExternalTool",
@@ -29,8 +23,4 @@ __all__ = [
     "Minimap2Aligner",
     "Samtools",
     "CDHitEst",
-    "Bcftools",
-    "Varlociraptor",
-    "Cyrcular",
-    "Cresil",
 ]

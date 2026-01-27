@@ -20,7 +20,7 @@ from circleseeker.modules.iecc_curator import (
 @pytest.mark.integration
 @pytest.mark.requires_data
 class TestRealDataCuration:
-    """Test eccDNA curation with real Cyrcular data from the curation demo."""
+    """Test eccDNA curation with real SplitReads-Core data from the curation demo."""
 
     @pytest.fixture
     def lb_2_3_data(self):

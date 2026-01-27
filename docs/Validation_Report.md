@@ -1,7 +1,7 @@
 # CircleSeeker Batch Validation Report
 
 **Test Date**: 2026-01-14 ~ 2026-01-15
-**Version**: v1.0.0
+**Version**: v1.1.0
 **Test Environment**: Linux (fat1 server), Python 3.12.11, 32 threads
 **minimap2**: v2.30-r1287
 

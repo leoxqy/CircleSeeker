@@ -70,46 +70,6 @@ def show_pipeline_steps() -> None:
     click.echo(f"Total: {len(Pipeline.STEPS)} steps\n")
 
 
-def _detect_inference_engine() -> tuple[str | None, str | None]:
-    """
-    Detect available inference engines.
-
-    Returns:
-        Tuple of (selected_engine, fallback_engine)
-        - selected_engine: The engine that will be used ('cresil' or 'cyrcular')
-        - fallback_engine: The backup engine if available, or None
-    """
-    import shutil
-
-    has_cresil = shutil.which("cresil") is not None
-    has_cyrcular = shutil.which("cyrcular") is not None
-
-    if has_cresil:
-        return ("cresil", "cyrcular" if has_cyrcular else None)
-    if has_cyrcular:
-        return ("cyrcular", None)
-    return (None, None)
-
-
-def _format_inference_info() -> tuple[str, str | None]:
-    """
-    Format inference engine information for display.
-
-    Returns:
-        Tuple of (info_string, warning_message)
-        - info_string: The formatted string for config display
-        - warning_message: Optional warning if recommended tool is missing
-    """
-    selected, _fallback = _detect_inference_engine()
-
-    if selected is None:
-        return ("Not available", "No inference tool found. Install Cresil or Cyrcular.")
-
-    if selected == "cresil":
-        return ("Cresil", None)
-    return ("Cyrcular", "Cresil recommended")
-
-
 def execute_pipeline(
     opts: PipelineOptions,
     logger: logging.Logger,
@@ -139,7 +99,7 @@ def execute_pipeline(
     if opts.preset:
         try:
             apply_preset(cfg, opts.preset)  # type: ignore[arg-type]
-        except Exception as exc:
+        except (ValueError, KeyError) as exc:
             click.echo(f"Error: {exc}", err=True)
             sys.exit(EXIT_ERROR)
 
@@ -257,7 +217,7 @@ def execute_pipeline(
     try:
         cfg.output_dir = user_output_dir
         save_config(cfg, pipeline.final_output_dir / "config.yaml")
-    except Exception as exc:
+    except OSError as exc:
         logger.warning(f"Could not save config: {exc}")
     finally:
         cfg.output_dir = saved_output_dir  # Always restore for pipeline operation
@@ -271,13 +231,10 @@ def execute_pipeline(
     # Create formatter for beautiful output
     formatter = ConsoleFormatter()
 
-    # Detect inference engine
-    inference_info, inference_warning = _format_inference_info()
-
     # Print header
     print_formatted(formatter.header())
 
-    # Print configuration (including inference engine and preset)
+    # Print configuration
     # Use user_output_dir for display (cfg.output_dir was changed to temp_dir by Pipeline)
     preset_display = opts.preset.capitalize() if opts.preset else "Balanced"
 
@@ -297,16 +254,10 @@ def execute_pipeline(
         "reference": reference.name,
         "output_dir": str(user_output_dir.absolute()),
         "threads": cfg.threads,
-        "preset": preset_display,
-        "inference": inference_info,
     }
     if turbo_status:
         config_dict["turbo"] = turbo_status
     print_formatted(formatter.format_config(config_dict))
-
-    # Show warning if recommended tool is missing
-    if inference_warning:
-        print_formatted(f"  [!] {inference_warning}")
 
     # Show warning if turbo mode was requested but not available
     if turbo_requested and not turbo_active:

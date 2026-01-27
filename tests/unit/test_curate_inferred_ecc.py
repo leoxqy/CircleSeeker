@@ -168,9 +168,9 @@ class TestSelectBestDuplicate:
 
 class TestCurateEccTables:
     @pytest.fixture
-    def sample_cyrcular_output(self, tmp_path):
-        # Create a sample Cyrcular overview TSV
-        tsv_file = tmp_path / "cyrcular_overview.tsv"
+    def sample_overview_output(self, tmp_path):
+        # Create a sample SplitReads-Core overview TSV
+        tsv_file = tmp_path / "splitreads_overview.tsv"
         
         data = pd.DataFrame({
             'regions': [
@@ -192,8 +192,8 @@ class TestCurateEccTables:
         data.to_csv(tsv_file, sep='\t', index=False)
         return tsv_file
     
-    def test_curate_basic(self, sample_cyrcular_output):
-        simple_df, chimeric_df = curate_ecc_tables(sample_cyrcular_output)
+    def test_curate_basic(self, sample_overview_output):
+        simple_df, chimeric_df = curate_ecc_tables(sample_overview_output)
         
         # Check simple circles
         assert len(simple_df) == 2  # chr1 and best of chr2 duplicates
@@ -221,15 +221,15 @@ class TestCurateEccTables:
         assert chr3_segments[chr3_segments['seg_index'] == 1]['junction_role'].iloc[0] == 'head'
         assert chr3_segments[chr3_segments['seg_index'] == 2]['junction_role'].iloc[0] == 'tail'
     
-    def test_length_filter(self, sample_cyrcular_output):
-        simple_df, chimeric_df = curate_ecc_tables(sample_cyrcular_output)
+    def test_length_filter(self, sample_overview_output):
+        simple_df, chimeric_df = curate_ecc_tables(sample_overview_output)
         
         # Verify that circles < 100bp were filtered out
         all_lengths = pd.concat([simple_df['length'], chimeric_df['length']])
         assert all(all_lengths >= 100)
     
-    def test_coordinate_conversion(self, sample_cyrcular_output):
-        simple_df, chimeric_df = curate_ecc_tables(sample_cyrcular_output)
+    def test_coordinate_conversion(self, sample_overview_output):
+        simple_df, chimeric_df = curate_ecc_tables(sample_overview_output)
         
         # Check 1-based to 0-based conversion
         chr1_entry = simple_df[simple_df['chr'] == 'chr1'].iloc[0]
@@ -277,8 +277,8 @@ class TestCurateEccTables:
         # Invalid chimeric should be skipped
         assert chimeric_df.empty
     
-    def test_three_segment_chimeric(self, sample_cyrcular_output):
-        simple_df, chimeric_df = curate_ecc_tables(sample_cyrcular_output)
+    def test_three_segment_chimeric(self, sample_overview_output):
+        simple_df, chimeric_df = curate_ecc_tables(sample_overview_output)
         
         # Check 3-segment chimeric circle
         chr5_segments = chimeric_df[chimeric_df['chr'] == 'chr5']
@@ -374,9 +374,9 @@ class TestWriteCuratedTables:
 
 class TestProcessEccDNA:
     @pytest.fixture
-    def sample_cyrcular_output(self, tmp_path):
-        # Create a sample Cyrcular overview TSV
-        tsv_file = tmp_path / "cyrcular_overview.tsv"
+    def sample_overview_output(self, tmp_path):
+        # Create a sample SplitReads-Core overview TSV
+        tsv_file = tmp_path / "splitreads_overview.tsv"
         
         data = pd.DataFrame({
             'regions': [
@@ -395,12 +395,12 @@ class TestProcessEccDNA:
         data.to_csv(tsv_file, sep='\t', index=False)
         return tsv_file
     
-    def test_backward_compatibility(self, sample_cyrcular_output, tmp_path):
+    def test_backward_compatibility(self, sample_overview_output, tmp_path):
         # Test the backward-compatible function
         output_prefix = tmp_path / "compat_test"
 
         # This should create the files
-        process_eccDNA(sample_cyrcular_output, output_prefix)
+        process_eccDNA(sample_overview_output, output_prefix)
 
         # Check files were created in organized folder
         inferred_dir = tmp_path / "compat_test_Inferred_eccDNA"
@@ -478,7 +478,7 @@ class TestStrandDetection:
 class TestIntegration:
     def test_full_pipeline(self, tmp_path):
         # Create a comprehensive test case
-        cyrcular_file = tmp_path / "cyrcular_full.tsv"
+        splitreads_file = tmp_path / "splitreads_full.tsv"
         
         # Include various edge cases
         data = pd.DataFrame({
@@ -508,10 +508,10 @@ class TestIntegration:
             'af_nanopore': [0.05, 0.06, 0.055, 0.058, 0.07, 0.065, 0.02, 0.01, 0.08]
         })
         
-        data.to_csv(cyrcular_file, sep='\t', index=False)
+        data.to_csv(splitreads_file, sep='\t', index=False)
         
         # Process the file
-        simple_df, chimeric_df = curate_ecc_tables(cyrcular_file)
+        simple_df, chimeric_df = curate_ecc_tables(splitreads_file)
         
         # Verify results
         # Simple circles: chr1 + best chr2 duplicate + chrX (chrY filtered for length)

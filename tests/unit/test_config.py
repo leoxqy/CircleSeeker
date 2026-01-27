@@ -236,6 +236,11 @@ class TestConfig:
         with tempfile.NamedTemporaryFile(suffix=".fasta") as input_f, \
              tempfile.NamedTemporaryFile(suffix=".fa") as ref_f:
 
+            input_f.write(b">read1\nACGT\n")
+            input_f.flush()
+            ref_f.write(b">chr1\nA\n")
+            ref_f.flush()
+
             config = Config()
             config.input_file = Path(input_f.name)
             config.reference = Path(ref_f.name)
@@ -249,6 +254,11 @@ class TestConfig:
         """runtime.tmp_dir must not be '.' (would risk deleting outputs)."""
         with tempfile.NamedTemporaryFile(suffix=".fasta") as input_f, \
              tempfile.NamedTemporaryFile(suffix=".fa") as ref_f:
+
+            input_f.write(b">read1\nACGT\n")
+            input_f.flush()
+            ref_f.write(b">chr1\nA\n")
+            ref_f.flush()
 
             config = Config()
             config.input_file = Path(input_f.name)
@@ -265,6 +275,11 @@ class TestConfig:
         with tempfile.NamedTemporaryFile(suffix=".fasta") as input_f, \
              tempfile.NamedTemporaryFile(suffix=".fa") as ref_f:
 
+            input_f.write(b">read1\nACGT\n")
+            input_f.flush()
+            ref_f.write(b">chr1\nA\n")
+            ref_f.flush()
+
             config = Config()
             config.input_file = Path(input_f.name)
             config.reference = Path(ref_f.name)
@@ -280,6 +295,11 @@ class TestConfig:
         with tempfile.NamedTemporaryFile(suffix=".fasta") as input_f, \
              tempfile.NamedTemporaryFile(suffix=".fa") as ref_f:
 
+            input_f.write(b">read1\nACGT\n")
+            input_f.flush()
+            ref_f.write(b">chr1\nA\n")
+            ref_f.flush()
+
             config = Config()
             config.input_file = Path(input_f.name)
             config.reference = Path(ref_f.name)
@@ -287,6 +307,50 @@ class TestConfig:
 
             # Should not raise any exception
             config.validate()
+
+    def test_config_validate_rejects_fastq_input(self):
+        """Input file must be FASTA; FASTQ should fail fast with helpful message."""
+        with tempfile.NamedTemporaryFile(suffix=".fastq") as input_f, \
+             tempfile.NamedTemporaryFile(suffix=".fa") as ref_f:
+
+            input_f.write(b"@read1\nACGT\n+\n!!!!\n")
+            input_f.flush()
+            ref_f.write(b">chr1\nA\n")
+            ref_f.flush()
+
+            config = Config()
+            config.input_file = Path(input_f.name)
+            config.reference = Path(ref_f.name)
+            config.threads = 4  # Safe value for CI
+
+            with pytest.raises(ConfigurationError) as exc_info:
+                config.validate()
+
+            message = str(exc_info.value)
+            assert "FASTQ" in message
+            assert "requires FASTA" in message
+
+    def test_config_validate_at_header_not_fastq(self):
+        """Files starting with '@' but not FASTQ (e.g., SAM headers) must not be misdetected."""
+        with tempfile.NamedTemporaryFile(suffix=".sam") as input_f, \
+             tempfile.NamedTemporaryFile(suffix=".fa") as ref_f:
+
+            input_f.write(b"@HD\\tVN:1.6\\tSO:coordinate\\n@SQ\\tSN:chr1\\tLN:1\\n")
+            input_f.flush()
+            ref_f.write(b">chr1\\nA\\n")
+            ref_f.flush()
+
+            config = Config()
+            config.input_file = Path(input_f.name)
+            config.reference = Path(ref_f.name)
+            config.threads = 4  # Safe value for CI
+
+            with pytest.raises(ConfigurationError) as exc_info:
+                config.validate()
+
+            message = str(exc_info.value)
+            assert "FASTQ" not in message
+            assert "does not look like FASTA" in message
 
     def test_config_to_dict(self):
         """Test config to_dict conversion."""
@@ -508,6 +572,11 @@ class TestConfigIntegration:
         # Set required fields
         with tempfile.NamedTemporaryFile(suffix=".fasta") as input_f, \
              tempfile.NamedTemporaryFile(suffix=".fa") as ref_f:
+
+            input_f.write(b">read1\nACGT\n")
+            input_f.flush()
+            ref_f.write(b">chr1\nA\n")
+            ref_f.flush()
 
             config.input_file = Path(input_f.name)
             config.reference = Path(ref_f.name)

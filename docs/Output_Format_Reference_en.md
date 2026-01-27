@@ -1,6 +1,6 @@
 # CircleSeeker Output Format Reference
 
-This document describes the primary output layout and file schemas for CircleSeeker v1.0.0.
+This document describes the primary output layout and file schemas for CircleSeeker v1.1.0.
 
 ---
 
@@ -53,7 +53,10 @@ Final summary table combining Confirmed + Inferred eccDNA.
 | `eccDNA_type` | string | `UeccDNA` / `MeccDNA` / `CeccDNA` |
 | `State` | string | `Confirmed` / `Inferred` |
 | `Seg_total` | int | Segment count (U/M = 1) |
-| `Hit_count` | int | Genomic hit count |
+| `Hit_count` | int | Number of supporting reads |
+| `reads_count` | int | Number of supporting reads (same as Hit_count) |
+| `confidence_score` | float | Detection confidence (0-1, from prob_present for Inferred) |
+| `copy_number` | float | Estimated copy number (from repeat count for Confirmed, coverage for Inferred) |
 
 ---
 

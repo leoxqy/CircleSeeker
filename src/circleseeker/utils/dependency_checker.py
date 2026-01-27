@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from circleseeker.utils.logging import get_logger
+from circleseeker.exceptions import DependencyError
 
 
 @dataclass
@@ -155,37 +156,17 @@ TOOLS = [
     Tool(
         name="lastal",
         required=True,
-        purpose="High-accuracy CeccDNA detection",
+        purpose="High-accuracy CeccDNA detection (LAST aligner)",
         install_hint="conda install -c bioconda last",
-        alt_names=["lastdb"],  # Check for related LAST tools
-    ),
-    # Optional tools for advanced features
-    Tool(
-        name="bcftools",
-        required=False,
-        purpose="VCF file processing (optional)",
-        install_hint="conda install -c bioconda bcftools",
-        min_version="1.17",
+        # Note: cecc_build module checks lastal/lastdb/last-split availability
     ),
     Tool(
-        name="varlociraptor",
-        required=False,
-        purpose="Variant calling (optional)",
-        install_hint="conda install -c bioconda varlociraptor",
+        name="bedtools",
+        required=True,
+        purpose="Genomic interval operations (required by pybedtools)",
+        install_hint="conda install -c bioconda bedtools",
     ),
-    # Inference tools (at least one required)
-    Tool(
-        name="cresil",
-        required=False,
-        purpose="Circular DNA inference (preferred)",
-        install_hint="See https://github.com/visanuwan/cresil",
-    ),
-    Tool(
-        name="cyrcular",
-        required=False,
-        purpose="Circular DNA inference (fallback)",
-        install_hint="conda install -c bioconda cyrcular",
-    ),
+    # Note: SplitReads-Core is built-in and doesn't require external tools
 ]
 
 
@@ -196,7 +177,6 @@ class DependencyChecker:
         self.logger = logger or get_logger("dependency_checker")
         self.missing_required: list[Tool] = []
         self.missing_optional: list[Tool] = []
-        self.missing_inference: list[Tool] = []
         self.found_tools: list[str] = []
         self.version_warnings: list[str] = []
 
@@ -253,34 +233,8 @@ class DependencyChecker:
                     self.missing_optional.append(tool)
                     self.logger.warning(f"⚠ {tool.name} not found (optional)")
 
-        # Special check: at least one inference tool required
-        has_cresil = "cresil" in self.found_tools
-        has_cyrcular = "cyrcular" in self.found_tools
-        has_inference = has_cresil or has_cyrcular
-
-        if not has_inference:
-            self.logger.error(
-                "Missing inference tools: install at least one of 'cresil' or 'cyrcular' to proceed"
-            )
-            self.missing_inference = [tool for tool in TOOLS if tool.name in ("cresil", "cyrcular")]
-
-        # If only cyrcular available (no cresil), bcftools and varlociraptor become required
-        if has_cyrcular and not has_cresil:
-            for dep_name in ("bcftools", "varlociraptor"):
-                if dep_name not in self.found_tools:
-                    dep_tool = next((t for t in TOOLS if t.name == dep_name), None)
-                    if dep_tool:
-                        # Remove from optional list if present (avoid duplicate reporting)
-                        if dep_tool in self.missing_optional:
-                            self.missing_optional.remove(dep_tool)
-                        # Add to required list if not already there
-                        if dep_tool not in self.missing_required:
-                            self.missing_required.append(dep_tool)
-                            self.logger.error(
-                                f"✗ {dep_name} required for Cyrcular inference (REQUIRED)"
-                            )
-
-        return len(self.missing_required) == 0 and has_inference
+        # SplitReads-Core is built-in; no external inference tools required.
+        return len(self.missing_required) == 0
 
     def print_report(self) -> None:
         """Print a detailed dependency report."""
@@ -305,14 +259,6 @@ class DependencyChecker:
                 print(f"    Purpose: {tool.purpose}")
                 print(f"    Install: {tool.install_hint}")
 
-        if self.missing_inference:
-            print("\n✗ Missing inference tools (install at least one):")
-            for tool in self.missing_inference:
-                print(f"  - {tool.name}")
-                print(f"    Purpose: {tool.purpose}")
-                print(f"    Install: {tool.install_hint}")
-            print("    Note: Install any ONE of the above to proceed.")
-
         if self.missing_required:
             print("\n✗ Missing REQUIRED tools:")
             for tool in self.missing_required:
@@ -331,9 +277,9 @@ class DependencyChecker:
 
     def raise_if_missing_required(self) -> None:
         """Raise error if required dependencies are missing."""
-        if self.missing_required or self.missing_inference:
+        if self.missing_required:
             self.print_report()
-            sys.exit(1)
+            raise DependencyError("Missing required dependencies")
 
 
 def check_dependencies(logger=None, skip_tools: Optional[set[str]] = None) -> bool:
@@ -347,14 +293,14 @@ def check_dependencies(logger=None, skip_tools: Optional[set[str]] = None) -> bo
         True if all required tools are available
 
     Raises:
-        SystemExit: If required dependencies are missing
+        DependencyError: If required dependencies are missing
     """
     checker = DependencyChecker(logger=logger)
     all_ok = checker.check_all(skip_tools=skip_tools)
 
     if not all_ok:
         checker.print_report()
-        sys.exit(1)
+        raise DependencyError("Missing required dependencies")
 
     # Print warnings for missing optional tools
     if checker.missing_optional:
@@ -365,4 +311,7 @@ def check_dependencies(logger=None, skip_tools: Optional[set[str]] = None) -> bo
 
 if __name__ == "__main__":
     # Can run as standalone tool
-    check_dependencies()
+    try:
+        check_dependencies()
+    except DependencyError:
+        sys.exit(1)

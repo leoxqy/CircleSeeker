@@ -52,7 +52,7 @@ def _detect_sequence_file_format(path: Path) -> str:
                     plus = handle.readline()
                     if plus.lstrip().startswith(b"+"):
                         return "fastq"
-                    return "fastq"
+                    return "unknown"
                 return "unknown"
     except OSError:
         return "unreadable"

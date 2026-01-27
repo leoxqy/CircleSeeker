@@ -1,6 +1,6 @@
-# CircleSeeker CLI Reference (v1.0.0)
+# CircleSeeker CLI Reference (v1.1.0)
 
-This document describes the CircleSeeker 1.0.0 command-line interface for English-speaking users.
+This document describes the CircleSeeker 1.1.0 command-line interface for English-speaking users.
 
 ---
 
@@ -71,7 +71,7 @@ circleseeker --debug show-checkpoint -o results/ -p sample
 
 ## 5. Execution Lifecycle
 
-1. **Dependency check** At startup, CircleSeeker verifies that all required external tools (minimap2, samtools, cd-hit-est) and at least one inference engine (cresil or cyrcular) are available. If dependencies are missing, clear error messages with installation hints are shown.
+1. **Dependency check** At startup, CircleSeeker verifies that all required external tools (minimap2, samtools, cd-hit-est, lastal) are available. SplitReads-Core is built-in and requires only the `mappy` Python package. If dependencies are missing, clear error messages with installation hints are shown.
 2. **Temporary workspace** Intermediates live under `<output>/.tmp_work/` (configurable via `runtime.tmp_dir`, supports relative or absolute paths). Use `--keep-tmp` to retain them.
 3. **Config & checkpoints** During execution, `config.yaml` and `<prefix>.checkpoint` are saved in the output directory; they are automatically cleaned up on successful completion. Use `--keep-tmp` to preserve them for debugging or resuming interrupted runs.
 4. **Auto indexing** Missing `.mmi` or `.fai` triggers `minimap2 -d` and `samtools faidx` automatically.
@@ -85,7 +85,7 @@ For clarity, CircleSeeker describes the workflow as two evidence-driven callers:
 
 - **CtcReads**: reads carrying **Ctc** (**C**oncatemeric **t**andem **c**opies) signals (tracked as CtcR-* classes in `tandem_to_ring.csv`).
 - **CtcReads-Caller** (Steps 1–10): produces **Confirmed** U/M/C eccDNA from CtcReads evidence.
-- **SplitReads-Caller** (Steps 11–13): infers eccDNA from split-read/junction evidence (Cresil preferred, Cyrcular fallback) and produces **Inferred** eccDNA.
+- **SplitReads-Caller** (Steps 11–13): infers eccDNA from split-read/junction evidence using built-in SplitReads-Core and produces **Inferred** eccDNA.
 - **Integration** (Steps 14–16): de-redundancy, merging, reporting, and packaging for delivery.
 
 ## 7. Step Overview
@@ -104,8 +104,8 @@ For clarity, CircleSeeker describes the workflow as two evidence-driven callers:
 | 8 | `cd_hit` | Remove redundant sequences |
 | 9 | `ecc_dedup` | Harmonize coordinates |
 |10 | `read_filter` | Filter CtcR reads and build inference FASTA |
-|11 | `minimap2` | Build reference index; skip alignment when Cresil is used |
-|12 | `ecc_inference` | Cresil inference (Cyrcular fallback on failure) |
+|11 | `minimap2` | Build reference index for SplitReads-Core |
+|12 | `ecc_inference` | SplitReads-Core inference (built-in) |
 |13 | `curate_inferred_ecc` | Curate inferred eccDNA tables (`iecc_curator`) |
 |14 | `ecc_unify` | Merge confirmed and inferred tables using segment overlap algorithm for chimeric redundancy detection |
 |15 | `ecc_summary` | Generate statistics and reports |

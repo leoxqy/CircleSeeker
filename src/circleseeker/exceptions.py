@@ -47,3 +47,9 @@ class FileFormatError(CircleSeekerError):
     """Raised when file format is invalid or unsupported."""
 
     pass
+
+
+class DependencyError(CircleSeekerError):
+    """Raised when required external dependencies are missing or incompatible."""
+
+    pass

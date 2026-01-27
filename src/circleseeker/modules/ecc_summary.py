@@ -80,7 +80,7 @@ class EccSummary:
             self.logger.error(f"FASTA file not found: {fasta_path}")
             total_reads = 0
             total_length = 0
-        except Exception as e:
+        except (OSError, UnicodeDecodeError) as e:
             self.logger.error(f"Error reading FASTA file: {e}")
             total_reads = 0
             total_length = 0
@@ -101,7 +101,7 @@ class EccSummary:
 
         except FileNotFoundError:
             self.logger.warning(f"Processed CSV not found: {processed_csv}")
-        except Exception as e:
+        except (OSError, pd.errors.ParserError, pd.errors.EmptyDataError) as e:
             self.logger.error(f"Error reading processed CSV: {e}")
 
         # Calculate other reads
@@ -169,7 +169,7 @@ class EccSummary:
                 total_length += current_len
         except FileNotFoundError:
             self.logger.warning(f"FASTA file not found: {path}")
-        except Exception as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             self.logger.error(f"Failed to read FASTA {path}: {exc}")
 
         average_length = round(total_length / total_sequences, 2) if total_sequences else 0
@@ -302,7 +302,7 @@ class EccSummary:
         except FileNotFoundError:
             self.logger.error(f"Merged CSV file not found: {merged_csv}")
             self.eccdna_stats = self._get_empty_eccdna_stats()
-        except Exception as e:
+        except (OSError, pd.errors.ParserError, KeyError, ValueError) as e:
             self.logger.error(f"Error processing merged CSV: {e}")
             self.eccdna_stats = self._get_empty_eccdna_stats()
 
@@ -364,7 +364,7 @@ class EccSummary:
                 "cecc_overlap_count": 0,
                 "cecc_overlap_pct": "0.00",
             }
-        except Exception as e:
+        except (json.JSONDecodeError, OSError, KeyError) as e:
             self.logger.error(f"Error reading overlap JSON: {e}")
             self.overlap_stats = {
                 "inferred_uecc_count": 0,

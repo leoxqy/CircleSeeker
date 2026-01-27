@@ -5,6 +5,46 @@ All notable changes to CircleSeeker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-01-25
+
+### Highlights
+- **Overall F1 Score: 98.7%** (up from 93.8%)
+- **Precision: 99.2%** (up from 89.9%) - False positives reduced by 93%
+- **CeccDNA F1: 95.4%** (up from 80.0%) - Major improvement in chimeric detection
+
+### Added
+- **SplitReads-Core Algorithm Documentation**: Added `docs/SplitReads_Core_Algorithm.md` with detailed algorithm descriptions for the built-in split-read inference module.
+- **Strand-aware CeccDNA matching**: Added strand-aware matching in `ecc_unify` to properly detect redundant chimeric eccDNA considering strand orientations (same-strand and reverse-complement matching).
+- **Subset detection for CeccDNA**: Inferred CeccDNA with fewer segments that match a subset of confirmed CeccDNA segments are now correctly identified as redundant.
+- **Inferred eccDNA metrics**: `prepare_inferred_simple/chimeric` now preserves `num_split_reads`, `prob_present`, and `hifi_abundance` from SplitReads-Core output, providing `reads_count`, `confidence_score`, and `copy_number` in final output.
+
+### Changed
+- **LAST pipeline optimization**: Fixed potential deadlock by redirecting lastal stderr to DEVNULL and using streaming output to avoid memory issues with large datasets.
+- **Dependency checker**: Added `bedtools` as required dependency (for pybedtools), removed misleading `alt_names` for LAST tools.
+- **Documentation overhaul**:
+  - Updated all docs to v1.1.0
+  - Added `span_ratio_min` parameter documentation
+  - Refreshed UMC classification model with detailed CeccBuild graph algorithm descriptions
+  - Added SplitReads-Core two-phase algorithm documentation (Trim + Identify)
+
+### Fixed
+- **Strand-aware subset detection**: Fixed IndexError when `check_strand=True` but strand info is missing by defaulting to "+" strand.
+- **Reduced C→U misclassification**: The `span_ratio_min` parameter (default 0.95) now effectively prevents CeccDNA from being misclassified as UeccDNA.
+
+### Improved
+- **Default configuration**: Added `tools.splitreads` section to default config YAML with all SplitReads-Core parameters documented.
+
+### Removed
+- **splitreads_caller.py**: Removed unused alternative SplitReads implementation to reduce codebase complexity. SplitReads-Core (`splitreads_core.py`) is the sole implementation.
+
+### Performance (Demo Dataset: 1000 eccDNA)
+| Metric | v1.0.x | v1.1.0 | Change |
+|--------|--------|--------|--------|
+| Precision | 89.9% | 99.2% | +9.3% |
+| Recall | 98.1% | 98.2% | +0.1% |
+| F1 Score | 93.8% | 98.7% | +4.9% |
+| False Positives | 110 | 8 | -93% |
+
 ## [1.0.0] - 2026-01-19
 
 ### Added
@@ -48,11 +88,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.13.0] - 2026-01-18
 
 ### Changed
-- **CeccDNA detection upgraded to LAST-based V4**: Complete rewrite of cecc_build module
+- **CeccDNA detection upgraded to LAST-based method**: Complete rewrite of cecc_build module
   - Uses LAST aligner for precise alignment of doubled sequences
   - Detects "doubled repeat pattern" where first and second half align to same genomic position
-  - Falls back to graph-based detection (V3) when LAST is unavailable
-  - Achieves 100% recall and 100% precision on simulated data (vs V3's ~1.3% accuracy)
+  - Falls back to graph-based detection when LAST is unavailable
+  - Achieves 100% recall and 100% precision on simulated data
 
 ### Technical Notes
 - LAST workflow: lastdb (build database) → lastal (align) → detect circles

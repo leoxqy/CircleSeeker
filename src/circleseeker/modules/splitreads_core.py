@@ -14,16 +14,13 @@ with significant optimizations for HiFi data:
 
 from __future__ import annotations
 
-import datetime
 import logging
-import pathlib
-import tempfile
 from collections import Counter
 from dataclasses import dataclass
 from itertools import chain
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Optional
 
 import intervaltree as tree
 import mappy
@@ -272,40 +269,45 @@ def _init_trim_worker(
     _ref_merge_distance = ref_merge_distance
 
 
-def _check_read_pattern(name: str, seq: str) -> list:
-    """Check for CTC (Circular Tandem Copy) pattern in read."""
+def _align_once(name: str, seq: str) -> list[list[Any]]:
+    """Align a read once and return primary hits in the shared trim format."""
     global _ref, _mapq, _list_ex_chr
 
     if _ref is None:
         raise RuntimeError("SplitReads-Core worker not initialized (reference aligner is None)")
 
-    list_result = []
     len_seq = len(seq)
-
-    list_hit = []
+    list_hit: list[list[Any]] = []
     for hit in _ref.map(seq):
         if hit.is_primary and hit.mapq >= _mapq and hit.ctg not in _list_ex_chr:
-            list_local_hit = [
-                name,
-                hit.is_primary,
-                hit.mapq,
-                len_seq,
-                hit.q_st,
-                hit.q_en,
-                hit.ctg,
-                hit.r_st,
-                hit.r_en,
-                hit.mlen,
-                hit.blen,
-                hit.strand,
-            ]
-            list_hit.append(list_local_hit)
+            list_hit.append(
+                [
+                    name,
+                    len_seq,
+                    hit.q_st,
+                    hit.q_en,
+                    hit.ctg,
+                    hit.r_st,
+                    hit.r_en,
+                    hit.mlen,
+                    hit.blen,
+                    hit.mapq,
+                    hit.strand,
+                ]
+            )
+    return list_hit
+
+
+def _check_read_pattern(name: str, seq: str, list_hit: Optional[list[list[Any]]] = None) -> list:
+    """Check for CTC (Circular Tandem Copy) pattern in read."""
+    if list_hit is None:
+        list_hit = _align_once(name, seq)
+
+    list_result = []
 
     if len(list_hit) > 1:
         header = [
             "readid",
-            "is_primary",
-            "mapq",
             "q_len",
             "q_start",
             "q_end",
@@ -314,6 +316,7 @@ def _check_read_pattern(name: str, seq: str) -> list:
             "r_end",
             "matchLen",
             "blockLen",
+            "mapq",
             "strand",
         ]
         df_mapping = pd.DataFrame(list_hit, columns=header)
@@ -375,33 +378,13 @@ def _merge_pd_regions(prev: "PdRegion", curr: "PdRegion", columns: pd.Index) -> 
     return PdRegion(series_new)
 
 
-def _get_merge_all(name: str, seq: str) -> list:
+def _get_merge_all(name: str, seq: str, list_hit: Optional[list[list[Any]]] = None) -> list:
     """Get all merged alignments for a read."""
-    global _ref, _mapq, _list_ex_chr, _allow_gap, _allow_overlap, _ref_merge_distance
-
-    if _ref is None:
-        raise RuntimeError("SplitReads-Core worker not initialized (reference aligner is None)")
+    global _allow_gap, _allow_overlap, _ref_merge_distance
 
     list_merged_result = []
-    len_seq = len(seq)
-
-    list_hit = []
-    for hit in _ref.map(seq):
-        if hit.is_primary and hit.mapq >= _mapq and hit.ctg not in _list_ex_chr:
-            list_local_hit = [
-                name,
-                len_seq,
-                hit.q_st,
-                hit.q_en,
-                hit.ctg,
-                hit.r_st,
-                hit.r_en,
-                hit.mlen,
-                hit.blen,
-                hit.mapq,
-                hit.strand,
-            ]
-            list_hit.append(list_local_hit)
+    if list_hit is None:
+        list_hit = _align_once(name, seq)
 
     if len(list_hit) > 0:
         header = [
@@ -481,13 +464,14 @@ def _cal_pattern_trim(record: tuple[str, str]) -> list:
 
     list_result = []
 
-    list_chk_pattern = _check_read_pattern(name, seq)
+    list_hit = _align_once(name, seq)
+    list_chk_pattern = _check_read_pattern(name, seq, list_hit=list_hit)
     if len(list_chk_pattern) > 0:
         for idx, rTab in enumerate(list_chk_pattern, start=0):
             oTab = rTab + ["{:.2f}".format((rTab[3] - rTab[2]) / rTab[11]), idx, True]
             list_result.append(oTab)
     else:
-        list_merged_result = _get_merge_all(name, seq)
+        list_merged_result = _get_merge_all(name, seq, list_hit=list_hit)
         if len(list_merged_result) > 0:
             len_trim_read = list_merged_result[-1][3] - list_merged_result[0][2]
 
@@ -587,7 +571,9 @@ def check_breakpoint_direction(df_check: pd.DataFrame) -> list[tuple]:
 
 
 def chk_circular_subgraph(
-    G: nx.MultiDiGraph, graph: nx.Graph, dict_pair_strand: dict
+    G: nx.MultiDiGraph,
+    graph: nx.Graph,
+    dict_pair_strand: dict[tuple[str, str], set[str]],
 ) -> tuple[str, int, bool, bool, bool]:
     """Check if subgraph represents a circular structure."""
     list_nodes = list(graph.nodes)
@@ -601,19 +587,19 @@ def chk_circular_subgraph(
         rm_sl_subgraph = graph.copy()
         rm_sl_subgraph.remove_edges_from(nx.selfloop_edges(rm_sl_subgraph))
         solved = all(x <= 2 for x in [rm_sl_subgraph.degree[node] for node in list_nodes])
-        key_forward = repr(list_nodes)
-        key_reverse = repr(list_nodes[::-1])
+        key_forward = (list_nodes[0], list_nodes[1])
+        key_reverse = (list_nodes[1], list_nodes[0])
         cyclic = False
-        if all(x in dict_pair_strand.keys() for x in [key_forward, key_reverse]):
+        if key_forward in dict_pair_strand and key_reverse in dict_pair_strand:
             for fstrands in dict_pair_strand[key_forward]:
                 fl, fr = fstrands.split("_")
-                key_check = f"{fr}{key_reverse}{fl}"
                 for rstrands in dict_pair_strand[key_reverse]:
                     rl, rr = rstrands.split("_")
-                    key_reverse_check = f"{rl}{key_reverse}{rr}"
-                    if key_check == key_reverse_check:
+                    if fr == rl and fl == rr:
                         cyclic = True
                         break
+                if cyclic:
+                    break
     elif num_nodes > 2:
         rm_sl_subgraph = graph.copy()
         rm_sl_subgraph.remove_edges_from(nx.selfloop_edges(rm_sl_subgraph))
@@ -726,28 +712,26 @@ class SplitReadsCore:
         batch_size = 10000
         all_results: list[list[Any]] = []
 
-        for i in range(0, len(records), batch_size):
-            batch = records[i : i + batch_size]
-
-            with Pool(
-                processes=self.threads,
-                initializer=_init_trim_worker,
-                initargs=(
-                    str(self.reference_mmi),
-                    self.config.mapq,
-                    self.exclude_chrs,
-                    self.config.allow_gap,
-                    self.config.allow_overlap,
-                    self.config.preset,
-                    self.config.ref_merge_distance,
-                ),
-            ) as pool:
+        with Pool(
+            processes=self.threads,
+            initializer=_init_trim_worker,
+            initargs=(
+                str(self.reference_mmi),
+                self.config.mapq,
+                self.exclude_chrs,
+                self.config.allow_gap,
+                self.config.allow_overlap,
+                self.config.preset,
+                self.config.ref_merge_distance,
+            ),
+        ) as pool:
+            for i in range(0, len(records), batch_size):
+                batch = records[i : i + batch_size]
                 batch_results = pool.map(_cal_pattern_trim, batch)
+                all_results.extend(chain.from_iterable(batch_results))
 
-            all_results.extend(chain.from_iterable(batch_results))
-
-            if (i + batch_size) % 10000 == 0:
-                self.logger.debug(f"Processed {min(i + batch_size, len(records))} reads")
+                if (i + batch_size) % 10000 == 0:
+                    self.logger.debug(f"Processed {min(i + batch_size, len(records))} reads")
 
         if not all_results:
             return pd.DataFrame()
@@ -926,8 +910,8 @@ class SplitReadsCore:
 
         # Build graph
         self.logger.info("Analyzing breakpoint graphs")
-        dict_pair_strand: dict[str, set] = {}
-        graph: dict[str, int] = {}
+        dict_pair_strand: dict[tuple[str, str], set[str]] = {}
+        graph: dict[tuple[str, str], int] = {}
 
         for readid, group in read_merged_ins_df.groupby(by="readid"):
             df_check = group.sort_values(by="order").copy()
@@ -936,26 +920,25 @@ class SplitReadsCore:
             if len(df_check) > 1:
                 for tup_result in check_breakpoint_direction(df_check):
                     if tup_result[3]:
-                        repr_mergeid = repr([tup_result[0], tup_result[1]])
+                        pair_key = (tup_result[0], tup_result[1])
 
-                        if repr_mergeid in dict_pair_strand:
-                            dict_pair_strand[repr_mergeid].add(tup_result[2])
+                        if pair_key in dict_pair_strand:
+                            dict_pair_strand[pair_key].add(tup_result[2])
                         else:
-                            dict_pair_strand[repr_mergeid] = {tup_result[2]}
+                            dict_pair_strand[pair_key] = {tup_result[2]}
 
-                        if repr_mergeid in graph:
-                            graph[repr_mergeid] += 1
+                        if pair_key in graph:
+                            graph[pair_key] += 1
                         else:
-                            graph[repr_mergeid] = 1
+                            graph[pair_key] = 1
 
         # Filter by breakpoint depth
         graph_filt = {k: v for k, v in graph.items() if v >= self.config.breakpoint_depth}
 
         # Create NetworkX graph
         G = nx.MultiDiGraph()
-        for k in graph_filt:
-            nodes = eval(k)
-            G.add_edge(nodes[0], nodes[1], weight=graph_filt[k])
+        for (left, right), weight in graph_filt.items():
+            G.add_edge(left, right, weight=weight)
 
         # Get connected components (subgraphs)
         subgraphs = list(nx.connected_components(G.to_undirected()))
@@ -1003,8 +986,8 @@ class SplitReadsCore:
         idx: int,
         comp_nodes: set,
         G: "nx.MultiDiGraph",
-        dict_pair_strand: dict,
-        dict_majority_strand: dict,
+        dict_pair_strand: dict[tuple[str, str], set[str]],
+        dict_majority_strand: dict[str, str],
     ) -> tuple:
         """Resolve region string with strand info for one connected component."""
         gname = f"ec{idx}"
@@ -1016,22 +999,26 @@ class SplitReadsCore:
         )
 
         if len(nodes) == 1:
-            select_repr = repr([nodes[0], nodes[0]])
-            if select_repr in dict_pair_strand:
-                regions = f"{eval(select_repr)[0]}_{list(dict_pair_strand[select_repr])[0][0]}"
+            pair_key = (nodes[0], nodes[0])
+            if pair_key in dict_pair_strand:
+                strand = next(iter(dict_pair_strand[pair_key]))[0]
+                regions = f"{nodes[0]}_{strand}"
             else:
                 regions = f"{nodes[0]}_{dict_majority_strand.get(nodes[0], '+')}"
 
         elif len(nodes) == 2:
-            select_repr = repr(nodes)
-            list_region = eval(select_repr)
+            key_forward = (nodes[0], nodes[1])
+            key_reverse = (nodes[1], nodes[0])
 
-            if select_repr not in dict_pair_strand:
-                select_repr = repr(nodes[::-1])
+            if key_forward in dict_pair_strand:
+                list_strand = next(iter(dict_pair_strand[key_forward])).split("_")
+            elif key_reverse in dict_pair_strand:
+                list_strand = next(iter(dict_pair_strand[key_reverse])).split("_")[::-1]
+            else:
+                list_strand = []
 
-            if select_repr in dict_pair_strand:
-                list_strand = list(dict_pair_strand[select_repr])[0].split("_")
-                regions = ",".join(f"{x[0]}_{x[1]}" for x in zip(list_region, list_strand))
+            if list_strand:
+                regions = ",".join(f"{x}_{s}" for x, s in zip(nodes, list_strand))
             else:
                 regions = ",".join(f"{n}_{dict_majority_strand.get(n, '+')}" for n in nodes)
 
@@ -1054,23 +1041,23 @@ class SplitReadsCore:
                 for tup_check in list_order_check:
                     l_region = list_traversal[tup_check[0]]
                     r_region = list_traversal[tup_check[1]]
-                    repr_mergeid = repr([l_region, r_region])
+                    pair_key = (l_region, r_region)
 
                     list_this_level: list[list[str]] = []
 
-                    if repr_mergeid in dict_pair_strand:
-                        for str_strand in list(dict_pair_strand[repr_mergeid]):
+                    if pair_key in dict_pair_strand:
+                        for str_strand in list(dict_pair_strand[pair_key]):
                             list_str_strand = [
                                 "_".join(x)
                                 for x in zip([l_region, r_region], str_strand.split("_"))
                             ]
                             list_this_level.append(list_str_strand)
                     else:
-                        rev_repr_mergeid = repr([r_region, l_region])
-                        if rev_repr_mergeid in dict_pair_strand:
+                        rev_pair_key = (r_region, l_region)
+                        if rev_pair_key in dict_pair_strand:
                             for str_strand in [
                                 reverse_strand(x)
-                                for x in list(dict_pair_strand[rev_repr_mergeid])
+                                for x in list(dict_pair_strand[rev_pair_key])
                             ]:
                                 list_str_strand = [
                                     "_".join(x)

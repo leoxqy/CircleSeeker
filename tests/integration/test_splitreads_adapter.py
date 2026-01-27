@@ -1,4 +1,4 @@
-"""Integration tests for Cresil adapter utilities."""
+"""Integration tests for SplitReads-Core adapter utilities."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from circleseeker.modules.cresil_adapter import (
-    convert_cresil_to_cyrcular_format,
-    parse_cresil_region,
-    parse_cresil_regions,
+from circleseeker.modules.splitreads_adapter import (
+    convert_splitreads_to_overview_format,
+    parse_splitreads_region,
+    parse_splitreads_regions,
 )
 
 pytestmark = pytest.mark.integration
@@ -24,13 +24,13 @@ pytestmark = pytest.mark.integration
         ("chr10:131725754-131727108_-", ("chr10", 131725754, 131727108, "-")),
     ],
 )
-def test_parse_cresil_region(region_str: str, expected: tuple[str, int, int, str]) -> None:
-    assert parse_cresil_region(region_str) == expected
+def test_parse_splitreads_region(region_str: str, expected: tuple[str, int, int, str]) -> None:
+    assert parse_splitreads_region(region_str) == expected
 
 
-def test_parse_cresil_regions_multiple() -> None:
+def test_parse_splitreads_regions_multiple() -> None:
     multi_region = "chr2:47242017-47243061_-;chr2:47250000-47252000_-"
-    parsed = parse_cresil_regions(multi_region)
+    parsed = parse_splitreads_regions(multi_region)
 
     assert parsed == [
         ("chr2", 47242017, 47243061, "-"),
@@ -38,8 +38,8 @@ def test_parse_cresil_regions_multiple() -> None:
     ]
 
 
-def test_convert_cresil_to_cyrcular_format(tmp_path: Path) -> None:
-    cresil_data = {
+def test_convert_splitreads_to_overview_format(tmp_path: Path) -> None:
+    splitreads_data = {
         "id": ["ec1", "ec2", "ec3", "ec4", "ec5"],
         "merge_region": [
             "chr2:47242017-47243061_-",
@@ -56,11 +56,11 @@ def test_convert_cresil_to_cyrcular_format(tmp_path: Path) -> None:
         "coverage": [50.26, 24.00, 29.17, 48.0, 20.0],
     }
 
-    df = pd.DataFrame(cresil_data)
-    test_file = tmp_path / "test_cresil_output.txt"
+    df = pd.DataFrame(splitreads_data)
+    test_file = tmp_path / "test_splitreads_output.txt"
     df.to_csv(test_file, sep="\t", index=False)
 
-    result_df = convert_cresil_to_cyrcular_format(test_file)
+    result_df = convert_splitreads_to_overview_format(test_file)
 
     expected_cols = {
         "circle_id",

@@ -173,7 +173,7 @@ class ConsoleFormatter:
             except ValueError:
                 pass
 
-        except Exception as e:
+        except (OSError, ValueError) as e:
             # Path resolution failed (e.g., permission denied, invalid path)
             # Log at debug level and fall back to original string
             import logging
@@ -197,8 +197,6 @@ class ConsoleFormatter:
             lines.append(self.format_line("", "Output dir", output_path))
         if "threads" in config:
             lines.append(self.format_line("", "Threads", str(config["threads"])))
-        if "inference" in config:
-            lines.append(self.format_line("", "Inference", str(config["inference"])))
         if "turbo" in config:
             lines.append(self.format_line("", "Turbo mode", str(config["turbo"])))
 

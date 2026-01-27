@@ -136,8 +136,8 @@ class Sieve:
                         self.reads_to_filter.add(read_name)
                         self.stats.csv_ctcr_reads += 1
 
-        except Exception as e:
-            raise PipelineError(f"Error loading classification CSV: {e}")
+        except (OSError, UnicodeDecodeError, csv.Error, ValueError, KeyError) as e:
+            raise PipelineError(f"Error loading classification CSV: {e}") from e
 
         # Log statistics
         self.logger.info(f"Loaded {self.stats.csv_total_reads} classifications")
@@ -314,6 +314,6 @@ class Sieve:
 
             return stats
 
-        except Exception as e:
+        except (OSError, ValueError, RuntimeError) as e:
             self.logger.error(f"Sieve pipeline failed: {e}")
             raise PipelineError(f"Sieve filtering failed: {e}")

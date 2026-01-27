@@ -208,7 +208,7 @@ class ColumnStandardizer:
                     try:
                         df[new_col] = df[new_col].apply(COORDINATE_CONVERSIONS[old_col])
                         conversions[f"{old_col}_converted"] = "Applied coordinate conversion"
-                    except Exception as e:
+                    except (KeyError, TypeError, ValueError) as e:
                         warnings.warn(f"Failed to convert coordinates for {old_col}: {e}")
 
         # Handle unknown columns

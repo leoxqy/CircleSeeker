@@ -1,6 +1,6 @@
 # CircleSeeker Validation Methodology
 
-**Version**: v1.0.0
+**Version**: v1.1.0
 **Last Updated**: 2026-01-15
 
 This document describes the simulation-based validation methodology used to evaluate CircleSeeker's eccDNA detection performance.

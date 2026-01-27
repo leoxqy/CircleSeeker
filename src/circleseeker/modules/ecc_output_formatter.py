@@ -29,7 +29,6 @@ Output directory structure:
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -87,9 +86,13 @@ def renumber_with_padding(df: pd.DataFrame, width: int = 4) -> pd.DataFrame:
     df["_state_order"] = df["State"].map(state_order).fillna(2)
     df = df.sort_values(["_type_order", "_state_order"]).reset_index(drop=True)
 
-    # Assign new IDs (vectorized: avoid iterrows)
-    new_ids = []
-    for ecc_type in ["UeccDNA", "MeccDNA", "CeccDNA"]:
+    # Assign new IDs – iterate in canonical order, then append any
+    # unexpected types so len(new_ids) always matches len(df).
+    known_types = ["UeccDNA", "MeccDNA", "CeccDNA"]
+    remaining_types = [t for t in df["eccDNA_type"].unique() if t not in known_types]
+
+    new_ids: list[str] = []
+    for ecc_type in known_types + remaining_types:
         count = (df["eccDNA_type"] == ecc_type).sum()
         new_ids.extend(format_eccdna_id(ecc_type, i, width) for i in range(1, count + 1))
 
@@ -679,7 +682,11 @@ def format_output(
     unified_df = renumber_with_padding(unified_df, id_width)
 
     # Build ID mapping for updating other tables
-    id_map = dict(zip(unified_df["original_id"], unified_df["eccDNA_id"]))
+    # renumber_with_padding() stores pre-renumber IDs in '_old_eccDNA_id';
+    # also honour 'original_id' if it already exists (e.g. ICeccDNA1).
+    id_map = dict(zip(unified_df["_old_eccDNA_id"], unified_df["eccDNA_id"]))
+    if "original_id" in unified_df.columns:
+        id_map.update(zip(unified_df["original_id"], unified_df["eccDNA_id"]))
 
     # Update IDs in type-specific tables
     if uecc_df is not None:

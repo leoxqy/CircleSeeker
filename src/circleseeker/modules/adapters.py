@@ -95,7 +95,7 @@ class CLIModuleAdapter(ModuleBase):
                 result.error_message = process.stderr
                 self.logger.error(f"{self.name} failed: {process.stderr}")
 
-        except Exception as e:
+        except (subprocess.CalledProcessError, OSError, RuntimeError) as e:
             result.error_message = str(e)
             self.logger.error(f"{self.name} exception: {e}")
 

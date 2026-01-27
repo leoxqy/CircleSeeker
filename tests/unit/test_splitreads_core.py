@@ -476,8 +476,8 @@ class TestChkCircularSubgraph:
         G.add_edge("B", "A")
         subgraph = G.to_undirected().subgraph(["A", "B"])
         dict_pair_strand = {
-            repr(["A", "B"]): {"+_+"},
-            repr(["B", "A"]): {"+_+"},
+            ("A", "B"): {"+_+"},
+            ("B", "A"): {"+_+"},
         }
         result = chk_circular_subgraph(G, subgraph, dict_pair_strand)
         assert result[4] is True  # cyclic
@@ -487,7 +487,7 @@ class TestChkCircularSubgraph:
         G.add_edge("A", "B")
         subgraph = G.to_undirected().subgraph(["A", "B"])
         # Only one direction, strand pairs don't form a cycle match
-        dict_pair_strand = {repr(["A", "B"]): {"+_-"}}
+        dict_pair_strand = {("A", "B"): {"+_-"}}
         result = chk_circular_subgraph(G, subgraph, dict_pair_strand)
         assert result[4] is False  # not cyclic
 

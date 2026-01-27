@@ -1,6 +1,6 @@
-"""Curate and split Cyrcular overview TSV into simple/chimeric eccDNA tables.
+"""Curate and split SplitReads-Core overview TSV into simple/chimeric eccDNA tables.
 
-This module processes Cyrcular output and generates:
+This module processes SplitReads-Core inference output and generates:
 1. CSV tables for simple and chimeric eccDNA candidates
 2. Optional FASTA sequences extracted from reference genome
    - Simple eccDNA: single sequence from reference
@@ -195,6 +195,7 @@ def generate_fasta_sequences(
     simple_fasta = output_prefix.parent / f"{output_prefix.name}_UeccDNA_I.fasta"
     chimeric_fasta = output_prefix.parent / f"{output_prefix.name}_CeccDNA_I.fasta"
 
+    fasta = None
     try:
         # Open reference genome
         fasta = pysam.FastaFile(str(reference_fasta))
@@ -223,7 +224,7 @@ def generate_fasta_sequences(
                                 f.write(sequence[i : i + 60] + "\n")
                         else:
                             logger.warning(f"Could not extract sequence for {eccDNA_id}")
-                    except Exception as e:
+                    except (ValueError, IndexError, OSError) as e:
                         logger.warning(f"Error extracting sequence for {eccDNA_id}: {e}")
             simple_fasta_path = simple_fasta
 
@@ -257,7 +258,7 @@ def generate_fasta_sequences(
                                 logger.warning(
                                     f"Could not extract segment {seg_idx} for {eccDNA_id}"
                                 )
-                        except Exception as e:
+                        except (ValueError, IndexError, OSError) as e:
                             logger.warning(
                                 f"Error extracting segment {seg_idx} for {eccDNA_id}: {e}"
                             )
@@ -277,12 +278,17 @@ def generate_fasta_sequences(
                             f.write(full_sequence[i : i + 60] + "\n")
             chimeric_fasta_path = chimeric_fasta
 
-        fasta.close()
         return simple_fasta_path, chimeric_fasta_path
 
-    except Exception as e:
+    except (ValueError, IndexError, OSError) as e:
         logger.error(f"Error generating FASTA sequences: {e}")
         return None, None
+    finally:
+        if fasta is not None:
+            try:
+                fasta.close()
+            except Exception:
+                pass
 
 
 def write_curated_tables_with_fasta(
@@ -374,7 +380,7 @@ def process_eccDNA(
     Process eccDNA data with optional FASTA generation.
 
     Args:
-        input_tsv: Input Cyrcular overview TSV file
+        input_tsv: Input SplitReads-Core overview TSV file
         output_prefix: Output file prefix
         reference_fasta: Optional path to reference genome for FASTA generation
         organize_files: If True, organize outputs into Inferred_eccDNA folder
@@ -416,9 +422,9 @@ def _parse_args() -> Any:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Curate Cyrcular overview TSV into inferred eccDNA tables and optional FASTA"
+        description="Curate SplitReads-Core overview TSV into inferred eccDNA tables and optional FASTA"
     )
-    parser.add_argument("-i", "--input", required=True, help="Input Cyrcular overview TSV file")
+    parser.add_argument("-i", "--input", required=True, help="Input SplitReads-Core overview TSV file")
     parser.add_argument("-o", "--output-prefix", required=True, help="Output prefix (no extension)")
     parser.add_argument(
         "-r",

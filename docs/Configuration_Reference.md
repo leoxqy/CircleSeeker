@@ -1,6 +1,6 @@
 # CircleSeeker 配置参考手册
 
-本手册完整列出 CircleSeeker v1.0.0 所有配置选项，包括默认值、取值范围及使用说明。
+本手册完整列出 CircleSeeker v1.1.0 所有配置选项，包括默认值、取值范围及使用说明。
 
 ---
 
@@ -151,7 +151,7 @@ circleseeker --debug --generate-config > config.yaml
 
 ### 4.4 CeccDNA 构建器 (`tools.cecc_build`)
 
-CeccBuild v4 以 LAST 为主进行检测，缺失 LAST 或关键输入时回退到图方法。
+CeccBuild 以 LAST 为主进行检测，缺失 LAST 或关键输入时回退到图方法。
 
 | 参数 | 类型 | 默认值 | 取值范围 | 说明 |
 |------|------|--------|----------|------|
@@ -204,7 +204,7 @@ CeccBuild v4 以 LAST 为主进行检测，缺失 LAST 或关键输入时回退�
 
 ### 4.7 Minimap2 推断比对 (`tools.minimap2`)
 
-用于推断阶段（Cyrcular）比对的 minimap2 配置。
+用于推断阶段（SplitReads-Core）比对的 minimap2 配置。
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -223,6 +223,27 @@ tools:
 ```
 
 ---
+
+### 4.9 SplitReads-Caller（`tools.splitreads`）
+
+内置的 split-read/图论推断模块，针对 HiFi 数据优化。需要 `mappy` Python 包。
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `mapq_threshold` | int | `30` | split 比对的最小 MAPQ |
+| `gap_tolerance` | int | `10` | read 坐标合并容差（bp） |
+| `overlap_tolerance` | int | `10` | overlap 合并容差（bp） |
+| `min_region_size` | int | `200` | 最小合并区域长度（bp） |
+| `overlap_check_size` | int | `50` | 断点检测窗口（bp） |
+| `min_breakpoint_depth` | int | `3` | 每个 junction/breakpoint 的最小支持数 |
+| `min_avg_depth` | float | `5.0` | 合并区域的最小平均深度 |
+| `min_inferred_chimeric_segments` | int | `3` | 推断 CeccDNA 的最小片段数（降低假阳性） |
+| `min_inferred_two_segment_split_reads` | int | `0` | 若 >0，则允许 2 段 CeccDNA（需 `num_split_reads` >= 此阈值） |
+| `exclude_chrs` | string | `""` | 需要排除的染色体（逗号分隔） |
+
+说明：
+- `min_inferred_chimeric_segments=3` 为偏重 precision 的默认值，针对推断嵌合圈的高假阳性场景。
+- 若希望保留 2 段推断 CeccDNA，可设置 `min_inferred_chimeric_segments=2`；或设置 `min_inferred_two_segment_split_reads` 仅放行高支持的 2 段候选。
 
 ## 5. 完整配置示例
 

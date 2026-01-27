@@ -28,10 +28,6 @@ from circleseeker.core.steps.definitions import PIPELINE_STEPS
 # Step execution lives in `circleseeker.core.steps.*` and is imported lazily by
 # wrapper methods on `Pipeline` to keep imports light.
 
-# DEPRECATED: Backward-compat patch target for tests/downstream monkeypatching.
-# This will be removed in a future release; avoid relying on this alias.
-CeccBuild: Any = None
-
 class Pipeline:
     """Main pipeline orchestrator with complete fixes."""
 
@@ -144,19 +140,15 @@ class Pipeline:
         self.state.results.pop(key, None)
 
     def _select_inference_tool(self) -> str:
-        """Determine which inference tool to use (Cresil preferred)."""
+        """Determine which inference tool to use.
+
+        SplitReads-Core is the built-in tool, optimized for HiFi data.
+        It is always available as all required dependencies are bundled.
+        """
         if self._inference_tool is None:
-            if shutil.which("cresil"):
-                self._inference_tool = "cresil"
-                self.logger.debug("Selected Cresil for eccDNA inference")
-            elif shutil.which("cyrcular"):
-                self._inference_tool = "cyrcular"
-                self.logger.debug("Selected Cyrcular for eccDNA inference")
-            else:
-                raise PipelineError(
-                    "Neither cresil nor cyrcular found in PATH. "
-                    "Please install at least one tool for circular DNA inference."
-                )
+            # SplitReads-Core is built-in and always available
+            self._inference_tool = "splitreads_core"
+            self.logger.debug("Selected SplitReads-Core for eccDNA inference (built-in, HiFi optimized)")
         return self._inference_tool
 
     def _ensure_reference_mmi(self) -> Path:
@@ -508,17 +500,8 @@ class Pipeline:
             self.temp_dir = configured_tmp
             self._temp_dir_safe_to_delete = False
         else:
-            # Validate relative path
-            if configured_tmp == Path(".") or str(configured_tmp).strip() in {"", "."}:
-                raise ConfigurationError(
-                    "Invalid runtime.tmp_dir: must be a subdirectory (not '.'). "
-                    "Use an absolute path if you want an external temp directory."
-                )
-            if ".." in configured_tmp.parts:
-                raise ConfigurationError(
-                    "Invalid runtime.tmp_dir: must not contain '..'. "
-                    "Use an absolute path if you want an external temp directory."
-                )
+            # Basic path safety (no '.', no '..') is enforced by Config.validate().
+            # Here we only check output_dir-specific constraints.
 
             # Check if output_dir is already a temp directory from previous run
             if config.output_dir.name == configured_tmp.name:
@@ -606,29 +589,17 @@ class Pipeline:
                             "Checkpoint policy = continue; resuming with existing checkpoint"
                         )
 
-                legacy_step_map = {"cyrcular_calling": "ecc_inference"}
-
-                def _remap_step_name(name: Optional[str]) -> Optional[str]:
-                    if not name:
-                        return name
-                    return legacy_step_map.get(name, name)
-
                 # Reconstruct step metadata
                 step_metadata = {}
                 for step_name, meta_data in data.get("step_metadata", {}).items():
-                    normalized_name = legacy_step_map.get(step_name, step_name)
                     metadata = StepMetadata(**meta_data)
-                    metadata.step_name = normalized_name
-                    step_metadata[normalized_name] = metadata
+                    metadata.step_name = step_name
+                    step_metadata[step_name] = metadata
 
                 state = PipelineState(
-                    completed_steps=[
-                        normalized
-                        for name in data.get("completed_steps", [])
-                        if (normalized := _remap_step_name(name))
-                    ],
-                    current_step=_remap_step_name(data.get("current_step")),
-                    failed_step=_remap_step_name(data.get("failed_step")),
+                    completed_steps=data.get("completed_steps", []),
+                    current_step=data.get("current_step"),
+                    failed_step=data.get("failed_step"),
                     results=data.get("results", {}),
                     step_metadata=step_metadata,
                     pipeline_start_time=data.get("pipeline_start_time"),
@@ -726,7 +697,7 @@ class Pipeline:
                     if cleanup_path and cleanup_path.exists():
                         cleanup_path.unlink()
                         self.logger.debug(f"Removed auxiliary file: {cleanup_path}")
-                except Exception as exc:
+                except OSError as exc:
                     self.logger.warning(f"Could not remove auxiliary file {cleanup_path}: {exc}")
 
             # Handle turbo mode cleanup
@@ -736,7 +707,7 @@ class Pipeline:
                 self.logger.info(f"Cleaning up temporary directory: {self.temp_dir}")
                 try:
                     shutil.rmtree(self.temp_dir)
-                except Exception as e:
+                except OSError as e:
                     self.logger.warning(f"Could not completely remove temp directory: {e}")
             else:
                 # Absolute path - don't auto-delete for safety
@@ -779,7 +750,7 @@ class Pipeline:
                 if self._turbo_shm_path.exists():
                     shutil.move(str(self._turbo_shm_path), str(dest_dir))
                     self.logger.info(f"Temporary files retained in: {dest_dir}")
-            except Exception as e:
+            except OSError as e:
                 self.logger.warning(f"Could not move turbo temp files: {e}")
                 self.logger.info(
                     f"Temporary files may remain in: {self._turbo_shm_path}"
@@ -797,7 +768,7 @@ class Pipeline:
                 if self._turbo_shm_path.exists():
                     shutil.rmtree(self._turbo_shm_path)
                     self.logger.info("Turbo mode temp files cleaned up successfully")
-            except Exception as e:
+            except OSError as e:
                 self.logger.warning(
                     f"Could not completely clean up turbo temp files: {e}\n"
                     f"Please manually remove: {self._turbo_shm_path}"
@@ -1103,31 +1074,25 @@ class Pipeline:
         read_filter(self)
 
     def _step_minimap2(self) -> None:
-        """Step 11: Prepare mapping artifacts (alignment optional for Cresil)."""
+        """Step 11: Prepare mapping artifacts (alignment optional for SplitReads-Core)."""
         from circleseeker.core.steps.inference import minimap2
 
         minimap2(self)
 
     def _step_ecc_inference(self) -> None:
-        """Step 12: Circular DNA detection - Cresil preferred, Cyrcular fallback."""
+        """Step 12: Circular DNA detection using SplitReads-Core (built-in, HiFi optimized)."""
         from circleseeker.core.steps.inference import ecc_inference
 
         ecc_inference(self)
 
-    def _run_cresil_inference(self) -> None:
-        """Run Cresil inference pipeline (replaces Steps 10-11 when available)."""
-        from circleseeker.core.steps.inference import run_cresil_inference
+    def _run_splitreads_core_inference(self) -> None:
+        """Run SplitReads-Core inference pipeline (built-in, HiFi optimized)."""
+        from circleseeker.core.steps.inference import run_splitreads_core_inference
 
-        run_cresil_inference(self)
-
-    def _run_cyrcular_inference(self) -> None:
-        """Run Cyrcular inference pipeline (original implementation)."""
-        from circleseeker.core.steps.inference import run_cyrcular_inference
-
-        run_cyrcular_inference(self)
+        run_splitreads_core_inference(self)
 
     def _step_curate_inferred_ecc(self) -> list[str] | None:
-        """Step 12: Curate inferred eccDNA simple/chimeric tables from Cyrcular overview TSV."""
+        """Step 12: Curate inferred eccDNA simple/chimeric tables from SplitReads-Core output."""
         from circleseeker.core.steps.inference import curate_inferred_ecc
 
         return curate_inferred_ecc(self)

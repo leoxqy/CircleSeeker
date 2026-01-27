@@ -38,15 +38,13 @@ def validate_installation(full_check: bool = False) -> list[str]:
     # Check external tools (basic check)
     if full_check:
         # CircleSeeker external tools with alternative names
+        # Note: SplitReads-Core is built-in and doesn't require external tools
         external_tools = [
             ("TideHunter", ["tidehunter"]),  # bioconda may install as lowercase
             ("minimap2", None),  # Required for sequence alignment
             ("cd-hit-est", None),  # Required for sequence clustering
             ("samtools", None),
-            ("bcftools", None),  # Optional: required for Cyrcular
-            ("cyrcular", None),  # Optional: inference engine (fallback)
-            ("varlociraptor", None),  # Optional: required for Cyrcular
-            ("cresil", None),  # Optional: inference engine (preferred)
+            ("lastal", None),  # Required for CeccDNA detection
         ]
 
         for tool_name, alt_names in external_tools:

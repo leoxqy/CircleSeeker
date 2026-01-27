@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Any
 import csv
+import subprocess
 import sys
 import re
 
@@ -203,13 +204,13 @@ class CDHitEst(ExternalTool):
                     clstr_size = clstr_path.stat().st_size
                     self.logger.debug(f"Representative file size: {rep_size} bytes")
                     self.logger.debug(f"Cluster file size: {clstr_size} bytes")
-                except Exception as e:
+                except OSError as e:
                     self.logger.debug(f"Could not get file sizes: {e}")
             else:
                 self.logger.warning(f"Cluster file not found: {clstr_path}")
             return clstr_path
 
-        except Exception as e:
+        except (subprocess.CalledProcessError, OSError) as e:
             self.logger.error(f"CD-HIT-EST failed: {e}")
             raise
 
@@ -380,13 +381,18 @@ class CDHitEst(ExternalTool):
             self.logger.info(f"Cluster statistics: {stats}")
             return stats
 
-        except Exception as e:
+        except (OSError, ValueError, KeyError) as e:
             self.logger.error(f"Error parsing cluster file: {e}")
             return {}
 
 
-class CDHitRunner(CDHitEst):
-    """Backward compatibility wrapper for existing code."""
+class CDHitRunner:
+    """Backward compatibility wrapper for legacy code.
+
+    Note: This wrapper intentionally does not inherit from CDHitEst/ExternalTool so that it
+    can expose a legacy high-level `run(input_fasta, output_prefix)` method without
+    violating the ExternalTool.run contract.
+    """
 
     def __init__(
         self,
@@ -402,11 +408,14 @@ class CDHitRunner(CDHitEst):
         extra: Optional[list[str]] = None,
     ):
         """Initialize with legacy parameter names."""
-        super().__init__(threads=threads, c=c, n=n, s=s, aS=aS, aL=aL, G=G, d=d, M=M, extra=extra)
+        self._tool = CDHitEst(threads=threads, c=c, n=n, s=s, aS=aS, aL=aL, G=G, d=d, M=M, extra=extra)
 
-    def run(self, input_fasta: Path, output_prefix: Path) -> Path:  # type: ignore[override]
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._tool, name)
+
+    def run(self, input_fasta: Path | str, output_prefix: Path | str) -> Path:
         """Run CD-HIT-EST with legacy interface."""
-        return self.cluster_sequences(input_fasta, output_prefix)
+        return self._tool.cluster_sequences(Path(input_fasta), Path(output_prefix))
 
 
 def _parse_args() -> Any:
@@ -454,7 +463,7 @@ def main() -> None:
 
         logger.info(f"Clustering done! Output: {output_prefix} and {csv_file}")
 
-    except Exception as e:
+    except (subprocess.CalledProcessError, OSError) as e:
         logger.error(f"CD-HIT-EST failed: {e}")
         raise
 

@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
+import pandas as pd
+
 from circleseeker.core.pipeline_types import ResultKeys
 from circleseeker.exceptions import PipelineError
 
@@ -28,23 +30,20 @@ def _get_xecc_source_read_names(xecc_fasta: Path, logger: logging.Logger) -> set
 
     read_names: set[str] = set()
     try:
-        with open(xecc_fasta, "r") as f:
+        with open(xecc_fasta, "rb") as f:
             for line in f:
-                if line.startswith(">"):
+                if line.startswith(b">"):
                     # Parse ID: >readName|repN|consLen|copyNum|circular or similar
                     header_parts = line[1:].split()
                     if not header_parts:
                         continue  # Skip malformed headers
-                    seq_id = header_parts[0]
+                    seq_id = header_parts[0].decode("utf-8", errors="replace")
                     # Original read name is the first part before |
                     original_read_name = seq_id.split("|")[0]
                     if original_read_name:
                         read_names.add(original_read_name)
     except OSError as e:
         logger.warning(f"Failed to parse XeccDNA FASTA (I/O error): {e}")
-        return set()
-    except UnicodeDecodeError as e:
-        logger.warning(f"Failed to parse XeccDNA FASTA (encoding error): {e}")
         return set()
 
     logger.info(f"Found {len(read_names)} unique source reads from XeccDNA")
@@ -118,9 +117,6 @@ def _append_reads_from_fasta(
     except OSError as e:
         logger.warning(f"Failed to append XeccDNA source reads (I/O error): {e}")
         return 0
-    except UnicodeDecodeError as e:
-        logger.warning(f"Failed to append XeccDNA source reads (encoding error): {e}")
-        return 0
 
     if appended_count > 0:
         logger.info(f"Appended {appended_count} XeccDNA source reads to inference input")
@@ -173,7 +169,7 @@ def read_filter(pipeline: Pipeline) -> None:
 
 
 def minimap2(pipeline: Pipeline, *, force_alignment: bool = False) -> None:
-    """Step 10: Prepare mapping artifacts (alignment optional for Cresil)."""
+    """Step 10: Prepare mapping artifacts (alignment optional for SplitReads-Core)."""
     from circleseeker.external.minimap2 import Minimap2, MiniMapConfig
 
     sieve_output = pipeline._get_result(ResultKeys.READ_FILTER_OUTPUT_FASTA)
@@ -209,7 +205,7 @@ def minimap2(pipeline: Pipeline, *, force_alignment: bool = False) -> None:
                             if last_byte is not None and last_byte != 10:
                                 out_f.write(b"\n")
                             seen_fastas.add(fasta_path)
-        except Exception as e:
+        except OSError as e:
             pipeline.logger.error(f"Failed to create combined FASTA: {e}")
             raise
 
@@ -245,9 +241,10 @@ def minimap2(pipeline: Pipeline, *, force_alignment: bool = False) -> None:
     reference_mmi = pipeline._ensure_reference_mmi()
     pipeline._set_result(ResultKeys.REFERENCE_MMI, str(reference_mmi))
 
-    inference_tool = pipeline._select_inference_tool()
-    if inference_tool == "cresil" and not force_alignment:
-        pipeline.logger.info("Cresil selected; skipping minimap2 alignment (BAM not required)")
+    # SplitReads-Core is built-in and doesn't need BAM alignment
+    # It uses mappy directly for alignment
+    if not force_alignment:
+        pipeline.logger.info("SplitReads-Core selected; skipping minimap2 alignment (BAM not required)")
         return
 
     # Read minimap2 config from pipeline configuration
@@ -277,15 +274,15 @@ def minimap2(pipeline: Pipeline, *, force_alignment: bool = False) -> None:
 
 
 def ecc_inference(pipeline: Pipeline) -> None:
-    """Step 11: Circular DNA detection - Cresil preferred, Cyrcular fallback."""
+    """Step 11: Circular DNA detection using SplitReads-Core (built-in, HiFi optimized)."""
     pipeline._del_result(ResultKeys.INFERENCE_FAILED)
     pipeline._del_result(ResultKeys.INFERENCE_ERROR)
     pipeline._del_result(ResultKeys.INFERENCE_ERROR_FILE)
 
     if pipeline._get_result(ResultKeys.INFERENCE_INPUT_EMPTY):
         pipeline.logger.warning("Inference input FASTA empty; skipping eccDNA inference")
-        pipeline._set_result(ResultKeys.CYRCULAR_RESULT_COUNT, 0)
-        pipeline._set_result(ResultKeys.CYRCULAR_OVERVIEW, None)
+        pipeline._set_result(ResultKeys.INFERENCE_RESULT_COUNT, 0)
+        pipeline._set_result(ResultKeys.INFERENCE_OVERVIEW, None)
         return
 
     all_filtered = pipeline._get_result(ResultKeys.ALL_FILTERED_FASTA)
@@ -293,20 +290,22 @@ def ecc_inference(pipeline: Pipeline) -> None:
         all_filtered_path = Path(all_filtered)
         if all_filtered_path.exists() and all_filtered_path.stat().st_size == 0:
             pipeline.logger.warning("Inference input FASTA empty; skipping eccDNA inference")
-            pipeline._set_result(ResultKeys.CYRCULAR_RESULT_COUNT, 0)
-            pipeline._set_result(ResultKeys.CYRCULAR_OVERVIEW, None)
+            pipeline._set_result(ResultKeys.INFERENCE_RESULT_COUNT, 0)
+            pipeline._set_result(ResultKeys.INFERENCE_OVERVIEW, None)
             return
 
-    def _mark_inference_failed(tool_name: str, exc: Exception) -> None:
-        pipeline.logger.warning(
-            "eccDNA inference failed (%s); continuing without inferred eccDNA: %s",
-            tool_name,
-            exc,
+    def _mark_inference_failed(exc: Exception) -> None:
+        import traceback
+
+        # Inference is a best-effort step; keep the pipeline running but make debugging easy.
+        pipeline.logger.exception(
+            "eccDNA inference failed; continuing without inferred eccDNA",
         )
+        error_text = f"{type(exc).__name__}: {exc}"
         pipeline._set_result(ResultKeys.INFERENCE_FAILED, True)
-        pipeline._set_result(ResultKeys.INFERENCE_ERROR, str(exc))
-        pipeline._set_result(ResultKeys.CYRCULAR_RESULT_COUNT, 0)
-        pipeline._set_result(ResultKeys.CYRCULAR_OVERVIEW, None)
+        pipeline._set_result(ResultKeys.INFERENCE_ERROR, error_text)
+        pipeline._set_result(ResultKeys.INFERENCE_RESULT_COUNT, 0)
+        pipeline._set_result(ResultKeys.INFERENCE_OVERVIEW, None)
         pipeline._set_result(ResultKeys.INFERRED_SIMPLE_TSV, None)
         pipeline._set_result(ResultKeys.INFERRED_CHIMERIC_TSV, None)
         pipeline._set_result(ResultKeys.INFERRED_SIMPLE_FASTA, None)
@@ -321,8 +320,11 @@ def ecc_inference(pipeline: Pipeline) -> None:
                     [
                         "eccDNA inference failed; CircleSeeker continued without inferred eccDNA.",
                         "step: ecc_inference",
-                        f"tool: {tool_name}",
-                        f"error: {exc}",
+                        "tool: SplitReads-Core",
+                        f"error: {error_text}",
+                        "",
+                        "traceback:",
+                        traceback.format_exc().rstrip(),
                         "",
                         "Confirmed eccDNA outputs generated before inference should still be present.",
                     ]
@@ -334,47 +336,62 @@ def ecc_inference(pipeline: Pipeline) -> None:
                 ResultKeys.INFERENCE_ERROR_FILE,
                 pipeline._serialize_path_for_state(marker),
             )
-        except Exception as write_exc:  # pragma: no cover
+        except OSError as write_exc:  # pragma: no cover
             pipeline.logger.debug("Failed to write inference failure marker: %s", write_exc)
 
-    def _run_cyrcular_fallback(cresil_exc: Exception) -> bool:
-        pipeline.logger.warning(
-            "Cresil failed (%s); attempting Cyrcular fallback", cresil_exc
-        )
-        bam_path = pipeline._get_result(ResultKeys.MINIMAP2_BAM)
-        if not (bam_path and Path(bam_path).exists()):
-            pipeline.logger.info("Preparing minimap2 alignment for Cyrcular fallback")
-            minimap2(pipeline, force_alignment=True)
-            bam_path = pipeline._get_result(ResultKeys.MINIMAP2_BAM)
-        if not (bam_path and Path(bam_path).exists()):
-            pipeline.logger.warning(
-                "Cyrcular fallback skipped: minimap2 BAM not available"
-            )
-            return False
-        pipeline._run_cyrcular_inference()
-        return True
-
-    tool = "unknown"
     try:
-        tool = pipeline._select_inference_tool()
-        if tool == "cresil":
-            pipeline.logger.info("Using Cresil for circular DNA detection (preferred)")
-            try:
-                pipeline._run_cresil_inference()
-            except Exception as exc:
-                if not _run_cyrcular_fallback(exc):
-                    _mark_inference_failed(tool_name="cresil", exc=exc)
-        else:
-            pipeline.logger.info("Using Cyrcular for circular DNA detection (fallback)")
-            pipeline._run_cyrcular_inference()
-    except Exception as exc:
-        _mark_inference_failed(tool_name=tool, exc=exc)
+        pipeline.logger.info("Using SplitReads-Core for circular DNA detection (built-in, HiFi optimized)")
+        pipeline._run_splitreads_core_inference()
+    except (PipelineError, OSError, ValueError, RuntimeError) as exc:
+        _mark_inference_failed(exc=exc)
 
 
-def run_cresil_inference(pipeline: Pipeline) -> None:
-    """Run Cresil inference pipeline (replaces Steps 10-11 when available)."""
-    from circleseeker.external.cresil import Cresil
-    from circleseeker.modules.cresil_adapter import write_cyrcular_compatible_tsv
+# Pipeline config → module config field name mapping.
+# The pipeline-level SplitReadsConfig (config.py) uses descriptive names
+# while the module-level SplitReadsConfig (splitreads_core.py) uses short names.
+_SPLITREADS_FIELD_MAP: dict[str, str] = {
+    "mapq_threshold": "mapq",
+    "gap_tolerance": "allow_gap",
+    "overlap_tolerance": "allow_overlap",
+    "min_breakpoint_depth": "breakpoint_depth",
+    "min_avg_depth": "average_depth",
+}
+
+
+def _build_splitreads_config(raw_cfg: object, config_cls: type) -> object:
+    """Create module SplitReadsConfig from pipeline config, bridging field name differences."""
+    if raw_cfg is None:
+        return config_cls()
+
+    if isinstance(raw_cfg, config_cls):
+        return raw_cfg
+
+    # Extract raw dict from whatever object we have
+    if isinstance(raw_cfg, dict):
+        raw_dict = dict(raw_cfg)
+    else:
+        raw_dict = {
+            k: getattr(raw_cfg, k)
+            for k in dir(raw_cfg)
+            if not k.startswith("_") and not callable(getattr(raw_cfg, k, None))
+        }
+
+    # Apply field name mapping (pipeline names → module names)
+    mapped: dict[str, object] = {}
+    for key, value in raw_dict.items():
+        mapped_key = _SPLITREADS_FIELD_MAP.get(key, key)
+        mapped[mapped_key] = value
+
+    try:
+        return config_cls.from_dict(mapped)
+    except (ValueError, TypeError):
+        return config_cls()
+
+
+def run_splitreads_core_inference(pipeline: Pipeline) -> None:
+    """Run SplitReads-Core inference pipeline (built-in, HiFi optimized)."""
+    from circleseeker.modules.splitreads_core import SplitReadsCore, SplitReadsConfig
+    from circleseeker.modules.splitreads_adapter import write_overview_tsv
 
     sieve_output = pipeline._get_result(ResultKeys.READ_FILTER_OUTPUT_FASTA)
 
@@ -384,11 +401,11 @@ def run_cresil_inference(pipeline: Pipeline) -> None:
         input_fasta = pipeline.config.output_dir / f"{pipeline.config.prefix}_all_filtered.fasta"
         if not input_fasta.exists() or input_fasta.stat().st_size == 0:
             pipeline.logger.warning(
-                "No filtered FASTA found; skipping Cresil inference. "
+                "No filtered FASTA found; skipping SplitReads-Core inference. "
                 "Inference requires filtered reads from earlier pipeline steps."
             )
-            pipeline._set_result(ResultKeys.CYRCULAR_RESULT_COUNT, 0)
-            pipeline._set_result(ResultKeys.CYRCULAR_OVERVIEW, None)
+            pipeline._set_result(ResultKeys.INFERENCE_RESULT_COUNT, 0)
+            pipeline._set_result(ResultKeys.INFERENCE_OVERVIEW, None)
             return
 
     reference_mmi_str = pipeline._get_result(ResultKeys.REFERENCE_MMI)
@@ -399,84 +416,63 @@ def run_cresil_inference(pipeline: Pipeline) -> None:
     if reference_mmi is None:
         raise PipelineError("Failed to create or locate reference MMI index")
 
-    cresil = Cresil(logger=pipeline.logger.getChild("cresil"))
-
-    output_dir = pipeline.config.output_dir / "cresil_output"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
     reference_fasta = pipeline.config.reference
     if reference_fasta is None:
         raise PipelineError("Reference genome is required")
 
-    pipeline.logger.info("Running Cresil pipeline (trim + identify)")
-    eccDNA_final = cresil.run_full_pipeline(
-        fasta_query=input_fasta,
-        reference_fasta=reference_fasta,
+    # Ensure .fai index exists for reference
+    reference_fai = Path(str(reference_fasta) + ".fai")
+    if not reference_fai.exists():
+        from circleseeker.external.samtools import Samtools
+        samtools = Samtools(logger=pipeline.logger.getChild("samtools"))
+        samtools.faidx(reference_fasta)
+
+    output_dir = pipeline.config.output_dir / "splitreads_core_output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Get configuration from pipeline config
+    splitreads_cfg = getattr(pipeline.config.tools, "splitreads", None)
+    splitreads_config = _build_splitreads_config(splitreads_cfg, SplitReadsConfig)
+
+    # Initialize SplitReadsCore (built-in, HiFi optimized)
+    splitreads_core = SplitReadsCore(
         reference_mmi=reference_mmi,
-        output_dir=output_dir,
+        config=splitreads_config,
+        logger=pipeline.logger.getChild("splitreads_core"),
         threads=pipeline.config.threads,
-        split_reads=True,
     )
 
-    pipeline.logger.info("Converting Cresil output to Cyrcular-compatible format")
+    pipeline.logger.info("Running SplitReads-Core pipeline (built-in, HiFi optimized)")
+    eccDNA_final = splitreads_core.run(
+        input_fasta=input_fasta,
+        chrom_sizes_file=reference_fai,
+        output_dir=output_dir,
+    )
+
+    if not eccDNA_final.exists():
+        raise FileNotFoundError(
+            f"SplitReads-Core did not produce expected output: {eccDNA_final}"
+        )
+
+    pipeline.logger.info("Converting SplitReads-Core output to internal format")
     overview_tsv = pipeline.config.output_dir / f"{pipeline.config.prefix}_overview.tsv"
-    write_cyrcular_compatible_tsv(eccDNA_final, overview_tsv)
+    write_overview_tsv(eccDNA_final, overview_tsv)
 
     if overview_tsv.exists():
         pipeline._set_result(
-            ResultKeys.CYRCULAR_OVERVIEW,
+            ResultKeys.INFERENCE_OVERVIEW,
             pipeline._serialize_path_for_state(overview_tsv),
         )
-        import pandas as pd
-
         df = pd.read_csv(overview_tsv, sep="\t")
-        pipeline._set_result(ResultKeys.CYRCULAR_RESULT_COUNT, len(df))
-        pipeline.logger.info(f"Cresil detected {len(df)} circular DNA candidates")
+        pipeline._set_result(ResultKeys.INFERENCE_RESULT_COUNT, len(df))
+        pipeline.logger.info(f"SplitReads-Core detected {len(df)} circular DNA candidates")
     else:
-        pipeline.logger.warning("Cresil output conversion failed")
-        pipeline._set_result(ResultKeys.CYRCULAR_RESULT_COUNT, 0)
-
-
-def run_cyrcular_inference(pipeline: Pipeline) -> None:
-    """Run Cyrcular inference pipeline (original implementation)."""
-    from circleseeker.modules.cyrcular_calling import PipelineConfig as CCConfig
-    from circleseeker.modules.cyrcular_calling import CyrcularCallingPipeline
-
-    bam_file = pipeline._get_result(ResultKeys.MINIMAP2_BAM)
-    if not bam_file or not Path(bam_file).exists():
-        pipeline.logger.warning("No BAM file from minimap2, skipping Cyrcular-Calling step")
-        return
-
-    reference = pipeline.config.reference
-    if reference is None:
-        raise PipelineError("Reference genome is required")
-
-    cfg = CCConfig(
-        bam_file=Path(bam_file),
-        reference=reference,
-        output_dir=pipeline.config.output_dir,
-        sample_name=pipeline.config.prefix,
-        threads=pipeline.config.threads,
-    )
-
-    cyrcular_pipeline = CyrcularCallingPipeline(cfg, logger=pipeline.logger.getChild("cyrcular_calling"))
-    results = cyrcular_pipeline.run()
-
-    overview = cyrcular_pipeline.file_paths.get("overview_table")
-    if overview and overview.exists():
-        pipeline._set_result(
-            ResultKeys.CYRCULAR_OVERVIEW,
-            pipeline._serialize_path_for_state(overview),
-        )
-    else:
-        pipeline.logger.warning(
-            "Cyrcular overview table not found; inferred eccDNA curation may be skipped"
-        )
-    pipeline._set_result(ResultKeys.CYRCULAR_RESULT_COUNT, len(results) if results else 0)
+        pipeline.logger.warning("SplitReads-Core output conversion failed")
+        pipeline._set_result(ResultKeys.INFERENCE_RESULT_COUNT, 0)
 
 
 def curate_inferred_ecc(pipeline: Pipeline) -> list[str] | None:
-    """Step 12: Curate inferred eccDNA tables from Cyrcular overview TSV."""
+    """Step 12: Curate inferred eccDNA tables from SplitReads-Core overview TSV."""
     from circleseeker.modules.iecc_curator import (
         curate_ecc_tables,
         write_curated_tables,
@@ -494,14 +490,14 @@ def curate_inferred_ecc(pipeline: Pipeline) -> list[str] | None:
         pipeline._set_result(ResultKeys.INFERRED_DIR, None)
         return None
 
-    overview_path_str = pipeline._get_result(ResultKeys.CYRCULAR_OVERVIEW)
+    overview_path_str = pipeline._get_result(ResultKeys.INFERENCE_OVERVIEW)
 
     overview_path_obj = pipeline._resolve_stored_path(
         overview_path_str,
         [f"{pipeline.config.prefix}_overview.tsv"],
     )
     if not overview_path_obj:
-        pipeline.logger.warning("Cyrcular overview table missing; skipping inferred eccDNA curation")
+        pipeline.logger.warning("SplitReads-Core overview table missing; skipping inferred eccDNA curation")
         pipeline._set_result(ResultKeys.INFERRED_SIMPLE_TSV, None)
         pipeline._set_result(ResultKeys.INFERRED_CHIMERIC_TSV, None)
         pipeline._set_result(ResultKeys.INFERRED_SIMPLE_FASTA, None)
@@ -510,11 +506,47 @@ def curate_inferred_ecc(pipeline: Pipeline) -> list[str] | None:
         return None
 
     pipeline._set_result(
-        ResultKeys.CYRCULAR_OVERVIEW,
+        ResultKeys.INFERENCE_OVERVIEW,
         pipeline._serialize_path_for_state(overview_path_obj),
     )
 
     simple_df, chimeric_df = curate_ecc_tables(overview_path_obj)
+
+    # Optional (opt-in) filter to suppress false positives from inferred
+    # CeccDNA.  Empirically, 2-segment chimeric circles are the dominant FP
+    # mode for split-read graph inference.  The filter activates only when
+    # the user explicitly raises min_inferred_chimeric_segments above 2 or
+    # sets min_inferred_two_segment_split_reads > 0 in the config.
+    try:
+        splitreads_cfg = pipeline.config.tools.splitreads
+        min_seg = int(getattr(splitreads_cfg, "min_inferred_chimeric_segments", 2))
+        min_two_seg_splits = int(getattr(splitreads_cfg, "min_inferred_two_segment_split_reads", 0))
+    except (AttributeError, ValueError, TypeError):
+        min_seg = 2
+        min_two_seg_splits = 0
+
+    if (
+        not chimeric_df.empty
+        and {"eccDNA_id", "seg_total", "num_split_reads"}.issubset(chimeric_df.columns)
+        and (min_seg > 2 or min_two_seg_splits > 0)
+    ):
+        before = int(chimeric_df["eccDNA_id"].nunique())
+        keep_mask = chimeric_df["seg_total"] >= min_seg
+        if min_two_seg_splits > 0:
+            keep_mask |= (chimeric_df["seg_total"] == 2) & (
+                chimeric_df["num_split_reads"] >= min_two_seg_splits
+            )
+        chimeric_df = chimeric_df.loc[keep_mask].copy()
+        after = int(chimeric_df["eccDNA_id"].nunique())
+        if after != before:
+            pipeline.logger.info(
+                "Filtered inferred chimeric eccDNA: %d -> %d circles "
+                "(min_segments=%d, min_two_segment_split_reads=%d)",
+                before,
+                after,
+                min_seg,
+                min_two_seg_splits,
+            )
 
     inferred_prefix = pipeline.config.output_dir / pipeline.config.prefix
     reference_for_inferred: Optional[Path] = None
@@ -542,7 +574,7 @@ def curate_inferred_ecc(pipeline: Pipeline) -> list[str] | None:
                 organize_files=True,
             )
         )
-    except Exception as exc:
+    except (OSError, ValueError, KeyError) as exc:
         pipeline.logger.warning(f"Failed to generate inferred eccDNA tables with FASTA: {exc}")
         simple_csv_path, chimeric_csv_path = write_curated_tables(
             simple_df,
