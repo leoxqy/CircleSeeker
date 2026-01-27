@@ -49,6 +49,8 @@ jobs:
             python-version: "3.11"
           - os: ubuntu-latest
             python-version: "3.12"
+          - os: macos-13
+            python-version: "3.12"
 
     steps:
       - name: Checkout
