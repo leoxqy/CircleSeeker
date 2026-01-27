@@ -246,9 +246,10 @@ class TestUmcProcess:
 
 class TestCdHit:
     def test_missing_fasta_skips(self, mock_pipeline):
-        cd_hit(mock_pipeline)
-        # Should warn for each missing file
-        assert mock_pipeline.logger.warning.call_count >= 1
+        with patch("circleseeker.external.cd_hit.CDHitEst"):
+            cd_hit(mock_pipeline)
+            # Should warn for each missing file
+            assert mock_pipeline.logger.warning.call_count >= 1
 
     def test_with_fasta_runs_clustering(self, mock_pipeline, tmp_path):
         fasta = tmp_path / "sample_UeccDNA_pre.fasta"
