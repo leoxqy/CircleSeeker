@@ -274,9 +274,7 @@ class Minimap2Module(ExternalToolModule):
             minimap2_proc = None
             samtools_proc = None
             try:
-                minimap2_proc = subprocess.Popen(
-                    minimap2_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                )
+                minimap2_proc = subprocess.Popen(minimap2_cmd, stdout=subprocess.PIPE)
                 samtools_proc = subprocess.Popen(
                     samtools_cmd, stdin=minimap2_proc.stdout,
                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
@@ -287,12 +285,9 @@ class Minimap2Module(ExternalToolModule):
 
                 _, samtools_stderr = samtools_proc.communicate(timeout=_PIPE_TIMEOUT)
                 minimap2_proc.wait(timeout=60)  # should already be done
-                minimap2_stderr = minimap2_proc.stderr.read() if minimap2_proc.stderr else b""
 
                 if minimap2_proc.returncode != 0 or samtools_proc.returncode != 0:
                     stderr_parts = []
-                    if minimap2_stderr:
-                        stderr_parts.append(f"minimap2 stderr:\n{minimap2_stderr.decode(errors='replace')}")
                     if samtools_stderr:
                         stderr_parts.append(f"samtools stderr:\n{samtools_stderr.decode(errors='replace')}")
                     combined_stderr = "\n".join(stderr_parts)
