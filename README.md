@@ -66,7 +66,7 @@ cd CircleSeeker
 pip install -e .
 ```
 
-> **Note**: CircleSeeker includes SplitReads-Core as a built-in inference module (HiFi optimized). No external inference tools are required.
+> **Note**: CircleSeeker includes SplitReads-Core, a built-in inference module inspired by [CReSIL](https://github.com/Peppermint-Lab/CReSIL) and optimized for HiFi long reads. No external inference tools are required.
 
 ## Quick Start
 
@@ -289,7 +289,7 @@ For a complete list of configuration options, see the [Configuration Reference](
 | Module | Description |
 |--------|-------------|
 | CtcReads-Core | TideHunter-based confirmed eccDNA detection |
-| SplitReads-Core | Built-in split-read inference (HiFi optimized) |
+| SplitReads-Core | Built-in split-read inference inspired by [CReSIL](https://github.com/Peppermint-Lab/CReSIL), optimized for HiFi |
 
 ## Troubleshooting
 
@@ -344,7 +344,7 @@ For detailed documentation, see the `docs/` directory:
 
 - [Pipeline Modules](docs/Pipeline_Modules.md) - Detailed algorithm descriptions
 - [UMC Classification Model](docs/UMC_Classification_Model.md) - U/M/C classification and CeccBuild algorithm
-- [SplitReads-Core Algorithm](docs/SplitReads_Core_Algorithm.md) - Built-in split-read inference algorithm
+- [SplitReads-Core Algorithm](docs/SplitReads_Core_Algorithm.md) - Built-in split-read inference algorithm (inspired by [CReSIL](https://github.com/Peppermint-Lab/CReSIL))
 - [CLI Reference](docs/CLI_Reference.md) - Complete command-line options
 - [Validation Methodology](docs/Validation_Methodology_en.md) - Synthetic U/M/C validation and recall benchmark
 
