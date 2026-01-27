@@ -14,7 +14,7 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Sequence, Union
+from typing import Any, Optional, Sequence, Union
 
 import numpy as np
 import pandas as pd
@@ -558,6 +558,20 @@ class MeccProcessor(BaseEccProcessor):
             if signature:
                 signature_to_queries[signature].append(query_id)
 
+        # Pre-build lookup: (query_id, chr, start0, end0) → row metrics
+        has_copynum = "copy_number" in df.columns
+        has_gap = "Gap_Percentage" in df.columns
+        segment_lookup: dict[tuple[Any, Any, Any, Any], dict[str, Any]] = {}
+        for qid, grp in query_id_to_group.items():
+            for row in grp.itertuples(index=False):
+                key = (qid, row.chr, row.start0, row.end0)
+                row_metrics: dict[str, Any] = {}
+                if has_copynum:
+                    row_metrics["copy_number"] = row.copy_number
+                if has_gap:
+                    row_metrics["Gap_Percentage"] = row.Gap_Percentage
+                segment_lookup.setdefault(key, row_metrics)
+
         rows_to_keep = []
         cluster_id = 0
 
@@ -571,40 +585,35 @@ class MeccProcessor(BaseEccProcessor):
             representative_group = query_id_to_group[representative_qid].copy()
 
             # For each location in the representative group
-            for idx, rep_row in representative_group.iterrows():
-                chr_match = rep_row["chr"]
-                start_match = rep_row["start0"]
-                end_match = rep_row["end0"]
+            for row in representative_group.itertuples(index=True):
+                idx = row.Index
+                chr_match = row.chr
+                start_match = row.start0
+                end_match = row.end0
 
                 # Aggregate copy_number
-                if "copy_number" in representative_group.columns:
-                    total_copynum = 0
+                if has_copynum:
+                    total_copynum = 0.0
                     for qid in query_ids:
-                        group = query_id_to_group[qid]
-                        matching_rows = group[
-                            (group["chr"] == chr_match)
-                            & (group["start0"] == start_match)
-                            & (group["end0"] == end_match)
-                        ]
-                        if not matching_rows.empty:
-                            copynum_val = matching_rows.iloc[0].get("copy_number", 0)
-                            if pd.notna(copynum_val):
-                                total_copynum += copynum_val
+                        segment_metrics = segment_lookup.get(
+                            (qid, chr_match, start_match, end_match)
+                        )
+                        if segment_metrics is not None:
+                            copynum_val = segment_metrics.get("copy_number")
+                            if copynum_val is not None and pd.notna(copynum_val):
+                                total_copynum += float(copynum_val)
                     representative_group.loc[idx, "copy_number"] = total_copynum
 
                 # Aggregate Gap_Percentage
-                if "Gap_Percentage" in representative_group.columns:
-                    gaps = []
+                if has_gap:
+                    gaps: list[float] = []
                     for qid in query_ids:
-                        group = query_id_to_group[qid]
-                        matching_rows = group[
-                            (group["chr"] == chr_match)
-                            & (group["start0"] == start_match)
-                            & (group["end0"] == end_match)
-                        ]
-                        if not matching_rows.empty:
-                            gap = matching_rows.iloc[0].get("Gap_Percentage")
-                            if pd.notna(gap):
+                        segment_metrics = segment_lookup.get(
+                            (qid, chr_match, start_match, end_match)
+                        )
+                        if segment_metrics is not None:
+                            gap = segment_metrics.get("Gap_Percentage")
+                            if gap is not None and pd.notna(gap):
                                 gaps.append(float(gap))
 
                     if gaps:
@@ -913,6 +922,14 @@ class CeccProcessor(BaseEccProcessor):
             if signature:
                 signature_to_queries[signature].append(query_id)
 
+        # Pre-build lookup: (query_id, chr, start0, end0) → copy_number
+        has_copynum = "copy_number" in df.columns
+        segment_lookup: dict[tuple[Any, Any, Any, Any], Any] = {}
+        if has_copynum:
+            for qid, grp in query_id_to_group.items():
+                for row in grp.itertuples(index=False):
+                    segment_lookup.setdefault((qid, row.chr, row.start0, row.end0), row.copy_number)
+
         rows_to_keep = []
         cluster_id = 0
 
@@ -925,25 +942,19 @@ class CeccProcessor(BaseEccProcessor):
             representative_group = query_id_to_group[representative_qid].copy()
 
             # Aggregate values for each segment
-            for idx, rep_row in representative_group.iterrows():
-                chr_match = rep_row["chr"]
-                start_match = rep_row["start0"]
-                end_match = rep_row["end0"]
+            for row in representative_group.itertuples(index=True):
+                idx = row.Index
+                chr_match = row.chr
+                start_match = row.start0
+                end_match = row.end0
 
                 # Aggregate copy_number
-                if "copy_number" in representative_group.columns:
-                    total_copynum = 0
+                if has_copynum:
+                    total_copynum = 0.0
                     for qid in query_ids:
-                        group = query_id_to_group[qid]
-                        matching_rows = group[
-                            (group["chr"] == chr_match)
-                            & (group["start0"] == start_match)
-                            & (group["end0"] == end_match)
-                        ]
-                        if not matching_rows.empty:
-                            copynum_val = matching_rows.iloc[0].get("copy_number", 0)
-                            if pd.notna(copynum_val):
-                                total_copynum += copynum_val
+                        copynum_val = segment_lookup.get((qid, chr_match, start_match, end_match))
+                        if copynum_val is not None and pd.notna(copynum_val):
+                            total_copynum += float(copynum_val)
 
                     if total_copynum > 0:
                         representative_group.loc[idx, "copy_number"] = total_copynum

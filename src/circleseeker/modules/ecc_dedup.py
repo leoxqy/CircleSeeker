@@ -1414,21 +1414,19 @@ class EccDedup:
             # Sort by chr, start0 for consistent ordering
             group = group.sort_values([ColumnStandard.CHR, ColumnStandard.START0])
 
-            # Track which positions we've seen
-            seen_positions: list[tuple[str, int, int]] = []
+            # Track seen positions by chromosome for fast lookup
+            seen_by_chr: dict[str, list[tuple[int, int]]] = {}
             keep_indices: list[int] = []
 
-            for idx, row in group.iterrows():
-                chr_val = str(row[ColumnStandard.CHR])
-                start0 = int(row[ColumnStandard.START0])
-                end0 = int(row[ColumnStandard.END0])
+            for row in group.itertuples(index=True):
+                idx = row.Index
+                chr_val = str(getattr(row, ColumnStandard.CHR))
+                start0 = int(getattr(row, ColumnStandard.START0))
+                end0 = int(getattr(row, ColumnStandard.END0))
 
                 # Check if this position is already covered
                 is_duplicate = False
-                for seen_chr, seen_start, seen_end in seen_positions:
-                    if chr_val != seen_chr:
-                        continue
-
+                for seen_start, seen_end in seen_by_chr.get(chr_val, ()):
                     # Check overlap with tolerance
                     # Two positions are considered the same if they overlap significantly
                     overlap_start = max(start0, seen_start)
@@ -1449,7 +1447,7 @@ class EccDedup:
                         break
 
                 if not is_duplicate:
-                    seen_positions.append((chr_val, start0, end0))
+                    seen_by_chr.setdefault(chr_val, []).append((start0, end0))
                     keep_indices.append(idx)
 
             rows_to_keep.extend(keep_indices)
