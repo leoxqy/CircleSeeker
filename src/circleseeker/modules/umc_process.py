@@ -358,13 +358,12 @@ class UeccProcessor(BaseEccProcessor):
 
                 result_rows.append(representative)
             else:
-                # Unclustered
-                for _, row in group.iterrows():
-                    row_copy = row.copy()
-                    row_copy["cluster_id"] = 0
-                    row_copy["cluster_size"] = 1
-                    row_copy["cluster_members"] = row["query_id"]
-                    result_rows.append(row_copy)
+                # Unclustered - use vectorized assignment
+                unclustered = group.copy()
+                unclustered["cluster_id"] = 0
+                unclustered["cluster_size"] = 1
+                unclustered["cluster_members"] = unclustered["query_id"]
+                result_rows.extend(unclustered.to_dict("records"))
 
         result_df = pd.DataFrame(result_rows)
 
@@ -387,11 +386,13 @@ class UeccProcessor(BaseEccProcessor):
         sequences_found = 0
         sequences_missing = 0
 
-        # For UeccDNA, process each row directly
-        for idx, row in df.iterrows():
-            query_id = row["query_id"]
-            q_start = row["q_start"]
-            cons_len = row["length"]
+        # For UeccDNA, process each row directly using itertuples for performance
+        eseq_values: list[str] = [""] * len(df)
+        for row in df.itertuples():
+            idx = row.Index
+            query_id = row.query_id
+            q_start = row.q_start
+            cons_len = row.length
 
             seq_str = self.seq_library.find_sequence(query_id)
 
@@ -399,7 +400,7 @@ class UeccProcessor(BaseEccProcessor):
                 try:
                     extracted_seq = extract_ring_sequence(seq_str, int(q_start), int(cons_len))
                     extracted_seq = canonicalize_circular_sequence(extracted_seq)
-                    df.loc[idx, "eSeq"] = extracted_seq
+                    eseq_values[df.index.get_loc(idx)] = extracted_seq
                     sequences_found += 1
                 except (ValueError, IndexError, TypeError) as e:
                     self.logger.debug(f"Failed to extract sequence for {query_id}: {e}")
@@ -407,32 +408,40 @@ class UeccProcessor(BaseEccProcessor):
             else:
                 sequences_missing += 1
 
+        df["eSeq"] = eseq_values
+
         self.logger.debug(f"Sequences extracted: {sequences_found}, missing: {sequences_missing}")
         return df
 
     def add_numbering_and_export(self, df: pd.DataFrame) -> pd.DataFrame:
         """Add UeccDNA IDs and prepare FASTA records."""
         df = df.copy()
-        df["eccDNA_id"] = "NA"
 
         if "eSeq" not in df.columns:
+            df["eccDNA_id"] = "NA"
             return df
 
-        for idx, row in df.iterrows():
-            seq = row["eSeq"]
+        # Use itertuples for performance with list-based assignment
+        eccDNA_ids: list[str] = ["NA"] * len(df)
+        has_cluster_id = "cluster_id" in df.columns
+
+        for row in df.itertuples():
+            seq = row.eSeq
             if seq and len(seq) > 0:
                 self.counter += 1
                 eccDNA_id = f"U{self.counter}"
-                df.loc[idx, "eccDNA_id"] = eccDNA_id
+                eccDNA_ids[df.index.get_loc(row.Index)] = eccDNA_id
 
-                query_id = row["query_id"]
-                if "cluster_id" in df.columns and row["cluster_id"] > 0:
-                    description = f"UeccDNA_cluster{row['cluster_id']}_{query_id}"
+                query_id = row.query_id
+                if has_cluster_id and row.cluster_id > 0:
+                    description = f"UeccDNA_cluster{row.cluster_id}_{query_id}"
                 else:
                     description = f"UeccDNA_{query_id}"
 
                 record = SeqRecord(Seq(seq), id=eccDNA_id, description=description)
                 self.fasta_records.append(record)
+
+        df["eccDNA_id"] = eccDNA_ids
 
         return df
 
@@ -505,11 +514,12 @@ class MeccProcessor(BaseEccProcessor):
         if not all(col in df_group.columns for col in ["chr", "start0", "end0"]):
             return ""
 
+        # Use vectorized operations where possible
         locations = []
-        for _, row in df_group.iterrows():
-            chrom = row["chr"]
-            start = row["start0"]
-            end = row["end0"]
+        for row in df_group.itertuples(index=False):
+            chrom = row.chr
+            start = row.start0
+            end = row.end0
 
             try:
                 start = int(start)
@@ -855,10 +865,10 @@ class CeccProcessor(BaseEccProcessor):
             df_sorted = df_group
 
         segments = []
-        for _, row in df_sorted.iterrows():
-            chrom = row["chr"]
-            start = row["start0"]
-            end = row["end0"]
+        for row in df_sorted.itertuples(index=False):
+            chrom = row.chr
+            start = row.start0
+            end = row.end0
 
             try:
                 start = int(start)

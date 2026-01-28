@@ -22,10 +22,8 @@ from multiprocessing import Pool, cpu_count
 from pathlib import Path
 from typing import Any, Optional
 
-import intervaltree as tree
 import mappy
 import networkx as nx
-import numpy as np
 import pandas as pd
 import pybedtools as bt
 from Bio import SeqIO

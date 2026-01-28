@@ -287,8 +287,8 @@ def generate_fasta_sequences(
         if fasta is not None:
             try:
                 fasta.close()
-            except Exception:
-                pass
+            except (OSError, ValueError) as e:
+                logger.debug(f"Failed to close reference FASTA: {e}")
 
 
 def write_curated_tables_with_fasta(

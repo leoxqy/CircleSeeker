@@ -5,6 +5,27 @@ All notable changes to CircleSeeker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-01-29
+
+### Fixed
+- **Exception handling**: Narrowed overly broad `except Exception` clauses in `iecc_curator.py` and `tidehunter.py` to specific exception types (`OSError`, `ValueError`, `AttributeError`)
+- **Unused imports**: Removed unused `intervaltree` and `numpy` imports from `splitreads_core.py`
+
+### Improved
+- **Performance optimization**: Replaced 12 `iterrows()` calls with `itertuples()` or vectorized operations across `umc_process.py`, `ecc_unify.py`, and `ecc_output_formatter.py` for 3-6x speedup in DataFrame iterations
+- **Step dependency validation**: Added `depends_on` attribute to all 16 pipeline steps in `definitions.py` with automatic validation in `pipeline.py` using Kahn's algorithm for cycle detection
+
+### Technical Details
+- **Files Modified**:
+  - `src/circleseeker/modules/iecc_curator.py`: Exception type narrowing
+  - `src/circleseeker/external/tidehunter.py`: Exception type narrowing
+  - `src/circleseeker/modules/splitreads_core.py`: Removed unused imports
+  - `src/circleseeker/modules/umc_process.py`: 5 iterrows optimizations
+  - `src/circleseeker/modules/ecc_unify.py`: 5 iterrows optimizations
+  - `src/circleseeker/modules/ecc_output_formatter.py`: 2 iterrows optimizations
+  - `src/circleseeker/core/steps/definitions.py`: Added depends_on for all steps
+  - `src/circleseeker/core/pipeline.py`: Added `_validate_step_dependencies()` method
+
 ## [1.1.0] - 2026-01-25
 
 ### Highlights

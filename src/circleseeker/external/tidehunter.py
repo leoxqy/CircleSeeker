@@ -142,7 +142,7 @@ class TideHunter(ExternalTool):
                     import signal as _signal
 
                     signal_name = _signal.Signals(signum).name
-                except Exception:
+                except (ValueError, AttributeError):
                     signal_name = None
                 if signal_name:
                     signal_hint = f" (signal {signum} {signal_name})"

@@ -309,19 +309,20 @@ def generate_regions_table(
     # Process MeccDNA (Confirmed)
     if mecc_df is not None and not mecc_df.empty:
         for ecc_id, group in mecc_df.groupby("eccDNA_id"):
-            for i, (_, row) in enumerate(group.iterrows(), start=1):
+            # Use itertuples for performance
+            for i, row in enumerate(group.itertuples(index=False), start=1):
                 # Determine role: primary for first/best site, candidate for others
-                is_primary = (i == 1) or row.get("is_primary", False)
+                is_primary = (i == 1) or getattr(row, "is_primary", False)
                 role = "primary" if is_primary else "candidate"
 
                 regions_rows.append({
                     "eccDNA_id": ecc_id,
                     "region_idx": i,
-                    "chr": row.get("chr", ""),
-                    "start": row.get("start0", 0),
-                    "end": row.get("end0", 0),
-                    "strand": row.get("strand", "+"),
-                    "length": row.get("length", 0),
+                    "chr": getattr(row, "chr", ""),
+                    "start": getattr(row, "start0", 0),
+                    "end": getattr(row, "end0", 0),
+                    "strand": getattr(row, "strand", "+"),
+                    "length": getattr(row, "length", 0),
                     "role": role,
                 })
 
@@ -331,7 +332,8 @@ def generate_regions_table(
             group = group.sort_values("seg_index") if "seg_index" in group.columns else group
             n_segs = len(group)
 
-            for i, (_, row) in enumerate(group.iterrows(), start=1):
+            # Use itertuples for performance
+            for i, row in enumerate(group.itertuples(index=False), start=1):
                 # Determine role based on position
                 if i == 1:
                     role = "head"
@@ -343,11 +345,11 @@ def generate_regions_table(
                 regions_rows.append({
                     "eccDNA_id": ecc_id,
                     "region_idx": i,
-                    "chr": row.get("chr", ""),
-                    "start": row.get("start0", 0),
-                    "end": row.get("end0", 0),
-                    "strand": row.get("strand", "+"),
-                    "length": row.get("length", row.get("seg_length", 0)),
+                    "chr": getattr(row, "chr", ""),
+                    "start": getattr(row, "start0", 0),
+                    "end": getattr(row, "end0", 0),
+                    "strand": getattr(row, "strand", "+"),
+                    "length": getattr(row, "length", getattr(row, "seg_length", 0)),
                     "role": role,
                 })
 

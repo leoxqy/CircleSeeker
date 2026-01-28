@@ -244,25 +244,31 @@ def find_redundant_simple(
 
     redundant_ids = set()
 
-    # Check each inferred entry
-    for _, row in inferred_df.iterrows():
+    # Resolve column names once
+    chr_col = "chr" if "chr" in inferred_df.columns else ("Chr" if "Chr" in inferred_df.columns else None)
+    start_col = "start0" if "start0" in inferred_df.columns else ("Start0" if "Start0" in inferred_df.columns else None)
+    end_col = "end0" if "end0" in inferred_df.columns else ("End0" if "End0" in inferred_df.columns else None)
+    regions_col = "regions" if "regions" in inferred_df.columns else ("Regions" if "Regions" in inferred_df.columns else None)
+
+    # Check each inferred entry using itertuples for performance
+    for row in inferred_df.itertuples(index=False):
         # Try to get coordinates from various possible column names
-        chr_val = row.get("chr", row.get("Chr", None))
-        start_val = row.get("start0", row.get("Start0", None))
-        end_val = row.get("end0", row.get("End0", None))
+        chr_val = getattr(row, chr_col, None) if chr_col else None
+        start_val = getattr(row, start_col, None) if start_col else None
+        end_val = getattr(row, end_col, None) if end_col else None
 
         if pd.notna(chr_val) and pd.notna(start_val) and pd.notna(end_val):
             ch = str(chr_val).strip()
             if not ch:
                 continue
             try:
-                s = int(start_val)
-                e = int(end_val)
+                s = int(start_val)  # type: ignore[arg-type]
+                e = int(end_val)  # type: ignore[arg-type]
             except (TypeError, ValueError):
                 continue
         else:
             # Try parsing from regions column if coordinates not available
-            regions = row.get("regions", row.get("Regions", None))
+            regions = getattr(row, regions_col, None) if regions_col else None
             if regions and pd.notna(regions):
                 try:
                     ch, s, e = parse_region(regions)
@@ -299,7 +305,7 @@ def find_redundant_simple(
                     break
 
         if hit:
-            redundant_ids.add(row["eccDNA_id"])
+            redundant_ids.add(row.eccDNA_id)
 
     return redundant_ids
 
@@ -346,15 +352,16 @@ def find_redundant_chimeric_exact(
     if inferred_df.empty or confirmed_df.empty:
         return set()
 
-    # Build set of confirmed CeccDNA region strings
+    # Build set of confirmed CeccDNA region strings using vectorized operations
     confirmed_c = confirmed_df[confirmed_df["eccDNA_type"] == "CeccDNA"]
     confirmed_regions = set()
 
-    for _, row in confirmed_c.iterrows():
-        regions = row.get("Regions", row.get("regions", ""))
-        if regions and pd.notna(regions):
-            normalized = regions.replace(" ", "")
-            confirmed_regions.add(normalized)
+    regions_col = "Regions" if "Regions" in confirmed_c.columns else "regions"
+    if regions_col in confirmed_c.columns:
+        for regions in confirmed_c[regions_col].dropna():
+            if regions:
+                normalized = str(regions).replace(" ", "")
+                confirmed_regions.add(normalized)
 
     # Check each inferred chimeric entry
     redundant_ids = set()
@@ -363,10 +370,11 @@ def find_redundant_chimeric_exact(
         group = group.sort_values("seg_index")
         segments = []
 
-        for _, row in group.iterrows():
-            chr_val = row.get("chr", "")
-            start_val = row.get("start0", "")
-            end_val = row.get("end0", "")
+        # Use itertuples for performance
+        for row in group.itertuples(index=False):
+            chr_val = getattr(row, "chr", "")
+            start_val = getattr(row, "start0", "")
+            end_val = getattr(row, "end0", "")
 
             if chr_val and pd.notna(start_val) and pd.notna(end_val):
                 segments.append(f"{chr_val}:{int(start_val)}-{int(end_val)}")
@@ -425,9 +433,14 @@ def find_redundant_chimeric_overlap(
 
     if check_strand:
         confirmed_segs_list_stranded: list[list[tuple[str, int, int, str]]] = []
-        for _idx, row in confirmed_c.iterrows():
-            regions = row.get("Regions", row.get("regions", ""))
-            strand = row.get("Strand", row.get("strand", ""))
+        # Resolve column names once for confirmed_c
+        conf_regions_col = "Regions" if "Regions" in confirmed_c.columns else "regions"
+        conf_strand_col = "Strand" if "Strand" in confirmed_c.columns else "strand"
+        has_regions = conf_regions_col in confirmed_c.columns
+        has_strand = conf_strand_col in confirmed_c.columns
+        for row in confirmed_c.itertuples(index=False):
+            regions = getattr(row, conf_regions_col, "") if has_regions else ""
+            strand = getattr(row, conf_strand_col, "") if has_strand else ""
             if regions and pd.notna(regions):
                 strand_str = strand if strand and pd.notna(strand) else "+"
                 segs_stranded = parse_chimeric_regions_with_strand(regions, strand_str)
@@ -438,11 +451,12 @@ def find_redundant_chimeric_overlap(
             group = group.sort_values("seg_index")
             inferred_segs_stranded: list[tuple[str, int, int, str]] = []
 
-            for _, row in group.iterrows():
-                chr_val = row.get("chr", "")
-                start_val = row.get("start0", "")
-                end_val = row.get("end0", "")
-                strand_val = row.get("strand", "+")
+            # Use itertuples for performance
+            for row in group.itertuples(index=False):
+                chr_val = getattr(row, "chr", "")
+                start_val = getattr(row, "start0", "")
+                end_val = getattr(row, "end0", "")
+                strand_val = getattr(row, "strand", "+")
 
                 if chr_val and pd.notna(start_val) and pd.notna(end_val):
                     inferred_segs_stranded.append(
@@ -464,8 +478,11 @@ def find_redundant_chimeric_overlap(
                     break
     else:
         confirmed_segs_list_unstranded: list[list[tuple[str, int, int]]] = []
-        for _idx, row in confirmed_c.iterrows():
-            regions = row.get("Regions", row.get("regions", ""))
+        # Resolve column name once for confirmed_c
+        conf_regions_col_u = "Regions" if "Regions" in confirmed_c.columns else "regions"
+        has_regions_u = conf_regions_col_u in confirmed_c.columns
+        for row in confirmed_c.itertuples(index=False):
+            regions = getattr(row, conf_regions_col_u, "") if has_regions_u else ""
             if regions and pd.notna(regions):
                 segs_unstranded = parse_chimeric_regions(regions)
                 if segs_unstranded:
@@ -475,10 +492,11 @@ def find_redundant_chimeric_overlap(
             group = group.sort_values("seg_index")
             inferred_segs_unstranded: list[tuple[str, int, int]] = []
 
-            for _, row in group.iterrows():
-                chr_val = row.get("chr", "")
-                start_val = row.get("start0", "")
-                end_val = row.get("end0", "")
+            # Use itertuples for performance
+            for row in group.itertuples(index=False):
+                chr_val = getattr(row, "chr", "")
+                start_val = getattr(row, "start0", "")
+                end_val = getattr(row, "end0", "")
 
                 if chr_val and pd.notna(start_val) and pd.notna(end_val):
                     inferred_segs_unstranded.append((str(chr_val), int(start_val), int(end_val)))
@@ -828,13 +846,13 @@ def prepare_inferred_chimeric(df: pd.DataFrame, redundant_ids: set[str]) -> pd.D
         # Sort by segment index
         group = group.sort_values("seg_index")
 
-        # Build regions and strands
-        regions = []
-        strands = []
-
-        for _, row in group.iterrows():
-            regions.append(f"{row['chr']}:{int(row['start0'])}-{int(row['end0'])}")
-            strands.append(row.get("strand", "+"))
+        # Build regions and strands using vectorized string operations
+        regions = (
+            group["chr"].astype(str) + ":" +
+            group["start0"].astype(int).astype(str) + "-" +
+            group["end0"].astype(int).astype(str)
+        ).tolist()
+        strands = group["strand"].fillna("+").tolist() if "strand" in group.columns else ["+"] * len(group)
 
         # Take first row for metadata (metrics are same across segments)
         first_row = group.iloc[0]

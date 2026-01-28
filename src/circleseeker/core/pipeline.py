@@ -885,6 +885,9 @@ class Pipeline:
         self, start_from: Optional[int] = None, stop_at: Optional[int] = None, force: bool = False
     ) -> dict[str, Any]:
         """Run the pipeline with automatic cleanup and temp directory management."""
+        # Validate step dependencies before running
+        self._validate_step_dependencies()
+
         if force:
             self.state = self._create_fresh_state()
             self._save_state()
@@ -984,6 +987,58 @@ class Pipeline:
             self._save_state()
             self.logger.info(f"Unexpected failure. Temporary files retained in: {self.temp_dir}")
             raise PipelineError(f"Unexpected pipeline failure: {e}") from e
+
+    def _validate_step_dependencies(self) -> None:
+        """Validate step dependencies at pipeline initialization.
+
+        Checks:
+        1. All declared dependencies exist as valid step names
+        2. No circular dependencies (using topological sort)
+
+        Raises:
+            ConfigurationError: If dependency validation fails
+        """
+        step_names = {step.name for step in self.STEPS}
+
+        # Check all dependencies exist
+        for step in self.STEPS:
+            for dep in step.depends_on:
+                if dep not in step_names:
+                    raise ConfigurationError(
+                        f"Step '{step.name}' declares dependency on unknown step '{dep}'"
+                    )
+
+        # Check for circular dependencies using Kahn's algorithm (topological sort)
+        # Build adjacency list and in-degree count
+        in_degree: dict[str, int] = {step.name: 0 for step in self.STEPS}
+        adjacency: dict[str, list[str]] = {step.name: [] for step in self.STEPS}
+
+        for step in self.STEPS:
+            for dep in step.depends_on:
+                adjacency[dep].append(step.name)
+                in_degree[step.name] += 1
+
+        # Find all nodes with no incoming edges
+        queue = [name for name, degree in in_degree.items() if degree == 0]
+        visited_count = 0
+
+        while queue:
+            node = queue.pop(0)
+            visited_count += 1
+
+            for neighbor in adjacency[node]:
+                in_degree[neighbor] -= 1
+                if in_degree[neighbor] == 0:
+                    queue.append(neighbor)
+
+        if visited_count != len(self.STEPS):
+            # Find the cycle for better error message
+            remaining = [name for name, degree in in_degree.items() if degree > 0]
+            raise ConfigurationError(
+                f"Circular dependency detected among steps: {remaining}"
+            )
+
+        self.logger.debug("Step dependency validation passed")
 
     def _execute_step(self, step: PipelineStep) -> Optional[list[str]]:
         """Execute a pipeline step and return output files."""
