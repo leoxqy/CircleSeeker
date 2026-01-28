@@ -88,7 +88,7 @@ jobs:
           verbose: true
 
   docs-sync:
-    name: Documentation sync check
+    name: Documentation & version sync check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -101,6 +101,45 @@ jobs:
 
       - name: Check bilingual docs sync
         run: python scripts/check_docs_sync.py
+
+      - name: Check version consistency
+        run: |
+          python -c "
+          import re, sys
+
+          # Read version from __version__.py
+          with open('src/circleseeker/__version__.py') as f:
+              match = re.search(r'__version__\s*=\s*\"(.+?)\"', f.read())
+              ver_py = match.group(1) if match else None
+
+          # Read version from pyproject.toml
+          with open('pyproject.toml') as f:
+              match = re.search(r'^version\s*=\s*\"(.+?)\"', f.read(), re.MULTILINE)
+              ver_toml = match.group(1) if match else None
+
+          # Read version from conda-recipe/meta.yaml
+          with open('conda-recipe/meta.yaml') as f:
+              match = re.search(r'\{%\s*set\s+version\s*=\s*\"(.+?)\"\s*%\}', f.read())
+              ver_conda = match.group(1) if match else None
+
+          versions = {
+              '__version__.py': ver_py,
+              'pyproject.toml': ver_toml,
+              'conda-recipe/meta.yaml': ver_conda,
+          }
+
+          print('Version check:')
+          for src, ver in versions.items():
+              status = 'OK' if ver == ver_py else 'MISMATCH'
+              print(f'  {src}: {ver} [{status}]')
+
+          if len(set(versions.values())) != 1 or None in versions.values():
+              print(f'\nERROR: Version mismatch detected!')
+              sys.exit(1)
+          else:
+              print(f'\nAll versions consistent: {ver_py}')
+          "
+
 
   package:
     name: Build package (sdist/wheel)

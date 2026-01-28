@@ -32,7 +32,7 @@ repos:
         additional_dependencies:
           - types-PyYAML
           - types-setuptools
-        files: ^src/circleseeker/(cli|config|core)/
+        files: ^src/circleseeker/(cli|config|core|modules|external|utils)/
 
   # General file checks
   - repo: https://github.com/pre-commit/pre-commit-hooks

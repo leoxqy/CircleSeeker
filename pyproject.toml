@@ -24,8 +24,8 @@ classifiers = [
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Operating System :: POSIX :: Linux",
-    "Operating System :: MacOS :: MacOS X",
 ]
 requires-python = ">=3.9"
 dependencies = [
@@ -38,7 +38,7 @@ dependencies = [
     "networkx>=3.0",
     "packaging>=23.0",
     "intervaltree>=3.1.0",
-    "mappy>=2.24",
+    "mappy>=2.26",
     "pybedtools>=0.9.0",
 ]
 
@@ -85,7 +85,7 @@ circleseeker = [
 
 [tool.black]
 line-length = 100
-target-version = ["py39", "py310", "py311"]
+target-version = ["py39", "py310", "py311", "py312"]
 include = '\.pyi?$'
 exclude = '''
 /(
@@ -134,13 +134,24 @@ disallow_incomplete_defs = true
 
 [tool.coverage.run]
 source = ["src/circleseeker"]
-omit = ["*/tests/*", "*/__init__.py"]
+omit = ["*/tests/*", "*/test_*.py", "*/__init__.py", "*/setup.py"]
 
 [tool.coverage.report]
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
+    "raise AssertionError",
     "raise NotImplementedError",
+    "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",
     "@abstractmethod",
 ]
+precision = 2
+show_missing = true
+skip_covered = false
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.coverage.xml]
+output = "coverage.xml"
