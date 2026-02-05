@@ -140,6 +140,7 @@ class CeccBuild:
         tmp_dir: Optional[Path] = None,
         keep_tmp: bool = False,
         logger: Optional[logging.Logger] = None,
+        last_timeout: Optional[int] = None,
     ) -> None:
         """
         Initialize CeccBuild.
@@ -157,6 +158,7 @@ class CeccBuild:
             tmp_dir: Optional directory for LAST intermediate files
             keep_tmp: Keep LAST intermediate files when tmp_dir is provided
             logger: Optional logger
+            last_timeout: Timeout in seconds for LAST alignment (None = no timeout)
         """
         self.gap_tolerance = gap_tolerance
         self.position_tolerance = position_tolerance
@@ -170,6 +172,7 @@ class CeccBuild:
         self.tmp_dir = Path(tmp_dir) if tmp_dir is not None else None
         self.keep_tmp = bool(keep_tmp)
         self.logger = logger or get_logger(self.__class__.__name__)
+        self.last_timeout = last_timeout
 
         # Runtime paths (set during run)
         self._reference_fasta: Optional[Path] = None
@@ -501,17 +504,21 @@ class CeccBuild:
 
                 # Wait for completion
                 # Guard against rare hangs (e.g., broken pipeline where one side exits unexpectedly).
-                # LAST can legitimately run for a long time on large inputs, so keep a generous timeout.
+                # By default, no timeout (None) to support arbitrarily large datasets.
+                # Users can set last_timeout to limit execution time if needed.
                 try:
-                    _, split_err = split_proc.communicate(timeout=24 * 60 * 60)  # 24 hours
+                    _, split_err = split_proc.communicate(timeout=self.last_timeout)
                 except subprocess.TimeoutExpired as exc:
-                    raise RuntimeError("lastal | last-split timed out after 86400 seconds") from exc
+                    timeout_secs = self.last_timeout if self.last_timeout else "unknown"
+                    raise RuntimeError(f"lastal | last-split timed out after {timeout_secs} seconds") from exc
 
                 # lastal should terminate promptly once last-split has finished consuming stdout.
+                # Use a generous timeout here since large datasets may need more cleanup time.
+                lastal_wait_timeout = 300 if self.last_timeout is None else max(300, self.last_timeout // 100)
                 try:
-                    lastal_proc.wait(timeout=60)
+                    lastal_proc.wait(timeout=lastal_wait_timeout)
                 except subprocess.TimeoutExpired as exc:
-                    raise RuntimeError("lastal did not terminate after last-split finished") from exc
+                    raise RuntimeError(f"lastal did not terminate after last-split finished (waited {lastal_wait_timeout}s)") from exc
 
                 if split_proc.returncode != 0:
                     raise RuntimeError(f"last-split failed: {split_err.decode(errors='replace')}")

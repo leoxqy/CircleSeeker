@@ -9,7 +9,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from typing import Any
+from typing import Any, Optional
 
 from circleseeker.modules.base import ExternalToolModule, ModuleResult
 
@@ -211,8 +211,9 @@ class CDHitModule(ExternalToolModule):
 class Minimap2Module(ExternalToolModule):
     """Wrapper for Minimap2 aligner."""
 
-    def __init__(self, **kwargs: Any):
+    def __init__(self, alignment_timeout: Optional[int] = None, **kwargs: Any):
         super().__init__(tool_name="minimap2", **kwargs)
+        self.alignment_timeout = alignment_timeout  # None = no timeout (default)
 
     def check_tool_availability(self) -> bool:
         """Check if minimap2 and samtools are available."""
@@ -270,7 +271,8 @@ class Minimap2Module(ExternalToolModule):
             ]
 
             # Use Popen to safely pipe minimap2 output to samtools
-            _PIPE_TIMEOUT = 86400  # 24 hours
+            # By default, no timeout (None) to support arbitrarily large datasets.
+            # Users can set alignment_timeout to limit execution time if needed.
             minimap2_proc = None
             samtools_proc = None
             try:
@@ -283,8 +285,10 @@ class Minimap2Module(ExternalToolModule):
                 if minimap2_proc.stdout is not None:
                     minimap2_proc.stdout.close()
 
-                _, samtools_stderr = samtools_proc.communicate(timeout=_PIPE_TIMEOUT)
-                minimap2_proc.wait(timeout=60)  # should already be done
+                _, samtools_stderr = samtools_proc.communicate(timeout=self.alignment_timeout)
+                # Use generous timeout for minimap2 cleanup
+                minimap2_wait = 300 if self.alignment_timeout is None else max(300, self.alignment_timeout // 100)
+                minimap2_proc.wait(timeout=minimap2_wait)
 
                 if minimap2_proc.returncode != 0 or samtools_proc.returncode != 0:
                     stderr_parts = []
@@ -312,12 +316,12 @@ class Minimap2Module(ExternalToolModule):
                     except OSError:
                         pass  # Process already terminated
 
-            # Index the BAM file with timeout protection
+            # Index the BAM file (no timeout by default, large BAMs may take a while)
             self.logger.info("Indexing BAM file...")
             subprocess.run(
                 ["samtools", "index", str(output_bam)],
                 check=True,
-                timeout=3600,  # 1-hour timeout for indexing
+                timeout=self.alignment_timeout,
             )
 
             result.success = True

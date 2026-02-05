@@ -162,14 +162,15 @@ def cecc_build(pipeline: Pipeline) -> None:
 
     from circleseeker.modules.cecc_build import CeccBuild
 
-    builder = CeccBuild(logger=pipeline.logger.getChild("cecc_build"))
-    if hasattr(builder, "tmp_dir"):
-        # Use the same temp directory as pipeline (no nested subdirectory)
-        builder.tmp_dir = pipeline.config.output_dir
-    if hasattr(builder, "keep_tmp"):
-        builder.keep_tmp = pipeline.config.keep_tmp
-    if hasattr(builder, "threads"):
-        builder.threads = int(getattr(pipeline.config, "threads", pipeline.config.performance.threads))
+    # Get threads from config (use performance.threads as the primary source)
+    threads = int(getattr(pipeline.config, "threads", pipeline.config.performance.threads))
+
+    builder = CeccBuild(
+        logger=pipeline.logger.getChild("cecc_build"),
+        threads=threads,
+        tmp_dir=pipeline.config.output_dir,
+        keep_tmp=pipeline.config.keep_tmp,
+    )
 
     pipeline.logger.info("Running cecc_build module")
     try:
