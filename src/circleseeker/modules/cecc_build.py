@@ -453,6 +453,24 @@ class CeccBuild:
 
         return canonical_prefix
 
+    @staticmethod
+    def _signal_name(returncode: int) -> str:
+        """Return human-readable signal description for negative return codes."""
+        if returncode >= 0:
+            return str(returncode)
+        import signal as _signal
+        signum = -returncode
+        try:
+            name = _signal.Signals(signum).name
+        except (ValueError, AttributeError):
+            name = f"signal {signum}"
+        descriptions = {
+            "SIGBUS": "SIGBUS (bus error – often memory-mapped file issue or OOM)",
+            "SIGKILL": "SIGKILL (killed by OS, likely out of memory)",
+            "SIGSEGV": "SIGSEGV (segmentation fault)",
+        }
+        return descriptions.get(name, name)
+
     def _run_last_split_alignment(
         self,
         query_fasta: Path,
@@ -478,16 +496,24 @@ class CeccBuild:
             str(query_fasta),
         ]
 
+        # Capture lastal stderr to a temp file (avoids PIPE deadlock on large output)
+        lastal_stderr_path = output_maf.with_suffix(".lastal_stderr.tmp")
+
         # Stream output directly to file to avoid memory issues
+        lastal_stderr_fh = None
+        try:
+            lastal_stderr_fh = open(lastal_stderr_path, "w")  # noqa: SIM115
+        except OSError:
+            lastal_stderr_fh = None
+
         with open(output_maf, "wb") as out_file:
             lastal_proc = None
             split_proc = None
             try:
-                # lastal stderr discarded to avoid deadlock (buffer full)
                 lastal_proc = subprocess.Popen(
                     lastal_cmd,
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL,
+                    stderr=lastal_stderr_fh if lastal_stderr_fh else subprocess.DEVNULL,
                 )
 
                 # last-split stdout streams directly to file
@@ -523,7 +549,20 @@ class CeccBuild:
                 if split_proc.returncode != 0:
                     raise RuntimeError(f"last-split failed: {split_err.decode(errors='replace')}")
                 if lastal_proc.returncode != 0:
-                    raise RuntimeError(f"lastal failed with exit code {lastal_proc.returncode}")
+                    # Read captured stderr for diagnostics
+                    lastal_stderr = ""
+                    if lastal_stderr_fh:
+                        lastal_stderr_fh.close()
+                        lastal_stderr_fh = None
+                        try:
+                            lastal_stderr = lastal_stderr_path.read_text(errors="replace").strip()
+                        except OSError:
+                            pass
+                    sig_desc = self._signal_name(lastal_proc.returncode)
+                    parts = [f"lastal failed with exit code {lastal_proc.returncode} ({sig_desc})"]
+                    if lastal_stderr:
+                        parts.append(f"stderr: {lastal_stderr[-2000:]}")
+                    raise RuntimeError("; ".join(parts))
             finally:
                 for proc in [lastal_proc, split_proc]:
                     if proc is None:
@@ -536,6 +575,12 @@ class CeccBuild:
                         proc.wait(timeout=2)
                     except OSError:
                         pass  # Process already terminated
+                if lastal_stderr_fh:
+                    lastal_stderr_fh.close()
+                try:
+                    lastal_stderr_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
         return output_maf
 
