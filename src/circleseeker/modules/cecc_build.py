@@ -484,11 +484,15 @@ class CeccBuild:
         alignments. This significantly reduces false positives from repetitive
         elements.
 
-        Uses streaming output to avoid memory issues with large datasets.
+        Runs lastal and last-split as separate steps (not piped) to avoid
+        potential issues with corrupted MAF headers when using parallel threads.
         """
-        self.logger.info("Running lastal | last-split...")
+        self.logger.info("Running lastal...")
 
-        # Run lastal (outputs MAF format by default)
+        # Intermediate MAF file from lastal (before last-split)
+        raw_maf = output_maf.with_suffix(".raw.maf")
+
+        # Step 1: Run lastal to produce raw MAF
         lastal_cmd = [
             "lastal",
             "-P", str(self.threads),
@@ -496,91 +500,81 @@ class CeccBuild:
             str(query_fasta),
         ]
 
-        # Capture lastal stderr to a temp file (avoids PIPE deadlock on large output)
-        lastal_stderr_path = output_maf.with_suffix(".lastal_stderr.tmp")
-
-        # Stream output directly to file to avoid memory issues
-        lastal_stderr_fh = None
         try:
-            lastal_stderr_fh = open(lastal_stderr_path, "w")  # noqa: SIM115
-        except OSError:
-            lastal_stderr_fh = None
-
-        with open(output_maf, "wb") as out_file:
-            lastal_proc = None
-            split_proc = None
-            try:
-                lastal_proc = subprocess.Popen(
+            with open(raw_maf, "w") as out_file:
+                result = subprocess.run(
                     lastal_cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=lastal_stderr_fh if lastal_stderr_fh else subprocess.DEVNULL,
-                )
-
-                # last-split stdout streams directly to file
-                split_proc = subprocess.Popen(
-                    ["last-split"],
-                    stdin=lastal_proc.stdout,
                     stdout=out_file,
                     stderr=subprocess.PIPE,
+                    timeout=self.last_timeout,
+                    check=False,
                 )
+        except subprocess.TimeoutExpired as exc:
+            timeout_secs = self.last_timeout if self.last_timeout else "unknown"
+            raise RuntimeError(f"lastal timed out after {timeout_secs} seconds") from exc
 
-                # Close lastal stdout to allow it to receive SIGPIPE
-                if lastal_proc.stdout:
-                    lastal_proc.stdout.close()
+        if result.returncode != 0:
+            sig_desc = self._signal_name(result.returncode)
+            stderr_text = result.stderr.decode(errors="replace").strip() if result.stderr else ""
+            parts = [f"lastal failed with exit code {result.returncode} ({sig_desc})"]
+            if stderr_text:
+                parts.append(f"stderr: {stderr_text[-2000:]}")
+            raise RuntimeError("; ".join(parts))
 
-                # Wait for completion
-                # Guard against rare hangs (e.g., broken pipeline where one side exits unexpectedly).
-                # By default, no timeout (None) to support arbitrarily large datasets.
-                # Users can set last_timeout to limit execution time if needed.
-                try:
-                    _, split_err = split_proc.communicate(timeout=self.last_timeout)
-                except subprocess.TimeoutExpired as exc:
-                    timeout_secs = self.last_timeout if self.last_timeout else "unknown"
-                    raise RuntimeError(f"lastal | last-split timed out after {timeout_secs} seconds") from exc
+        # Validate lastal output before passing to last-split
+        raw_maf_size = raw_maf.stat().st_size
+        self.logger.info(f"lastal output: {raw_maf_size} bytes")
 
-                # lastal should terminate promptly once last-split has finished consuming stdout.
-                # Use a generous timeout here since large datasets may need more cleanup time.
-                lastal_wait_timeout = 300 if self.last_timeout is None else max(300, self.last_timeout // 100)
-                try:
-                    lastal_proc.wait(timeout=lastal_wait_timeout)
-                except subprocess.TimeoutExpired as exc:
-                    raise RuntimeError(f"lastal did not terminate after last-split finished (waited {lastal_wait_timeout}s)") from exc
+        if raw_maf_size == 0:
+            self.logger.warning("lastal produced empty output (no alignments found)")
+            # Create empty output file
+            output_maf.touch()
+            raw_maf.unlink(missing_ok=True)
+            return output_maf
 
-                if split_proc.returncode != 0:
-                    raise RuntimeError(f"last-split failed: {split_err.decode(errors='replace')}")
-                if lastal_proc.returncode != 0:
-                    # Read captured stderr for diagnostics
-                    lastal_stderr = ""
-                    if lastal_stderr_fh:
-                        lastal_stderr_fh.close()
-                        lastal_stderr_fh = None
-                        try:
-                            lastal_stderr = lastal_stderr_path.read_text(errors="replace").strip()
-                        except OSError:
-                            pass
-                    sig_desc = self._signal_name(lastal_proc.returncode)
-                    parts = [f"lastal failed with exit code {lastal_proc.returncode} ({sig_desc})"]
-                    if lastal_stderr:
-                        parts.append(f"stderr: {lastal_stderr[-2000:]}")
-                    raise RuntimeError("; ".join(parts))
-            finally:
-                for proc in [lastal_proc, split_proc]:
-                    if proc is None:
-                        continue
-                    try:
-                        proc.terminate()
-                        proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait(timeout=2)
-                    except OSError:
-                        pass  # Process already terminated
-                if lastal_stderr_fh:
-                    lastal_stderr_fh.close()
-                try:
-                    lastal_stderr_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
+        # Check MAF header is present (last-split requires it)
+        with open(raw_maf, "r") as f:
+            first_lines = f.read(4096)
+        if not first_lines.startswith("#"):
+            self.logger.warning("lastal MAF output missing header, may cause last-split errors")
+
+        # Step 2: Run last-split on the raw MAF
+        self.logger.info("Running last-split...")
+        split_cmd = ["last-split", str(raw_maf)]
+
+        try:
+            with open(output_maf, "w") as out_file:
+                result = subprocess.run(
+                    split_cmd,
+                    stdout=out_file,
+                    stderr=subprocess.PIPE,
+                    timeout=self.last_timeout,
+                    check=False,
+                )
+        except subprocess.TimeoutExpired as exc:
+            timeout_secs = self.last_timeout if self.last_timeout else "unknown"
+            raise RuntimeError(f"last-split timed out after {timeout_secs} seconds") from exc
+
+        if result.returncode != 0:
+            stderr_text = result.stderr.decode(errors="replace").strip() if result.stderr else ""
+            # Provide diagnostic info for common last-split errors
+            if "I need 2 sequences per alignment" in stderr_text:
+                # Read first few alignment blocks for diagnosis
+                diag_lines = []
+                with open(raw_maf, "r") as f:
+                    for i, line in enumerate(f):
+                        if i > 100:
+                            break
+                        diag_lines.append(line.rstrip())
+                self.logger.error(
+                    "last-split error: MAF format issue. First 100 lines of lastal output:\n%s",
+                    "\n".join(diag_lines),
+                )
+            raise RuntimeError(f"last-split failed: {stderr_text}")
+
+        # Clean up intermediate file
+        if not self.keep_tmp:
+            raw_maf.unlink(missing_ok=True)
 
         return output_maf
 
