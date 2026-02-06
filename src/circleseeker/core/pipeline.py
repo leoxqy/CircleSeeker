@@ -447,10 +447,11 @@ class Pipeline:
             )
             return None
 
-        # Generate unique directory name
+        # Generate unique directory name.
+        # Use PID to guarantee uniqueness even when multiple samples share the
+        # same SLURM_JOB_ID and prefix (e.g. parallel runs in a single job).
         import os
-        job_id = os.environ.get("SLURM_JOB_ID", str(os.getpid()))
-        shm_dir_name = f"circleseeker_{config.prefix}_{job_id}"
+        shm_dir_name = f"circleseeker_{config.prefix}_{os.getpid()}"
         shm_path = Path("/dev/shm") / shm_dir_name
 
         # Create /dev/shm directory

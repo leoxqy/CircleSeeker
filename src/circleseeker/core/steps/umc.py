@@ -170,6 +170,7 @@ def cecc_build(pipeline: Pipeline) -> None:
         threads=threads,
         tmp_dir=pipeline.config.output_dir,
         keep_tmp=pipeline.config.keep_tmp,
+        prefix=pipeline.config.prefix,
     )
 
     pipeline.logger.info("Running cecc_build module")

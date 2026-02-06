@@ -143,6 +143,7 @@ class CeccBuild:
         keep_tmp: bool = False,
         logger: Optional[logging.Logger] = None,
         last_timeout: Optional[int] = None,
+        prefix: Optional[str] = None,
     ) -> None:
         """
         Initialize CeccBuild.
@@ -161,6 +162,7 @@ class CeccBuild:
             keep_tmp: Keep LAST intermediate files when tmp_dir is provided
             logger: Optional logger
             last_timeout: Timeout in seconds for LAST alignment (None = no timeout)
+            prefix: Sample prefix for unique temporary file naming in parallel runs
         """
         self.gap_tolerance = gap_tolerance
         self.position_tolerance = position_tolerance
@@ -175,6 +177,7 @@ class CeccBuild:
         self.keep_tmp = bool(keep_tmp)
         self.logger = logger or get_logger(self.__class__.__name__)
         self.last_timeout = last_timeout
+        self.prefix = prefix
 
         # Runtime paths (set during run)
         self._reference_fasta: Optional[Path] = None
@@ -444,43 +447,41 @@ class CeccBuild:
         lastdb_in_temp = self.tmp_dir / canonical_prefix.name if self.tmp_dir else None
 
         # Check candidates (LAST index consists of multiple files, .suf is required)
+        # Note: prefix is e.g. "ref.lastdb", so the .suf file is "ref.lastdb.suf"
+        # — we must append ".suf", not replace the existing suffix.
         for candidate in [canonical_prefix, lastdb_in_temp]:
-            if candidate and candidate.with_suffix(".suf").exists():
+            if candidate and Path(str(candidate) + ".suf").exists():
                 self.logger.info(f"Using existing LAST database: {candidate}")
                 return candidate
 
         # Not found, need to build. Use file lock to prevent race condition
         # when multiple processes try to build simultaneously.
+        # IMPORTANT: The lock file must NOT be deleted after use. flock() is
+        # inode-based — if the file is deleted and recreated, new processes
+        # lock a different inode and the mutual exclusion breaks silently.
         lock_file = canonical_prefix.with_suffix(".lastdb.lock")
         self.logger.info(f"Acquiring lock to build LAST database: {canonical_prefix}")
 
-        try:
-            lock_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(lock_file, "w") as lock_fh:
-                # Try to acquire exclusive lock (blocking)
-                fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
-                self.logger.debug("Lock acquired")
+        lock_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_file, "w") as lock_fh:
+            # Acquire exclusive lock (blocks until available)
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+            self.logger.debug("Lock acquired")
 
-                # Re-check if database was built by another process while we waited
-                if canonical_prefix.with_suffix(".suf").exists():
-                    self.logger.info(f"LAST database was built by another process: {canonical_prefix}")
-                    return canonical_prefix
-
-                # Build the database
-                self.logger.info(f"Building LAST database: {canonical_prefix}")
-                cmd = ["lastdb", "-P", str(self.threads), str(canonical_prefix), str(reference_fasta)]
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                if result.returncode != 0:
-                    raise RuntimeError(f"lastdb failed: {result.stderr}")
-
+            # Re-check if database was built by another process while we waited
+            if Path(str(canonical_prefix) + ".suf").exists():
+                self.logger.info(f"LAST database was built by another process: {canonical_prefix}")
                 return canonical_prefix
-                # Lock is released when exiting the with block
-        finally:
-            # Clean up lock file (best effort)
-            try:
-                lock_file.unlink(missing_ok=True)
-            except OSError:
-                pass
+
+            # Build the database
+            self.logger.info(f"Building LAST database: {canonical_prefix}")
+            cmd = ["lastdb", "-P", str(self.threads), str(canonical_prefix), str(reference_fasta)]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"lastdb failed: {result.stderr}")
+
+            return canonical_prefix
+            # Lock is released when file handle is closed (exiting with block)
 
     @staticmethod
     def _signal_name(returncode: int) -> str:
@@ -1601,8 +1602,11 @@ class CeccBuild:
         work_dir = Path(work_dir)
         work_dir.mkdir(parents=True, exist_ok=True)
 
+        # Use prefix for unique temp file naming to avoid collisions in parallel runs
+        unique_prefix = self.prefix or output_csv.stem
+
         # Extract sequences
-        query_fasta = work_dir / "cecc_query.fasta"
+        query_fasta = work_dir / f"{unique_prefix}_cecc_query.fasta"
         extracted = self._extract_sequences(read_ids, fasta_file, query_fasta)
         self.logger.info(f"Extracted {extracted} sequences")
 
@@ -1611,7 +1615,7 @@ class CeccBuild:
             result_df = pd.DataFrame()
         else:
             # Run LAST alignment with last-split for optimal chain selection
-            maf_file = work_dir / "cecc_alignments.maf"
+            maf_file = work_dir / f"{unique_prefix}_cecc_alignments.maf"
             self._run_last_split_alignment(query_fasta, db_prefix, maf_file)
 
             # Parse last-split MAF results
