@@ -21,8 +21,10 @@ Requires LAST aligner (lastal, lastdb, last-split) to be installed.
 
 from __future__ import annotations
 
+import fcntl
 import logging
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Any, List, Tuple, Dict, Set
@@ -431,6 +433,9 @@ class CeccBuild:
         Similar to minimap2's index handling: check if index exists next to
         reference, if not, build it there. This allows one-time indexing
         that persists across runs.
+
+        Uses file locking to prevent race conditions when multiple processes
+        try to build the database simultaneously.
         """
         # Canonical path: next to reference genome
         canonical_prefix = self._canonical_lastdb_prefix(reference_fasta)
@@ -444,14 +449,38 @@ class CeccBuild:
                 self.logger.info(f"Using existing LAST database: {candidate}")
                 return candidate
 
-        # Not found, build at canonical location (next to reference)
-        self.logger.info(f"Building LAST database: {canonical_prefix}")
-        cmd = ["lastdb", "-P", str(self.threads), str(canonical_prefix), str(reference_fasta)]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(f"lastdb failed: {result.stderr}")
+        # Not found, need to build. Use file lock to prevent race condition
+        # when multiple processes try to build simultaneously.
+        lock_file = canonical_prefix.with_suffix(".lastdb.lock")
+        self.logger.info(f"Acquiring lock to build LAST database: {canonical_prefix}")
 
-        return canonical_prefix
+        try:
+            lock_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(lock_file, "w") as lock_fh:
+                # Try to acquire exclusive lock (blocking)
+                fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+                self.logger.debug("Lock acquired")
+
+                # Re-check if database was built by another process while we waited
+                if canonical_prefix.with_suffix(".suf").exists():
+                    self.logger.info(f"LAST database was built by another process: {canonical_prefix}")
+                    return canonical_prefix
+
+                # Build the database
+                self.logger.info(f"Building LAST database: {canonical_prefix}")
+                cmd = ["lastdb", "-P", str(self.threads), str(canonical_prefix), str(reference_fasta)]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    raise RuntimeError(f"lastdb failed: {result.stderr}")
+
+                return canonical_prefix
+                # Lock is released when exiting the with block
+        finally:
+            # Clean up lock file (best effort)
+            try:
+                lock_file.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     @staticmethod
     def _signal_name(returncode: int) -> str:
