@@ -38,6 +38,7 @@ class PipelineOptions:
     threads: Optional[int]  # None means use config or default
     keep_tmp: bool  # CLI flag: True if --keep-tmp provided
     turbo: bool  # CLI flag: True if --turbo provided (use /dev/shm)
+    fast_align: bool  # CLI flag: True if --fast-align provided
     start_from: Optional[int]
     stop_at: Optional[int]
     resume: bool
@@ -176,6 +177,14 @@ def execute_pipeline(
     if opts.turbo:
         cfg.runtime.turbo_mode = True
     # Otherwise, keep config file value (cfg.runtime.turbo_mode already has default False)
+
+    # fast_align: CLI --fast-align flag > config file > default False
+    if opts.fast_align:
+        cecc_cfg = cfg.tools.cecc_build
+        if isinstance(cecc_cfg, dict):
+            cecc_cfg["fast_last"] = True
+        else:
+            cecc_cfg.fast_last = True
 
     # Validate configuration FIRST (fail fast on user errors like missing files)
     from circleseeker.exceptions import ConfigurationError

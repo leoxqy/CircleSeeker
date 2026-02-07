@@ -302,6 +302,7 @@ class CeccBuildConfig(ToolConfigMixin):
     theta_chain: float = 0.95  # Chain coverage threshold (fraction 0-1)
     min_match_degree: float = 95.0  # Legacy key (percent 0-100)
     max_rotations: int = 20
+    fast_last: bool = False  # Use faster but cruder LAST alignment (-M -m 2)
 
 
 @dataclass

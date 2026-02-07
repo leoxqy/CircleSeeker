@@ -98,6 +98,15 @@ def turbo_option(func: F) -> F:
     )(func)
 
 
+def fast_align_option(func: F) -> F:
+    """Fast alignment option: use faster but cruder LAST alignment for cecc_build."""
+    return click.option(
+        "--fast-align",
+        is_flag=True,
+        help="Use faster LAST alignment for CeccDNA detection (~3x speedup, minimal accuracy loss)",
+    )(func)
+
+
 def verbose_option(func: F) -> F:
     """Verbosity option (unified: use -v/--verbose everywhere)."""
     return click.option(

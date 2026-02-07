@@ -144,6 +144,7 @@ class CeccBuild:
         logger: Optional[logging.Logger] = None,
         last_timeout: Optional[int] = None,
         prefix: Optional[str] = None,
+        fast_last: bool = False,
     ) -> None:
         """
         Initialize CeccBuild.
@@ -163,6 +164,7 @@ class CeccBuild:
             logger: Optional logger
             last_timeout: Timeout in seconds for LAST alignment (None = no timeout)
             prefix: Sample prefix for unique temporary file naming in parallel runs
+            fast_last: Use faster LAST alignment (-M -m 2, ~3x speedup)
         """
         self.gap_tolerance = gap_tolerance
         self.position_tolerance = position_tolerance
@@ -178,6 +180,7 @@ class CeccBuild:
         self.logger = logger or get_logger(self.__class__.__name__)
         self.last_timeout = last_timeout
         self.prefix = prefix
+        self.fast_last = fast_last
 
         # Runtime paths (set during run)
         self._reference_fasta: Optional[Path] = None
@@ -526,9 +529,11 @@ class CeccBuild:
         lastal_cmd = [
             "lastal",
             "-P", str(self.threads),
-            str(db_prefix),
-            str(query_fasta),
         ]
+        if self.fast_last:
+            lastal_cmd += ["-M", "-m", "2"]
+            self.logger.info("Using fast LAST mode (-M -m 2)")
+        lastal_cmd += [str(db_prefix), str(query_fasta)]
 
         try:
             with open(raw_maf, "w") as out_file:

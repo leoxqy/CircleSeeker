@@ -165,17 +165,19 @@ def cecc_build(pipeline: Pipeline) -> None:
     # Get threads from config (use performance.threads as the primary source)
     threads = int(getattr(pipeline.config, "threads", pipeline.config.performance.threads))
 
+    cecc_cfg = getattr(pipeline.config.tools, "cecc_build", {}) or {}
+
     builder = CeccBuild(
         logger=pipeline.logger.getChild("cecc_build"),
         threads=threads,
         tmp_dir=pipeline.config.output_dir,
         keep_tmp=pipeline.config.keep_tmp,
         prefix=pipeline.config.prefix,
+        fast_last=bool(cecc_cfg.get("fast_last", False)),
     )
 
     pipeline.logger.info("Running cecc_build module")
     try:
-        cecc_cfg = getattr(pipeline.config.tools, "cecc_build", {}) or {}
         if not isinstance(cecc_cfg, dict) and not hasattr(cecc_cfg, 'get'):
             raise PipelineError(
                 "Invalid cecc_build config; expected mapping, "
