@@ -186,6 +186,7 @@ class CeccBuild:
         self._reference_fasta: Optional[Path] = None
         self._fasta_file: Optional[Path] = None
         self._last_db: Optional[Path] = None
+        self._lastal_split_supported: Optional[bool] = None  # cached detection
         # Graph-based detection tuning (used in fallback path)
         self.overlap_threshold: float = 0.95
         self.locus_overlap_threshold: float = 0.95
@@ -425,6 +426,28 @@ class CeccBuild:
         # last-split returns 0 for --help
         return lastdb.returncode == 0 and lastal.returncode == 0 and last_split.returncode == 0
 
+    def _check_lastal_split_support(self) -> bool:
+        """Check if lastal supports the --split flag (built-in split computation).
+
+        Caches the result to avoid repeated subprocess calls.
+        """
+        if self._lastal_split_supported is not None:
+            return self._lastal_split_supported
+        try:
+            result = subprocess.run(
+                ["lastal", "--help"],
+                capture_output=True, text=True, check=False,
+            )
+            output = result.stdout + result.stderr
+            self._lastal_split_supported = "--split" in output
+        except (FileNotFoundError, OSError):
+            self._lastal_split_supported = False
+        if self._lastal_split_supported:
+            self.logger.debug("lastal --split is supported")
+        else:
+            self.logger.debug("lastal --split not supported, using two-step fallback")
+        return self._lastal_split_supported
+
     def _canonical_lastdb_prefix(self, reference_fasta: Path) -> Path:
         """Return canonical LAST database prefix path (ref.fa → ref.lastdb)."""
         ref_str = str(reference_fasta)
@@ -528,37 +551,96 @@ class CeccBuild:
         db_prefix: Path,
         output_maf: Path,
     ) -> Path:
-        """Run LAST alignment with last-split for optimal chain selection.
+        """Run LAST alignment with split filtering.
 
-        last-split selects the best alignment chain for each query region,
-        filtering out ambiguous multi-mapping and keeping only high-confidence
-        alignments. This significantly reduces false positives from repetitive
-        elements.
-
-        Runs lastal and last-split as separate steps (not piped) to avoid
-        potential issues with corrupted MAF headers when using parallel threads.
+        Prefers single-command ``lastal --split`` when the installed version
+        supports it (eliminates large intermediate MAF files and is ~3x faster).
+        Falls back to the two-step ``lastal`` + ``last-split`` approach for
+        older LAST versions.
         """
-        self.logger.info("Running lastal...")
-
-        # Intermediate MAF file from lastal (before last-split)
-        raw_maf = output_maf.with_suffix(".raw.maf")
-
-        # Log file for LAST tools stderr
         log_name = f"{self.prefix}_last_align.log" if self.prefix else "last_align.log"
         last_log_file = output_maf.parent / log_name
 
-        # Step 1: Run lastal to produce raw MAF
-        lastal_cmd = [
-            "lastal",
-            "-P", str(self.threads),
-        ]
+        use_builtin_split = self._check_lastal_split_support()
+
+        if use_builtin_split:
+            return self._run_lastal_builtin_split(
+                query_fasta, db_prefix, output_maf, last_log_file,
+            )
+        return self._run_lastal_two_step(
+            query_fasta, db_prefix, output_maf, last_log_file,
+        )
+
+    def _run_lastal_builtin_split(
+        self,
+        query_fasta: Path,
+        db_prefix: Path,
+        output_maf: Path,
+        last_log_file: Path,
+    ) -> Path:
+        """Single-command path: ``lastal --split`` writes final MAF directly."""
+        self.logger.info("Running lastal --split (single-pass)")
+
+        cmd = ["lastal", "-P", str(self.threads), "--split"]
+        if self.fast_last:
+            cmd += ["-M", "-m", "2"]
+            self.logger.debug("fast LAST mode enabled (-M -m 2)")
+        cmd += [str(db_prefix), str(query_fasta)]
+
+        try:
+            with open(output_maf, "w") as out_file, \
+                 open(last_log_file, "w") as log_handle:
+                result = subprocess.run(
+                    cmd,
+                    stdout=out_file,
+                    stderr=log_handle,
+                    timeout=self.last_timeout,
+                    check=False,
+                )
+        except subprocess.TimeoutExpired as exc:
+            timeout_secs = self.last_timeout if self.last_timeout else "unknown"
+            raise RuntimeError(
+                f"lastal --split timed out after {timeout_secs} seconds"
+            ) from exc
+
+        if result.returncode != 0:
+            sig_desc = self._signal_name(result.returncode)
+            stderr_text = self._read_log_tail(last_log_file)
+            parts = [f"lastal --split failed with exit code {result.returncode} ({sig_desc})"]
+            if stderr_text:
+                parts.append(f"stderr: {stderr_text[-2000:]}")
+            raise RuntimeError("; ".join(parts))
+
+        maf_size = output_maf.stat().st_size
+        self.logger.debug(f"lastal --split output: {maf_size} bytes")
+
+        if maf_size == 0:
+            self.logger.warning("lastal produced empty output (no alignments found)")
+
+        return output_maf
+
+    def _run_lastal_two_step(
+        self,
+        query_fasta: Path,
+        db_prefix: Path,
+        output_maf: Path,
+        last_log_file: Path,
+    ) -> Path:
+        """Fallback two-step path: ``lastal`` then ``last-split``."""
+        self.logger.info("Running lastal + last-split (two-step)")
+
+        raw_maf = output_maf.with_suffix(".raw.maf")
+
+        # Step 1: lastal → raw MAF
+        lastal_cmd = ["lastal", "-P", str(self.threads)]
         if self.fast_last:
             lastal_cmd += ["-M", "-m", "2"]
-            self.logger.info("Using fast LAST mode (-M -m 2)")
+            self.logger.debug("fast LAST mode enabled (-M -m 2)")
         lastal_cmd += [str(db_prefix), str(query_fasta)]
 
         try:
-            with open(raw_maf, "w") as out_file, open(last_log_file, "w") as log_handle:
+            with open(raw_maf, "w") as out_file, \
+                 open(last_log_file, "w") as log_handle:
                 result = subprocess.run(
                     lastal_cmd,
                     stdout=out_file,
@@ -578,29 +660,28 @@ class CeccBuild:
                 parts.append(f"stderr: {stderr_text[-2000:]}")
             raise RuntimeError("; ".join(parts))
 
-        # Validate lastal output before passing to last-split
         raw_maf_size = raw_maf.stat().st_size
-        self.logger.info(f"lastal output: {raw_maf_size} bytes")
+        self.logger.debug(f"lastal output: {raw_maf_size} bytes")
 
         if raw_maf_size == 0:
             self.logger.warning("lastal produced empty output (no alignments found)")
-            # Create empty output file
             output_maf.touch()
             raw_maf.unlink(missing_ok=True)
             return output_maf
 
-        # Check MAF header is present (last-split requires it)
+        # Check MAF header (last-split requires it)
         with open(raw_maf, "r") as f:
             first_lines = f.read(4096)
         if not first_lines.startswith("#"):
             self.logger.warning("lastal MAF output missing header, may cause last-split errors")
 
-        # Step 2: Run last-split on the raw MAF
-        self.logger.info("Running last-split...")
+        # Step 2: last-split → final MAF
+        self.logger.debug("Running last-split...")
         split_cmd = ["last-split", str(raw_maf)]
 
         try:
-            with open(output_maf, "w") as out_file, open(last_log_file, "a") as log_handle:
+            with open(output_maf, "w") as out_file, \
+                 open(last_log_file, "a") as log_handle:
                 result = subprocess.run(
                     split_cmd,
                     stdout=out_file,
@@ -614,9 +695,7 @@ class CeccBuild:
 
         if result.returncode != 0:
             stderr_text = self._read_log_tail(last_log_file)
-            # Provide diagnostic info for common last-split errors
             if "I need 2 sequences per alignment" in stderr_text:
-                # Read first few alignment blocks for diagnosis
                 diag_lines = []
                 with open(raw_maf, "r") as f:
                     for i, line in enumerate(f):
@@ -1576,17 +1655,15 @@ class CeccBuild:
         if half_query_buffer is not None:
             self.half_query_buffer = max(0, int(half_query_buffer))
 
-        self.logger.info("=" * 60)
-        self.logger.info("CeccBuild - last-split + closure + loci filter")
-        self.logger.info("=" * 60)
-        self.logger.info(f"Parameters:")
-        self.logger.info(f"  - Position tolerance (closure): {self.position_tolerance} bp")
-        self.logger.info(f"  - Min query gap (closure): {self.min_repeat_query_gap} bp")
-        self.logger.info(f"  - Min distinct loci: {self.min_segments}")
-        self.logger.info(f"  - Min identity: {self.min_identity}%")
+        self.logger.info("CeccBuild: starting Cecc detection")
+        self.logger.debug(
+            "params: pos_tol=%d, min_gap=%d, min_loci=%d, min_id=%.1f%%",
+            self.position_tolerance, self.min_repeat_query_gap,
+            self.min_segments, self.min_identity,
+        )
 
         # Read input CSV
-        self.logger.info(f"Reading: {input_csv}")
+        self.logger.debug(f"Reading: {input_csv}")
         try:
             df = pd.read_csv(input_csv)
         except (pd.errors.ParserError, pd.errors.EmptyDataError, ValueError):
@@ -1670,19 +1747,16 @@ class CeccBuild:
         result_df.to_csv(output_csv, index=False)
 
         # Summary
-        self.logger.info("=" * 60)
-        self.logger.info("Results:")
         if not result_df.empty:
             n_cecc = result_df["query_id"].nunique()
-            self.logger.info(f"  - Cecc detected: {n_cecc}")
+            class_summary = ""
             if "CeccClass" in result_df.columns:
                 class_counts = result_df.groupby("query_id")["CeccClass"].first().value_counts()
-                for cls, cnt in class_counts.items():
-                    self.logger.info(f"  - {cls}: {cnt}")
+                class_summary = " (" + ", ".join(f"{cls}={cnt}" for cls, cnt in class_counts.items()) + ")"
+            self.logger.info(f"Cecc detected: {n_cecc}{class_summary}")
         else:
-            self.logger.info("  - Cecc detected: 0")
-        self.logger.info(f"Output: {output_csv}")
-        self.logger.info("=" * 60)
+            self.logger.info("Cecc detected: 0")
+        self.logger.debug(f"Output: {output_csv}")
 
         return result_df
 
