@@ -226,7 +226,7 @@ class Pipeline:
             f"{self.config.prefix}_UeccDNA*.fasta",
             f"{self.config.prefix}_MeccDNA*.fasta",
             f"{self.config.prefix}_CeccDNA*.fasta",
-            "tandem_to_ring.fasta",
+            f"{self.config.prefix}_tandem_to_ring.fasta",
             f"{self.config.prefix}_circular.fasta",
         ]
 

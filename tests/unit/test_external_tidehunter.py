@@ -71,7 +71,7 @@ class TestTideHunter:
         # Verify output file was opened for writing
         assert mock_file.call_count == 2
         mock_file.assert_any_call(output_file, "w")
-        mock_file.assert_any_call(output_file.parent / "tidehunter.log", "w")
+        mock_file.assert_any_call(output_file.parent / "tidehunter_results_tidehunter.log", "w")
 
     @patch.object(TideHunter, '_check_installation')
     @patch('subprocess.run')

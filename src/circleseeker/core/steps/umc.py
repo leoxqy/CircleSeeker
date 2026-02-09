@@ -31,7 +31,7 @@ def um_classify(pipeline: Pipeline) -> None:
         ResultKeys.ALIGNMENT_OUTPUT,
         pipeline._serialize_path_for_state(alignment_output)
     )
-    output_prefix = pipeline.config.output_dir / "um_classify"
+    output_prefix = pipeline.config.output_dir / f"{pipeline.config.prefix}_um_classify"
 
     um_cfg = pipeline.config.tools.um_classify if hasattr(pipeline.config.tools, "um_classify") else {}
     if not isinstance(um_cfg, dict) and not hasattr(um_cfg, 'get'):
@@ -66,7 +66,7 @@ def um_classify(pipeline: Pipeline) -> None:
         logger=pipeline.logger.getChild("um_classify"),
     )
 
-    pipeline.logger.info("Running um_classify module")
+    pipeline.logger.debug("Running um_classify module")
 
     if not alignment_output.exists() or alignment_output.stat().st_size == 0:
         pipeline.logger.warning(
@@ -103,9 +103,9 @@ def um_classify(pipeline: Pipeline) -> None:
 
     classifier.classify_alignment_results(alignment_df, output_prefix)
 
-    uecc_output = pipeline.config.output_dir / "um_classify.uecc.csv"
-    mecc_output = pipeline.config.output_dir / "um_classify.mecc.csv"
-    unclass_output = pipeline.config.output_dir / "um_classify.unclassified.csv"
+    uecc_output = pipeline.config.output_dir / f"{pipeline.config.prefix}_um_classify.uecc.csv"
+    mecc_output = pipeline.config.output_dir / f"{pipeline.config.prefix}_um_classify.mecc.csv"
+    unclass_output = pipeline.config.output_dir / f"{pipeline.config.prefix}_um_classify.unclassified.csv"
 
     if uecc_output.exists():
         try:
@@ -131,7 +131,7 @@ def cecc_build(pipeline: Pipeline) -> None:
     """Step 5: Process Cecc candidates using cecc_build module."""
     import pandas as pd
 
-    unclass_input = pipeline.config.output_dir / "um_classify.unclassified.csv"
+    unclass_input = pipeline.config.output_dir / f"{pipeline.config.prefix}_um_classify.unclassified.csv"
     input_csv = unclass_input
 
     def _has_data_rows(path: Path) -> bool:
@@ -152,13 +152,13 @@ def cecc_build(pipeline: Pipeline) -> None:
             "No candidates found for CECC analysis (missing/empty %s).",
             input_csv.name,
         )
-        output_file = pipeline.config.output_dir / "cecc_build.csv"
+        output_file = pipeline.config.output_dir / f"{pipeline.config.prefix}_cecc_build.csv"
         pd.DataFrame().to_csv(output_file, index=False)
         pipeline._set_result(ResultKeys.CECC_BUILD_OUTPUT, str(output_file))
         pipeline._set_result(ResultKeys.CECC_BUILD_COUNT, 0)
         return
 
-    output_file = pipeline.config.output_dir / "cecc_build.csv"
+    output_file = pipeline.config.output_dir / f"{pipeline.config.prefix}_cecc_build.csv"
 
     from circleseeker.modules.cecc_build import CeccBuild
 
@@ -176,7 +176,7 @@ def cecc_build(pipeline: Pipeline) -> None:
         fast_last=bool(cecc_cfg.get("fast_last", False)),
     )
 
-    pipeline.logger.info("Running cecc_build module")
+    pipeline.logger.debug("Running cecc_build module")
     try:
         if not isinstance(cecc_cfg, dict) and not hasattr(cecc_cfg, 'get'):
             raise PipelineError(
@@ -217,7 +217,7 @@ def cecc_build(pipeline: Pipeline) -> None:
             if not reference_fasta.exists():
                 reference_fasta = None
 
-        fasta_candidate = pipeline.config.output_dir / "tandem_to_ring.fasta"
+        fasta_candidate = pipeline.config.output_dir / f"{pipeline.config.prefix}_tandem_to_ring.fasta"
         if not fasta_candidate.exists():
             fasta_candidate = pipeline.config.output_dir / f"{pipeline.config.prefix}_circular.fasta"
         fasta_file: Optional[Path] = fasta_candidate if fasta_candidate.exists() else None
@@ -246,8 +246,8 @@ def cecc_build(pipeline: Pipeline) -> None:
         # Safety guard: even though we only analyze unclassified reads, ensure we never emit
         # Cecc calls that overlap with existing U/Mecc classifications.
         if not df_cecc.empty and "query_id" in df_cecc.columns:
-            uecc_path = pipeline.config.output_dir / "um_classify.uecc.csv"
-            mecc_path = pipeline.config.output_dir / "um_classify.mecc.csv"
+            uecc_path = pipeline.config.output_dir / f"{pipeline.config.prefix}_um_classify.uecc.csv"
+            mecc_path = pipeline.config.output_dir / f"{pipeline.config.prefix}_um_classify.mecc.csv"
             uecc_df = (
                 pd.read_csv(uecc_path)
                 if uecc_path.exists() and uecc_path.stat().st_size > 1
@@ -283,21 +283,21 @@ def umc_process(pipeline: Pipeline) -> None:
     """Step 6: Generate FASTA files using umc_process module."""
     from circleseeker.modules.umc_process import UMCProcess, UMCProcessConfig
 
-    circular_fasta = pipeline.config.output_dir / "tandem_to_ring.fasta"
+    circular_fasta = pipeline.config.output_dir / f"{pipeline.config.prefix}_tandem_to_ring.fasta"
     if not circular_fasta.exists():
         circular_fasta = pipeline.config.output_dir / f"{pipeline.config.prefix}_circular.fasta"
         if not circular_fasta.exists():
             pipeline.logger.warning("Circular FASTA file not found, skipping umc_process step")
             return
 
-    uecc_csv = pipeline.config.output_dir / "um_classify.uecc.csv"
-    mecc_csv = pipeline.config.output_dir / "um_classify.mecc.csv"
-    cecc_csv = pipeline.config.output_dir / "cecc_build.csv"
+    uecc_csv = pipeline.config.output_dir / f"{pipeline.config.prefix}_um_classify.uecc.csv"
+    mecc_csv = pipeline.config.output_dir / f"{pipeline.config.prefix}_um_classify.mecc.csv"
+    cecc_csv = pipeline.config.output_dir / f"{pipeline.config.prefix}_cecc_build.csv"
 
     umc_cfg = UMCProcessConfig(process_xecc=bool(pipeline.config.enable_xecc))
     processor = UMCProcess(config=umc_cfg, logger=pipeline.logger.getChild("umc_process"))
 
-    pipeline.logger.info("Running umc_process module")
+    pipeline.logger.debug("Running umc_process module")
     processor.run(
         fasta_file=circular_fasta,
         uecc_csv=uecc_csv if uecc_csv.exists() else None,
@@ -353,7 +353,7 @@ def cd_hit(pipeline: Pipeline) -> None:
         output_path = pipeline.config.output_dir / output_prefix
 
         try:
-            clstr_path = cd_hit_tool.cluster_sequences(input_fasta, output_path)
+            clstr_path = cd_hit_tool.cluster_sequences(input_fasta, output_path, log_prefix=pipeline.config.prefix)
         except (subprocess.CalledProcessError, OSError) as e:
             pipeline.logger.warning(f"cd-hit failed for {input_name}: {e}")
             continue

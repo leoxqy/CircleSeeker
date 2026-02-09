@@ -479,12 +479,30 @@ class CeccBuild:
             # Build the database
             self.logger.info(f"Building LAST database: {canonical_prefix}")
             cmd = ["lastdb", "-P", str(self.threads), str(canonical_prefix), str(reference_fasta)]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            lastdb_log = Path(str(canonical_prefix) + ".lastdb.log")
+            with open(lastdb_log, "w") as log_handle:
+                result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=log_handle, text=True)
             if result.returncode != 0:
-                raise RuntimeError(f"lastdb failed: {result.stderr}")
+                stderr_text = self._read_log_tail(lastdb_log)
+                raise RuntimeError(f"lastdb failed: {stderr_text}")
 
             return canonical_prefix
             # Lock is released when file handle is closed (exiting with block)
+
+    @staticmethod
+    def _read_log_tail(log_path: Path, max_bytes: int = 32000) -> str:
+        """Read the tail of a log file."""
+        try:
+            with open(log_path, "rb") as handle:
+                try:
+                    handle.seek(0, 2)
+                    size = handle.tell()
+                    handle.seek(max(0, size - max_bytes))
+                except OSError:
+                    pass
+                return handle.read().decode(errors="replace").strip()
+        except OSError:
+            return ""
 
     @staticmethod
     def _signal_name(returncode: int) -> str:
@@ -525,6 +543,10 @@ class CeccBuild:
         # Intermediate MAF file from lastal (before last-split)
         raw_maf = output_maf.with_suffix(".raw.maf")
 
+        # Log file for LAST tools stderr
+        log_name = f"{self.prefix}_last_align.log" if self.prefix else "last_align.log"
+        last_log_file = output_maf.parent / log_name
+
         # Step 1: Run lastal to produce raw MAF
         lastal_cmd = [
             "lastal",
@@ -536,11 +558,11 @@ class CeccBuild:
         lastal_cmd += [str(db_prefix), str(query_fasta)]
 
         try:
-            with open(raw_maf, "w") as out_file:
+            with open(raw_maf, "w") as out_file, open(last_log_file, "w") as log_handle:
                 result = subprocess.run(
                     lastal_cmd,
                     stdout=out_file,
-                    stderr=subprocess.PIPE,
+                    stderr=log_handle,
                     timeout=self.last_timeout,
                     check=False,
                 )
@@ -550,7 +572,7 @@ class CeccBuild:
 
         if result.returncode != 0:
             sig_desc = self._signal_name(result.returncode)
-            stderr_text = result.stderr.decode(errors="replace").strip() if result.stderr else ""
+            stderr_text = self._read_log_tail(last_log_file)
             parts = [f"lastal failed with exit code {result.returncode} ({sig_desc})"]
             if stderr_text:
                 parts.append(f"stderr: {stderr_text[-2000:]}")
@@ -578,11 +600,11 @@ class CeccBuild:
         split_cmd = ["last-split", str(raw_maf)]
 
         try:
-            with open(output_maf, "w") as out_file:
+            with open(output_maf, "w") as out_file, open(last_log_file, "a") as log_handle:
                 result = subprocess.run(
                     split_cmd,
                     stdout=out_file,
-                    stderr=subprocess.PIPE,
+                    stderr=log_handle,
                     timeout=self.last_timeout,
                     check=False,
                 )
@@ -591,7 +613,7 @@ class CeccBuild:
             raise RuntimeError(f"last-split timed out after {timeout_secs} seconds") from exc
 
         if result.returncode != 0:
-            stderr_text = result.stderr.decode(errors="replace").strip() if result.stderr else ""
+            stderr_text = self._read_log_tail(last_log_file)
             # Provide diagnostic info for common last-split errors
             if "I need 2 sequences per alignment" in stderr_text:
                 # Read first few alignment blocks for diagnosis

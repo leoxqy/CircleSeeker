@@ -627,7 +627,7 @@ class UMeccClassifier:
         Returns:
             Preprocessed DataFrame
         """
-        self.logger.info(f"Reading alignment results from {alignment_file}")
+        self.logger.debug(f"Reading alignment results from {alignment_file}")
 
         try:
             df = pd.read_csv(alignment_file, sep="\t", header=None)
@@ -658,14 +658,10 @@ class UMeccClassifier:
         Returns:
             Tuple of (uecc_df, mecc_df, unclassified_df)
         """
-        self.logger.info("=" * 60)
-        self.logger.info("Starting U/Mecc classification from DataFrame")
-        self.logger.info("=" * 60)
-
         df = self._preprocess_alignment_df(alignment_df, "DataFrame")
 
         self.logger.info(
-            f"Processed {len(df):,} alignments from {df['query_id'].nunique():,} queries"
+            f"Classifying {df['query_id'].nunique():,} queries ({len(df):,} alignments)"
         )
 
         # Check if we have valid data after preprocessing
@@ -705,15 +701,14 @@ class UMeccClassifier:
                 else:
                     unclass_lq_only_queries += 1
 
-        self.logger.info("=" * 60)
-        self.logger.info("Classification Summary:")
-        self.logger.info(f"  Uecc: {uecc_count:,} queries")
-        self.logger.info(f"  Mecc: {mecc_count:,} queries")
-        self.logger.info(f"  Unclassified: {unclassified_count:,} queries")
+        self.logger.info(
+            f"Classification: Uecc={uecc_count:,}, Mecc={mecc_count:,}, "
+            f"Unclassified={unclassified_count:,}"
+        )
         if unclassified_count > 0:
-            self.logger.info(f"    - With high-quality alignments: {unclass_hq_queries:,}")
-            self.logger.info(f"    - Only low-quality alignments: {unclass_lq_only_queries:,}")
-        self.logger.info("=" * 60)
+            self.logger.debug(
+                f"  Unclassified breakdown: HQ={unclass_hq_queries:,}, LQ-only={unclass_lq_only_queries:,}"
+            )
 
         return uecc_df, mecc_df, unclassified_df
 
@@ -731,25 +726,25 @@ class UMeccClassifier:
 
         if uecc_df is not None and not uecc_df.empty:
             uecc_df.to_csv(uecc_out, index=False)
-            self.logger.info(f"Saved Uecc results to {uecc_out}")
+            self.logger.debug(f"Saved Uecc results to {uecc_out}")
         else:
             # Write empty table for downstream processes
             pd.DataFrame().to_csv(uecc_out, index=False)
-            self.logger.info(f"Saved empty Uecc results to {uecc_out}")
+            self.logger.debug(f"Saved empty Uecc results to {uecc_out}")
 
         if mecc_df is not None and not mecc_df.empty:
             mecc_df.to_csv(mecc_out, index=False)
-            self.logger.info(f"Saved Mecc results to {mecc_out}")
+            self.logger.debug(f"Saved Mecc results to {mecc_out}")
         else:
             pd.DataFrame().to_csv(mecc_out, index=False)
-            self.logger.info(f"Saved empty Mecc results to {mecc_out}")
+            self.logger.debug(f"Saved empty Mecc results to {mecc_out}")
 
         if unclassified_df is not None and not unclassified_df.empty:
             unclassified_df.to_csv(unclass_out, index=False)
-            self.logger.info(f"Saved Unclassified results to {unclass_out}")
+            self.logger.debug(f"Saved Unclassified results to {unclass_out}")
         else:
             pd.DataFrame().to_csv(unclass_out, index=False)
-            self.logger.info(f"Saved empty Unclassified results to {unclass_out}")
+            self.logger.debug(f"Saved empty Unclassified results to {unclass_out}")
 
     def classify_uecc_mecc(self, df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, set[str]]:
         """
@@ -1316,15 +1311,14 @@ class UMeccClassifier:
                 else:
                     unclass_lq_only_queries += 1
 
-        self.logger.info("=" * 60)
-        self.logger.info("Classification Summary:")
-        self.logger.info(f"  Uecc: {uecc_count:,} queries")
-        self.logger.info(f"  Mecc: {mecc_count:,} queries")
-        self.logger.info(f"  Unclassified: {unclassified_count:,} queries")
+        self.logger.info(
+            f"Classification: Uecc={uecc_count:,}, Mecc={mecc_count:,}, "
+            f"Unclassified={unclassified_count:,}"
+        )
         if unclassified_count > 0:
-            self.logger.info(f"    - With high-quality alignments: {unclass_hq_queries:,}")
-            self.logger.info(f"    - Only low-quality alignments: {unclass_lq_only_queries:,}")
-        self.logger.info("=" * 60)
+            self.logger.debug(
+                f"  Unclassified breakdown: HQ={unclass_hq_queries:,}, LQ-only={unclass_lq_only_queries:,}"
+            )
 
         return uecc_df, mecc_df, unclassified_df
 

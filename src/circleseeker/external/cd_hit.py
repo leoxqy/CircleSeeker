@@ -157,7 +157,7 @@ class CDHitEst(ExternalTool):
 
         return cmd
 
-    def cluster_sequences(self, input_fasta: Path, output_prefix: Path) -> Path:
+    def cluster_sequences(self, input_fasta: Path, output_prefix: Path, log_prefix: str = "") -> Path:
         """
         Run CD-HIT-EST clustering.
 
@@ -174,7 +174,7 @@ class CDHitEst(ExternalTool):
         """
         command = self._build_command(input_fasta, output_prefix)
 
-        self.logger.info(f"Running CD-HIT-EST on: {input_fasta}")
+        self.logger.debug(f"Running CD-HIT-EST on: {input_fasta}")
         self.logger.debug(f"Command: {' '.join(command)}")
 
         # Ensure output directory exists
@@ -184,6 +184,15 @@ class CDHitEst(ExternalTool):
             # Run CD-HIT-EST
             stdout, stderr = self.run(command)
 
+            # Save stderr/stdout to log file
+            log_name = f"{log_prefix}_cd_hit.log" if log_prefix else "cd_hit.log"
+            log_file = output_prefix.parent / log_name
+            with open(log_file, "a") as f:
+                if stdout:
+                    f.write(stdout)
+                if stderr:
+                    f.write(stderr)
+
             # Log output for debugging
             if stdout:
                 self.logger.debug("CD-HIT-EST stdout:\n" + stdout)
@@ -191,12 +200,12 @@ class CDHitEst(ExternalTool):
                 self.logger.debug("CD-HIT-EST stderr:\n" + stderr)
 
             self.logger.info("CD-HIT-EST completed successfully")
-            self.logger.info(f"Representative sequences: {output_prefix}")
+            self.logger.debug(f"Representative sequences: {output_prefix}")
 
             # Check for cluster file
             clstr_path = Path(str(output_prefix) + ".clstr")
             if clstr_path.exists():
-                self.logger.info(f"Cluster file: {clstr_path}")
+                self.logger.debug(f"Cluster file: {clstr_path}")
 
                 # Log file sizes for debugging
                 try:
@@ -339,11 +348,11 @@ class CDHitEst(ExternalTool):
             output_csv = cluster_file.with_suffix("")  # Remove .clstr
             output_csv = output_csv.with_suffix(".id2cluster.csv")
 
-        self.logger.info(f"Parsing clusters from: {cluster_file}")
+        self.logger.debug(f"Parsing clusters from: {cluster_file}")
         members, representatives = self._parse_clstr(cluster_file)
 
         csv_path = self._write_id2cluster_csv(members, representatives, output_csv)
-        self.logger.info(f"ID→Cluster CSV written: {csv_path}")
+        self.logger.debug(f"ID→Cluster CSV written: {csv_path}")
         return csv_path
 
     def get_cluster_stats(self, cluster_file: Path) -> dict[str, Any]:
@@ -378,7 +387,7 @@ class CDHitEst(ExternalTool):
             if total_sequences > 0:
                 stats["reduction_rate"] = (1 - total_clusters / total_sequences) * 100
 
-            self.logger.info(f"Cluster statistics: {stats}")
+            self.logger.debug(f"Cluster statistics: {stats}")
             return stats
 
         except (OSError, ValueError, KeyError) as e:

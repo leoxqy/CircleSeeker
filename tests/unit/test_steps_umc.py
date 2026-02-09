@@ -190,13 +190,13 @@ class TestCeccBuild:
         assert mock_pipeline.state.results.get(ResultKeys.CECC_BUILD_COUNT) == 0
 
     def test_empty_unclassified_csv(self, mock_pipeline, tmp_path):
-        unclass = tmp_path / "um_classify.unclassified.csv"
+        unclass = tmp_path / "sample_um_classify.unclassified.csv"
         unclass.write_text("header\n")  # header only, no data rows
         cecc_build(mock_pipeline)
         assert mock_pipeline.state.results.get(ResultKeys.CECC_BUILD_COUNT) == 0
 
     def test_calls_builder_with_data(self, mock_pipeline, tmp_path):
-        unclass = tmp_path / "um_classify.unclassified.csv"
+        unclass = tmp_path / "sample_um_classify.unclassified.csv"
         unclass.write_text("query_id,chr,start,end\nread1,chr1,100,200\n")
 
         with patch("circleseeker.modules.cecc_build.CeccBuild") as MockBuilder:
@@ -231,7 +231,7 @@ class TestUmcProcess:
         mock_pipeline.logger.warning.assert_called()
 
     def test_with_fasta_calls_processor(self, mock_pipeline, tmp_path):
-        fasta = tmp_path / "tandem_to_ring.fasta"
+        fasta = tmp_path / "sample_tandem_to_ring.fasta"
         fasta.write_text(">seq1\nATCG\n")
 
         with patch("circleseeker.modules.umc_process.UMCProcess") as MockProc:
@@ -261,7 +261,7 @@ class TestCdHit:
         with patch("circleseeker.external.cd_hit.CDHitEst") as MockCdHit:
             mock_instance = MockCdHit.return_value
 
-            def _create_cluster(input_f, output_f):
+            def _create_cluster(input_f, output_f, **kwargs):
                 output_f.write_text(">seq1\nATCG\n")
                 clstr = output_f.with_suffix(".clstr")
                 clstr.write_text(">Cluster 0\n0\t4nt, >seq1... *\n")

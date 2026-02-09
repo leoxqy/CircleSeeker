@@ -92,7 +92,7 @@ def ecc_summary(pipeline: Pipeline) -> None:
     """Step 14: Generate summary report."""
     from circleseeker.modules.ecc_summary import EccSummary
 
-    processed_csv = pipeline.config.output_dir / "tandem_to_ring.csv"
+    processed_csv = pipeline.config.output_dir / f"{pipeline.config.prefix}_tandem_to_ring.csv"
     unified_csv_path = pipeline._resolve_stored_path(
         pipeline.state.results.get(ResultKeys.UNIFIED_CSV),
         [f"{pipeline.config.prefix}_unified.csv"],

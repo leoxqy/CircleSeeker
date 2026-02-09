@@ -247,6 +247,7 @@ class Minimap2Aligner(ExternalTool):
         split_length: int = 5000,
         preset_short: str = "sr",
         preset_long: str = "sr",
+        log_prefix: str = "",
     ) -> Path:
         """Run minimap2 alignment with optional length-based preset splitting.
 
@@ -291,6 +292,7 @@ class Minimap2Aligner(ExternalTool):
                 split_length=split_length,
                 preset_short=preset_short,
                 preset_long=preset_long,
+                log_prefix=log_prefix,
             )
         else:
             self._run_minimap2(
@@ -300,6 +302,7 @@ class Minimap2Aligner(ExternalTool):
                 preset=preset,
                 max_target_seqs=max_target_seqs,
                 additional_args=additional_args,
+                log_prefix=log_prefix,
             )
 
         written = paf_to_alignment_tsv(
@@ -322,6 +325,7 @@ class Minimap2Aligner(ExternalTool):
         preset: str,
         max_target_seqs: int,
         additional_args: str,
+        log_prefix: str = "",
     ) -> None:
         """Run minimap2 with a single preset."""
         cmd = [
@@ -342,15 +346,16 @@ class Minimap2Aligner(ExternalTool):
 
         cmd.extend([str(reference), str(query)])
 
-        self.logger.info(f"Running minimap2 (preset={preset})")
+        self.logger.debug(f"Running minimap2 (preset={preset})")
         self.logger.debug(f"Command: {' '.join(cmd)}")
 
         try:
-            log_file = output_paf.parent / "minimap2_align.log"
+            log_name = f"{log_prefix}_minimap2_align.log" if log_prefix else "minimap2_align.log"
+            log_file = output_paf.parent / log_name
             with open(output_paf, "w") as out_handle, open(log_file, "w") as log_handle:
                 subprocess.run(cmd, stdout=out_handle, stderr=log_handle, text=True, check=True)
         except subprocess.CalledProcessError as exc:
-            stderr_tail = self._read_log_tail(output_paf.parent / "minimap2_align.log")
+            stderr_tail = self._read_log_tail(log_file)
             raise ExternalToolError(
                 "minimap2 failed",
                 command=cmd,
@@ -368,6 +373,7 @@ class Minimap2Aligner(ExternalTool):
         split_length: int,
         preset_short: str,
         preset_long: str,
+        log_prefix: str = "",
     ) -> None:
         """Run minimap2 with length-based preset splitting."""
         work_dir = output_paf.parent / "minimap2_split_tmp"
@@ -398,6 +404,7 @@ class Minimap2Aligner(ExternalTool):
                 preset=preset_short,
                 max_target_seqs=max_target_seqs,
                 additional_args=additional_args,
+                log_prefix=log_prefix,
             )
             paf_files.append(paf_short)
 
@@ -410,6 +417,7 @@ class Minimap2Aligner(ExternalTool):
                 preset=preset_long,
                 max_target_seqs=max_target_seqs,
                 additional_args=additional_args,
+                log_prefix=log_prefix,
             )
             paf_files.append(paf_long)
 

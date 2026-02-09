@@ -1346,7 +1346,7 @@ class UMCProcess:
         if fasta_file is None:
             # Look for common FASTA file names
             possible_fasta = [
-                output_dir / "tandem_to_ring.fasta",
+                output_dir / f"{prefix}_tandem_to_ring.fasta",
                 output_dir / f"{prefix}_circular.fasta",
                 output_dir / f"{prefix}_processed.fasta",
             ]
@@ -1359,17 +1359,17 @@ class UMCProcess:
                 raise FileNotFoundError("No FASTA file found. Please specify fasta_file parameter.")
 
         if uecc_csv is None:
-            uecc_path = output_dir / "um_classify.uecc.csv"
+            uecc_path = output_dir / f"{prefix}_um_classify.uecc.csv"
             if uecc_path.exists():
                 uecc_csv = uecc_path
 
         if mecc_csv is None:
-            mecc_path = output_dir / "um_classify.mecc.csv"
+            mecc_path = output_dir / f"{prefix}_um_classify.mecc.csv"
             if mecc_path.exists():
                 mecc_csv = mecc_path
 
         if cecc_csv is None:
-            cecc_path = output_dir / "cecc_build.csv"
+            cecc_path = output_dir / f"{prefix}_cecc_build.csv"
             if cecc_path.exists():
                 cecc_csv = cecc_path
 

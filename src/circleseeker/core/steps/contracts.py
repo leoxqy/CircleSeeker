@@ -132,15 +132,15 @@ STEP_CONTRACTS: dict[str, StepContract] = {
             _out("tidehunter_output", "{prefix}.TH.ecc_candidates.txt", kind="txt"),
         ),
         outputs=(
-            _out("tandem_to_ring_csv", "tandem_to_ring.csv", kind="csv", required=True),
-            _out("tandem_to_ring_fasta", "tandem_to_ring.fasta", kind="fasta", required=True),
+            _out("tandem_to_ring_csv", "{prefix}_tandem_to_ring.csv", kind="csv", required=True),
+            _out("tandem_to_ring_fasta", "{prefix}_tandem_to_ring.fasta", kind="fasta", required=True),
         ),
     ),
     "run_alignment": StepContract(
         step_name="run_alignment",
         inputs=(
             _cfg("reference_fasta", "reference", required=True),
-            _out("tandem_to_ring_fasta", "tandem_to_ring.fasta", kind="fasta"),
+            _out("tandem_to_ring_fasta", "{prefix}_tandem_to_ring.fasta", kind="fasta"),
         ),
         outputs=(
             _out(
@@ -164,10 +164,10 @@ STEP_CONTRACTS: dict[str, StepContract] = {
             ),
         ),
         outputs=(
-            _out("um_all", "um_classify.all.csv", kind="csv", required=False),
+            _out("um_all", "{prefix}_um_classify.all.csv", kind="csv", required=False),
             _out(
                 "um_uecc",
-                "um_classify.uecc.csv",
+                "{prefix}_um_classify.uecc.csv",
                 kind="csv",
                 required=False,
                 required_columns=_UECC_MECC_REQUIRED,
@@ -175,25 +175,25 @@ STEP_CONTRACTS: dict[str, StepContract] = {
             ),
             _out(
                 "um_mecc",
-                "um_classify.mecc.csv",
+                "{prefix}_um_classify.mecc.csv",
                 kind="csv",
                 required=False,
                 required_columns=_UECC_MECC_REQUIRED,
                 coordinate_system=COORD_0_BASED_HALF_OPEN,
             ),
-            _out("um_unclassified", "um_classify.unclassified.csv", kind="csv", required=False),
+            _out("um_unclassified", "{prefix}_um_classify.unclassified.csv", kind="csv", required=False),
         ),
     ),
     "cecc_build": StepContract(
         step_name="cecc_build",
         inputs=(
-            _out("um_all", "um_classify.all.csv", kind="csv"),
-            _out("um_unclassified", "um_classify.unclassified.csv", kind="csv"),
+            _out("um_all", "{prefix}_um_classify.all.csv", kind="csv"),
+            _out("um_unclassified", "{prefix}_um_classify.unclassified.csv", kind="csv"),
         ),
         outputs=(
             _out(
                 "cecc_build",
-                "cecc_build.csv",
+                "{prefix}_cecc_build.csv",
                 kind="csv",
                 required=True,
                 required_columns=_CECC_REQUIRED,

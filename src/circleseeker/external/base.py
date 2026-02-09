@@ -184,7 +184,7 @@ class ExternalTool:
         # Use default timeout if not specified
         effective_timeout = timeout if timeout is not None else self.DEFAULT_TIMEOUT
         cmd_str = " ".join(str(c) for c in cmd)
-        self.logger.info(f"Running: {cmd_str}")
+        self.logger.debug(f"Running: {cmd_str}")
 
         try:
             result = subprocess.run(

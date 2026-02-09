@@ -71,8 +71,8 @@ def tandem_to_ring(pipeline: Pipeline) -> None:
     if not tidehunter_output:
         raise PipelineError("TideHunter output not found in state")
 
-    csv_output = pipeline.config.output_dir / "tandem_to_ring.csv"
-    fasta_output = pipeline.config.output_dir / "tandem_to_ring.fasta"
+    csv_output = pipeline.config.output_dir / f"{pipeline.config.prefix}_tandem_to_ring.csv"
+    fasta_output = pipeline.config.output_dir / f"{pipeline.config.prefix}_tandem_to_ring.fasta"
 
     t2r_cfg = getattr(pipeline.config.tools, "tandem_to_ring", {}) or {}
     if not isinstance(t2r_cfg, dict) and not hasattr(t2r_cfg, 'get'):
@@ -90,7 +90,7 @@ def tandem_to_ring(pipeline: Pipeline) -> None:
         logger=pipeline.logger.getChild("tandem_to_ring"),
     )
 
-    pipeline.logger.info("Running tandem_to_ring module")
+    pipeline.logger.debug("Running tandem_to_ring module")
     processor.run()
 
     pipeline._set_result(ResultKeys.T2R_CSV, str(csv_output))
@@ -112,19 +112,19 @@ def run_alignment(pipeline: Pipeline) -> None:
     skip_t2r = bool(getattr(pipeline.config, "skip_tandem_to_ring", False))
     t2r_fasta = pipeline._resolve_stored_path(
         pipeline.state.results.get(ResultKeys.T2R_FASTA),
-        ["tandem_to_ring.fasta", f"{pipeline.config.prefix}_circular.fasta"],
+        [f"{pipeline.config.prefix}_tandem_to_ring.fasta", f"{pipeline.config.prefix}_circular.fasta"],
     )
     if t2r_fasta is not None:
         query_file = t2r_fasta
     elif skip_t2r:
         raise PipelineError(
-            "tandem_to_ring.fasta not found. When skip_carousel is true, provide a "
-            f"precomputed tandem_to_ring.fasta (or {pipeline.config.prefix}_circular.fasta) "
+            f"{pipeline.config.prefix}_tandem_to_ring.fasta not found. When skip_carousel is true, provide a "
+            f"precomputed {pipeline.config.prefix}_tandem_to_ring.fasta (or {pipeline.config.prefix}_circular.fasta) "
             "in the output directory."
         )
     else:
         raise PipelineError(
-            "tandem_to_ring.fasta not found. Run tandem_to_ring or provide a "
+            f"{pipeline.config.prefix}_tandem_to_ring.fasta not found. Run tandem_to_ring or provide a "
             "precomputed output and set skip_carousel: true."
         )
 
@@ -193,6 +193,7 @@ def run_alignment(pipeline: Pipeline) -> None:
         split_length=split_length,
         preset_short=preset_short,
         preset_long=preset_long,
+        log_prefix=pipeline.config.prefix,
     )
 
     if min_alignment_length > 0:

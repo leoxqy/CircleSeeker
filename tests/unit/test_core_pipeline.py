@@ -531,10 +531,10 @@ def test_cecc_build_uses_unclassified_only(tmp_path):
     # Minimal um_classify artifacts required by _step_cecc_build
     pipeline.config.output_dir.mkdir(parents=True, exist_ok=True)
     # Even if a legacy/leftover full table exists, cecc_build should not use it.
-    (pipeline.config.output_dir / "um_classify.all.csv").write_text("query_id\nread_all\n")
+    (pipeline.config.output_dir / "sample_um_classify.all.csv").write_text("query_id\nread_all\n")
 
     # Provide an unclassified alignment row (header + 1 row so the step runs).
-    (pipeline.config.output_dir / "um_classify.unclassified.csv").write_text(
+    (pipeline.config.output_dir / "sample_um_classify.unclassified.csv").write_text(
         "\n".join(
             [
                 "query_id,subject_id,q_start,q_end,s_start,s_end,strand,alignment_length,reads,length,copy_number",
@@ -548,9 +548,9 @@ def test_cecc_build_uses_unclassified_only(tmp_path):
         [
             {"query_id": "read_u", "U_cov": 0.98},
         ]
-    ).to_csv(pipeline.config.output_dir / "um_classify.uecc.csv", index=False)
+    ).to_csv(pipeline.config.output_dir / "sample_um_classify.uecc.csv", index=False)
     pd.DataFrame([{"query_id": "read_mc"}]).to_csv(
-        pipeline.config.output_dir / "um_classify.mecc.csv", index=False
+        pipeline.config.output_dir / "sample_um_classify.mecc.csv", index=False
     )
 
     cecc_rows = [
@@ -568,17 +568,17 @@ def test_cecc_build_uses_unclassified_only(tmp_path):
 
     with patch("circleseeker.modules.cecc_build.CeccBuild") as mock_cecc_build:
         def fake_run_pipeline(*, input_csv, output_csv, **_kwargs):
-            assert str(input_csv).endswith("um_classify.unclassified.csv")
+            assert str(input_csv).endswith("sample_um_classify.unclassified.csv")
             pd.DataFrame(cecc_rows).to_csv(output_csv, index=False)
 
         mock_cecc_build.return_value.run_pipeline.side_effect = fake_run_pipeline
 
         pipeline._step_cecc_build()
 
-    mecc_after = pd.read_csv(pipeline.config.output_dir / "um_classify.mecc.csv")
+    mecc_after = pd.read_csv(pipeline.config.output_dir / "sample_um_classify.mecc.csv")
     assert "read_mc" in set(mecc_after.get("query_id", pd.Series([], dtype=str)).astype(str))
 
-    cecc_after = pd.read_csv(pipeline.config.output_dir / "cecc_build.csv")
+    cecc_after = pd.read_csv(pipeline.config.output_dir / "sample_cecc_build.csv")
     cecc_ids = set(cecc_after.get("query_id", pd.Series([], dtype=str)).astype(str))
     assert "read_mc" not in cecc_ids
     assert "read_c" in cecc_ids

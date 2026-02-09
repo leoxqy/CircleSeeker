@@ -58,7 +58,7 @@ class EccSummary:
         Returns:
             Dictionary containing read statistics
         """
-        self.logger.info(f"Collecting read statistics from {fasta_path} and {processed_csv}")
+        self.logger.debug(f"Collecting read statistics from {fasta_path} and {processed_csv}")
 
         # Count total reads from FASTA
         total_reads = 0
@@ -75,7 +75,7 @@ class EccSummary:
                     else:
                         current_len += len(line.strip())
             total_length += current_len
-            self.logger.info(f"Total reads counted: {total_reads}")
+            self.logger.debug(f"Total reads counted: {total_reads}")
         except FileNotFoundError:
             self.logger.error(f"FASTA file not found: {fasta_path}")
             total_reads = 0
@@ -97,7 +97,7 @@ class EccSummary:
                 ctcr_subtypes[subtype] = count
                 ctcr_total += count
 
-            self.logger.info(f"CtcR reads counted: {ctcr_total}")
+            self.logger.debug(f"CtcR reads counted: {ctcr_total}")
 
         except FileNotFoundError:
             self.logger.warning(f"Processed CSV not found: {processed_csv}")
@@ -214,7 +214,7 @@ class EccSummary:
         Returns:
             Dictionary containing eccDNA statistics
         """
-        self.logger.info(f"Collecting eccDNA statistics from {merged_csv}")
+        self.logger.debug(f"Collecting eccDNA statistics from {merged_csv}")
 
         try:
             df = pd.read_csv(merged_csv)
@@ -333,7 +333,7 @@ class EccSummary:
         Returns:
             Dictionary containing overlap statistics
         """
-        self.logger.info(f"Collecting overlap statistics from {overlap_json}")
+        self.logger.debug(f"Collecting overlap statistics from {overlap_json}")
 
         try:
             with open(overlap_json, "r") as f:
@@ -352,7 +352,7 @@ class EccSummary:
                 "cecc_overlap_pct": f"{chimeric_stats.get('overlapping_pct', 0):.2f}",
             }
 
-            self.logger.info("Loaded overlap statistics successfully")
+            self.logger.debug("Loaded overlap statistics successfully")
 
         except FileNotFoundError:
             self.logger.warning(f"Overlap JSON file not found: {overlap_json}")
@@ -417,7 +417,7 @@ class EccSummary:
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(html_content)
 
-        self.logger.info(f"HTML report saved to {output_path}")
+        self.logger.debug(f"HTML report saved to {output_path}")
         return html_content
 
     def generate_text_summary(self, output_path: Optional[Path] = None) -> str:
@@ -520,7 +520,7 @@ class EccSummary:
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(text_content)
 
-        self.logger.info(f"Text summary saved to {output_path}")
+        self.logger.debug(f"Text summary saved to {output_path}")
         return text_content
 
     def _get_html_template(self) -> str:

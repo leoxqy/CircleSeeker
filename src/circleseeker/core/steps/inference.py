@@ -128,7 +128,7 @@ def read_filter(pipeline: Pipeline) -> None:
     """Step 9: Filter sequences using read_filter module (Sieve)."""
     from circleseeker.modules.read_filter import Sieve
 
-    tandem_to_ring_csv = pipeline.config.output_dir / "tandem_to_ring.csv"
+    tandem_to_ring_csv = pipeline.config.output_dir / f"{pipeline.config.prefix}_tandem_to_ring.csv"
 
     original_fasta = pipeline.config.input_file
     if original_fasta is None:
@@ -426,7 +426,7 @@ def run_splitreads_core_inference(pipeline: Pipeline) -> None:
     if not reference_fai.exists():
         from circleseeker.external.samtools import Samtools
         samtools = Samtools(logger=pipeline.logger.getChild("samtools"))
-        samtools.faidx(reference_fasta)
+        samtools.faidx(reference_fasta, log_prefix=pipeline.config.prefix)
 
     output_dir = pipeline.config.output_dir / "splitreads_core_output"
     output_dir.mkdir(parents=True, exist_ok=True)

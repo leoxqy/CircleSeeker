@@ -35,7 +35,7 @@ class TestRunAlignment:
         )
         pipeline = Pipeline(config)
 
-        with pytest.raises(PipelineError, match="tandem_to_ring\\.fasta"):
+        with pytest.raises(PipelineError, match="sample_tandem_to_ring\\.fasta"):
             run_alignment(pipeline)
 
     def test_skip_carousel_requires_t2r_fasta(self, tmp_path, monkeypatch):
@@ -55,7 +55,7 @@ class TestRunAlignment:
         )
         pipeline = Pipeline(config)
 
-        with pytest.raises(PipelineError, match="tandem_to_ring\\.fasta"):
+        with pytest.raises(PipelineError, match="sample_tandem_to_ring\\.fasta"):
             run_alignment(pipeline)
 
 

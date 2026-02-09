@@ -99,7 +99,9 @@ class TideHunter(ExternalTool):
         # Create output directory
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        log_file = output_file.parent / "tidehunter.log"
+        # Derive prefix from output_file name (e.g. "{prefix}.TH.ecc_candidates.txt")
+        _prefix = output_file.name.partition(".")[0]
+        log_file = output_file.parent / f"{_prefix}_tidehunter.log"
 
         def _read_tail(path: Path, max_bytes: int = 32_000) -> str:
             try:
@@ -122,7 +124,7 @@ class TideHunter(ExternalTool):
                 subprocess.run(cmd, stdout=out_handle, stderr=log_handle, text=True, check=True)
 
             self.logger.info("TideHunter completed successfully")
-            self.logger.info(f"Output saved to: {output_file}")
+            self.logger.debug(f"Output saved to: {output_file}")
 
             # Log output file size
             output_size = output_file.stat().st_size

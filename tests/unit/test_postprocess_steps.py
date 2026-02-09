@@ -147,7 +147,7 @@ class TestEccSummary:
         pipeline = Pipeline(config)
 
         # Create required intermediate files
-        processed_csv = pipeline.config.output_dir / "tandem_to_ring.csv"
+        processed_csv = pipeline.config.output_dir / "sample_tandem_to_ring.csv"
         processed_csv.parent.mkdir(parents=True, exist_ok=True)
         processed_csv.write_text("col1,col2\nval1,val2\n")
 
@@ -173,7 +173,7 @@ class TestEccSummary:
         pipeline = Pipeline(config)
 
         # Create required files
-        processed_csv = pipeline.config.output_dir / "tandem_to_ring.csv"
+        processed_csv = pipeline.config.output_dir / "sample_tandem_to_ring.csv"
         processed_csv.parent.mkdir(parents=True, exist_ok=True)
         processed_csv.write_text("col1\nval1\n")
 
