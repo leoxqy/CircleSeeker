@@ -111,11 +111,11 @@ circleseeker \
 
 ## Pipeline Overview
 
-CircleSeeker implements a 16-step analysis pipeline with two evidence-driven callers:
+CircleSeeker implements a 16-step analysis pipeline organized into 5 phases, driven by two evidence-based callers:
 
 - **CtcReads**: Reads containing **Ctc** (**C**oncatemeric **t**andem **c**opies) signals
-- **CtcReads-Caller** (Steps 1–10): Produces **Confirmed** U/M/C eccDNA from CtcReads evidence
-- **SplitReads-Caller** (Steps 11–13): Produces **Inferred** eccDNA from split-read/junction evidence
+- **CtcReads-Caller** (Steps 4–9): Produces **Confirmed** U/M/C eccDNA from CtcReads evidence
+- **SplitReads-Caller** (Steps 10–13): Produces **Inferred** eccDNA from split-read/junction evidence
 
 ### Architecture
 
@@ -123,39 +123,51 @@ CircleSeeker implements a 16-step analysis pipeline with two evidence-driven cal
   <img src="docs/images/architecture.jpg" width="700" alt="CircleSeeker Architecture">
 </p>
 
-- **CtcReads-Caller** (Steps 1-10): Detects eccDNA from reads with concatemeric tandem copies (CtcReads), producing **Confirmed** U/M/C eccDNA
-- **SplitReads-Caller** (Steps 11-13): Detects eccDNA from split-read evidence (non-CtcReads), producing **Inferred** eccDNA
-- **Integration** (Steps 14-16): Merges results and generates final output (CSV + HTML report)
+- **Preprocessing** (Steps 1-3): Dependency checks, tandem repeat detection, circular candidate extraction
+- **CtcReads-Caller** (Steps 4-9): Alignment, U/M/C classification, deduplication — producing **Confirmed** eccDNA
+- **SplitReads-Caller** (Steps 10-13): Read filtering, split-read inference — producing **Inferred** eccDNA
+- **Integration** (Steps 14-15): Merges results and generates summary report
+- **Packaging** (Step 16): Organizes final output directory
 
-### CtcReads-Caller (Steps 1-10)
+### Phase 1: Preprocessing (Steps 1-3)
 
 | Step | Module | Description |
 |------|--------|-------------|
 | 1 | check_dependencies | Validate required tools and dependencies |
 | 2 | tidehunter | Detect tandem repeats in HiFi reads |
 | 3 | tandem_to_ring | Convert tandem repeats to circular candidates |
+
+### Phase 2: CtcReads-Caller (Steps 4-9)
+
+| Step | Module | Description |
+|------|--------|-------------|
 | 4 | run_alignment | Map candidates to reference genome (minimap2) |
 | 5 | um_classify | Classify eccDNA as Unique (U) or Multiple (M) origin |
 | 6 | cecc_build | Identify Chimeric (C) eccDNA using LAST |
 | 7 | umc_process | Process and cluster U/M/C types |
 | 8 | cd_hit | Remove redundancy (99% identity threshold) |
 | 9 | ecc_dedup | Deduplicate and standardize coordinates |
-| 10 | read_filter | Filter reads for inference (exclude CtcReads) |
 
-### SplitReads-Caller (Steps 11-13)
+### Phase 3: SplitReads-Caller (Steps 10-13)
 
 | Step | Module | Description |
 |------|--------|-------------|
+| 10 | read_filter | Filter reads for inference (exclude CtcReads) |
 | 11 | minimap2 | Prepare reference index |
 | 12 | ecc_inference | Detect eccDNA using SplitReads-Core (built-in) |
 | 13 | curate_inferred_ecc | Curate inferred eccDNA |
 
-### Integration (Steps 14-16)
+### Phase 4: Integration (Steps 14-15)
 
 | Step | Module | Description |
 |------|--------|-------------|
 | 14 | ecc_unify | Merge confirmed and inferred results |
 | 15 | ecc_summary | Generate statistics and summaries |
+
+### Phase 5: Packaging (Step 16)
+
+| Step | Module | Description |
+|------|--------|-------------|
 | 16 | ecc_packager | Package final outputs |
 
 ## Output Files

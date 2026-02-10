@@ -280,9 +280,8 @@ class UMClassifyConfig(ToolConfigMixin):
     u_high_coverage_threshold: float = 0.98
     u_high_mapq_threshold: int = 50
     pos_tol_bp: int = 50
-    # Ambiguity interception
-    delta_uc: float = 0.05
-    epsilon_mc: float = 0.05
+    # Uecc span filter
+    span_ratio_min: float = 0.95
     # Legacy keys (for backward compatibility)
     min_full_length_coverage: float = 95.0
     max_identity_gap_for_mecc: float = 5.0

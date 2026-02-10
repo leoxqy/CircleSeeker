@@ -24,7 +24,7 @@ Common optional flags:
 - `--keep-tmp` Retain the temporary `.tmp_work` directory (default: remove); overrides `keep_tmp` in config
 - `--turbo` Enable turbo mode (RAM-backed temp directory for faster I/O)
 - `--preset CHOICE` Sensitivity preset (`relaxed` / `balanced` / `strict`)
-- `--show-steps` List all 16 steps without executing them
+- `--show-steps` List all 5 phases (16 steps) without executing them
 - `--dry-run` Show planned operations without running
 
 ---
@@ -78,37 +78,37 @@ circleseeker validate
 
 ---
 
-## 6. Evidence-Driven Callers
+## 6. 5-Phase Pipeline (Evidence-Driven Callers)
 
-For clarity, CircleSeeker describes the workflow as two evidence-driven callers:
+CircleSeeker organizes 16 internal steps into 5 display phases, centered on two evidence-driven callers:
 
 - **CtcReads**: reads carrying **Ctc** (**C**oncatemeric **t**andem **c**opies) signals (tracked as CtcR-* classes in `tandem_to_ring.csv`).
-- **CtcReads-Caller** (Steps 1–10): produces **Confirmed** U/M/C eccDNA from CtcReads evidence.
-- **SplitReads-Caller** (Steps 11–13): infers eccDNA from split-read/junction evidence using built-in SplitReads-Core and produces **Inferred** eccDNA.
-- **Integration** (Steps 14–16): de-redundancy, merging, reporting, and packaging for delivery.
+- **Preprocessing** (Steps 1–3): dependency checks, tandem repeat detection, circular candidate extraction.
+- **CtcReads-Caller** (Steps 4–9): produces **Confirmed** U/M/C eccDNA from CtcReads evidence.
+- **SplitReads-Caller** (Steps 10–13): infers eccDNA from split-read/junction evidence using built-in SplitReads-Core and produces **Inferred** eccDNA.
+- **Integration** (Steps 14–15): de-redundancy merging and summary reporting.
+- **Packaging** (Step 16): assembles the final deliverable directory.
 
-## 7. Step Overview
+## 7. Step Overview (5 Phases x 16 Steps)
 
-> Quick mapping: Steps 1–10 are **CtcReads-Caller**; Steps 11–13 are **SplitReads-Caller**; Steps 14–16 are **Integration**.
-
-| # | Name | Purpose |
-|---|------|---------|
-| 1 | `check_dependencies` | Verify required tools and inference engine |
-| 2 | `tidehunter` | Detect tandem repeats |
-| 3 | `tandem_to_ring` | Convert repeats to circular candidates |
-| 4 | `run_alignment` | Align candidates back to the reference (minimap2 or LAST) |
-| 5 | `um_classify` | Coverage + locus-based U/Mecc classification |
-| 6 | `cecc_build` | LAST-first complex eccDNA detection (graph fallback) |
-| 7 | `umc_process` | Consolidate U/M/C outputs |
-| 8 | `cd_hit` | Remove redundant sequences |
-| 9 | `ecc_dedup` | Harmonize coordinates |
-|10 | `read_filter` | Filter CtcR reads and build inference FASTA |
-|11 | `minimap2` | Build reference index for SplitReads-Core |
-|12 | `ecc_inference` | SplitReads-Core inference (built-in) |
-|13 | `curate_inferred_ecc` | Curate inferred eccDNA tables (`iecc_curator`) |
-|14 | `ecc_unify` | Merge confirmed and inferred tables using segment overlap algorithm for chimeric redundancy detection |
-|15 | `ecc_summary` | Generate statistics and reports |
-|16 | `ecc_packager` | Package final deliverables |
+| Phase | # | Name | Purpose |
+|-------|---|------|---------|
+| **Preprocessing** | 1 | `check_dependencies` | Verify required tools and inference engine |
+| | 2 | `tidehunter` | Detect tandem repeats |
+| | 3 | `tandem_to_ring` | Convert repeats to circular candidates |
+| **CtcReads-Caller** | 4 | `run_alignment` | Align candidates back to the reference (minimap2) |
+| | 5 | `um_classify` | Coverage + locus-based U/Mecc classification |
+| | 6 | `cecc_build` | LAST-first complex eccDNA detection (graph fallback) |
+| | 7 | `umc_process` | Consolidate U/M/C outputs |
+| | 8 | `cd_hit` | Remove redundant sequences |
+| | 9 | `ecc_dedup` | Harmonize coordinates |
+| **SplitReads-Caller** |10 | `read_filter` | Filter CtcR reads and build inference FASTA |
+| |11 | `minimap2` | Build reference index for SplitReads-Core |
+| |12 | `ecc_inference` | SplitReads-Core inference (built-in) |
+| |13 | `curate_inferred_ecc` | Curate inferred eccDNA tables (`iecc_curator`) |
+| **Integration** |14 | `ecc_unify` | Merge confirmed and inferred tables using segment overlap algorithm for chimeric redundancy detection |
+| |15 | `ecc_summary` | Generate statistics and reports |
+| **Packaging** |16 | `ecc_packager` | Package final deliverables |
 
 ---
 

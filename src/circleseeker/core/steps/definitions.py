@@ -95,3 +95,12 @@ PIPELINE_STEPS: list[PipelineStep] = [
     ),
 ]
 
+# User-facing pipeline phases – each groups consecutive steps for progress display.
+# Tuple format: (phase_name, start_idx, end_idx) → PIPELINE_STEPS[start:end].
+PIPELINE_PHASES: list[tuple[str, int, int]] = [
+    ("Preprocessing",      0,  3),   # steps[0:3]
+    ("CtcReads-Caller",    3,  9),   # steps[3:9]
+    ("SplitReads-Caller",  9,  13),  # steps[9:13]
+    ("Integration",        13, 15),  # steps[13:15]
+    ("Packaging",          15, 16),  # steps[15:16]
+]

@@ -63,9 +63,7 @@ tools:
     u_high_mapq_threshold: 50
     theta_locus: 0.95
     pos_tol_bp: 50
-    # Ambiguity interception (fractions 0-1)
-    delta_uc: 0.05
-    epsilon_mc: 0.05
+    span_ratio_min: 0.95
     # Legacy keys (accepted; prefer theta_full)
     min_full_length_coverage: 95.0
     max_identity_gap_for_mecc: 5.0

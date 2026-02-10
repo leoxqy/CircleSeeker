@@ -24,7 +24,7 @@ circleseeker -i reads.fasta -r reference.fa -o results/
 - `--keep-tmp` 保留临时目录（`.tmp_work`），默认删除；可显式覆盖配置文件中的 `keep_tmp` 设置
 - `--turbo` 启用 turbo 模式（使用 RAM-backed 临时目录加速 I/O）
 - `--preset CHOICE` 灵敏度预设（`relaxed` / `balanced` / `strict`）
-- `--show-steps` 查看 16 个步骤及状态（不执行）
+- `--show-steps` 查看 5 阶段 16 步骤及状态（不执行）
 - `--dry-run` 仅展示计划执行的操作，不实际运行
 
 ---
@@ -82,39 +82,39 @@ circleseeker validate
 
 ---
 
-## 6. 两条 Caller（证据来源视角）
+## 6. 5 阶段流水线（证据来源视角）
 
-为便于理解与展示，本项目将 eccDNA 的分析拆分为两条证据链路：
+CircleSeeker 将 16 个内部步骤组织为 5 个阶段展示，核心是两条证据驱动的 Caller：
 
 - **CtcReads**：含 **Ctc**（**C**oncatemeric **t**andem **c**opies）信号的 reads（在 `tandem_to_ring.csv` 中以 CtcR-* 分类体现）。
-- **CtcReads-Caller**（步骤 1-10）：基于 CtcReads 证据产出 **Confirmed** U/M/C eccDNA。
-- **SplitReads-Caller**（步骤 11-13）：基于 split-reads/junction 证据使用内置 SplitReads-Core 推断 eccDNA，产出 **Inferred** eccDNA。
-- **Integration**（步骤 14-16）：对 Confirmed/Inferred 做去冗余合并、统计与打包交付。
+- **Preprocessing**（步骤 1-3）：依赖检查、串联重复检测、环状候选提取。
+- **CtcReads-Caller**（步骤 4-9）：基于 CtcReads 证据产出 **Confirmed** U/M/C eccDNA。
+- **SplitReads-Caller**（步骤 10-13）：基于 split-reads/junction 证据使用内置 SplitReads-Core 推断 eccDNA，产出 **Inferred** eccDNA。
+- **Integration**（步骤 14-15）：对 Confirmed/Inferred 做去冗余合并与统计报告。
+- **Packaging**（步骤 16）：整理最终输出目录。
 
-## 7. 16 个步骤一览
+## 7. 步骤一览（5 阶段 × 16 步）
 
-> 快速定位：步骤 1-10 属于 **CtcReads-Caller**；步骤 11-13 属于 **SplitReads-Caller**；步骤 14-16 属于 **Integration**。
+| 阶段 | 序号 | 名称 | 作用 |
+|------|-----|------|------|
+| **Preprocessing** | 1 | `check_dependencies` | 检查外部工具与推断引擎可用性 |
+| | 2 | `tidehunter` | 检测 HiFi reads 中的串联重复 |
+| | 3 | `tandem_to_ring` | 将重复结构转换为候选环状序列 |
+| **CtcReads-Caller** | 4 | `run_alignment` | 使用 minimap2 将候选片段比对至参考基因组 |
+| | 5 | `um_classify` | 基于覆盖度与位点聚类区分 UeccDNA / MeccDNA |
+| | 6 | `cecc_build` | LAST 优先的复杂 eccDNA 检测（不可用时回退图方法） |
+| | 7 | `umc_process` | 生成 U/M/C FASTA 及汇总 |
+| | 8 | `cd_hit` | 去除冗余序列 |
+| | 9 | `ecc_dedup` | 合并并标准化坐标 |
+| **SplitReads-Caller** |10 | `read_filter` | 过滤 CtcR reads，生成推断输入 FASTA |
+| |11 | `minimap2` | 构建参考索引供 SplitReads-Core 使用 |
+| |12 | `ecc_inference` | 使用内置 SplitReads-Core 进行推断 |
+| |13 | `curate_inferred_ecc` | 整理推断结果（内部调用 `iecc_curator`） |
+| **Integration** |14 | `ecc_unify` | 合并确认与推断数据，使用片段重叠算法检测冗余嵌合体 eccDNA |
+| |15 | `ecc_summary` | 统计并生成 HTML/TXT 报告（含合并 FASTA） |
+| **Packaging** |16 | `ecc_packager` | 复制/重命名产物，形成最终目录 |
 
-| 序号 | 名称 | 作用 |
-|-----|------|------|
-| 1 | `check_dependencies` | 检查外部工具与推断引擎可用性 |
-| 2 | `tidehunter` | 检测 HiFi reads 中的串联重复 |
-| 3 | `tandem_to_ring` | 将重复结构转换为候选环状序列 |
-| 4 | `run_alignment` | 使用 minimap2（或 LAST）将候选片段比对至参考基因组 |
-| 5 | `um_classify` | 基于覆盖度与位点聚类区分 UeccDNA / MeccDNA |
-| 6 | `cecc_build` | LAST 优先的复杂 eccDNA 检测（不可用时回退图方法） |
-| 7 | `umc_process` | 生成 U/M/C FASTA 及汇总 |
-| 8 | `cd_hit` | 去除冗余序列 |
-| 9 | `ecc_dedup` | 合并并标准化坐标 |
-|10 | `read_filter` | 过滤 CtcR reads，生成推断输入 FASTA |
-|11 | `minimap2` | 构建参考索引供 SplitReads-Core 使用 |
-|12 | `ecc_inference` | 使用内置 SplitReads-Core 进行推断 |
-|13 | `curate_inferred_ecc` | 整理推断结果（内部调用 `iecc_curator`） |
-|14 | `ecc_unify` | 合并确认与推断数据，使用片段重叠算法检测冗余嵌合体 eccDNA |
-|15 | `ecc_summary` | 统计并生成 HTML/TXT 报告（含合并 FASTA） |
-|16 | `ecc_packager` | 复制/重命名产物，形成最终目录 |
-
-运行中可通过 `circleseeker --show-steps` 查看步骤列表。
+运行中可通过 `circleseeker --show-steps` 查看 5 阶段步骤列表。
 
 ---
 

@@ -147,7 +147,7 @@ def run_alignment(pipeline: Pipeline) -> None:
             "Invalid minimap2_align config; expected mapping, "
             f"got {type(minimap_cfg).__name__}"
         )
-    preset = minimap_cfg.get("preset", "sr")
+    preset = minimap_cfg.get("preset", "map-hifi")
     additional_args = minimap_cfg.get("additional_args", "")
     max_target_seqs = minimap_cfg.get("max_target_seqs", 200)
     # Identity filter with length-based compensation for HiFi data:
@@ -163,8 +163,8 @@ def run_alignment(pipeline: Pipeline) -> None:
     # Length-based preset splitting: use different presets for short/long sequences
     split_by_length = bool(minimap_cfg.get("split_by_length", False))
     split_length = int(minimap_cfg.get("split_length", 5000))
-    preset_short = minimap_cfg.get("preset_short", "sr")
-    preset_long = minimap_cfg.get("preset_long", "sr")
+    preset_short = minimap_cfg.get("preset_short", "map-hifi")
+    preset_long = minimap_cfg.get("preset_long", "map-hifi")
 
     if aligner_name == "last":
         pipeline.logger.warning(

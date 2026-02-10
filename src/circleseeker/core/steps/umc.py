@@ -63,6 +63,7 @@ def um_classify(pipeline: Pipeline) -> None:
         u_high_mapq_threshold=um_cfg.get("u_high_mapq_threshold", 50),
         theta_locus=um_cfg.get("theta_locus", 0.95),
         pos_tol_bp=um_cfg.get("pos_tol_bp", 50),
+        span_ratio_min=um_cfg.get("span_ratio_min", 0.95),
         logger=pipeline.logger.getChild("um_classify"),
     )
 
@@ -277,6 +278,8 @@ def cecc_build(pipeline: Pipeline) -> None:
         pd.DataFrame().to_csv(output_file, index=False)
         pipeline._set_result(ResultKeys.CECC_BUILD_OUTPUT, str(output_file))
         pipeline._set_result(ResultKeys.CECC_BUILD_COUNT, 0)
+        pipeline._set_result(ResultKeys.CECC_BUILD_FAILED, True)
+        pipeline._set_result(ResultKeys.CECC_BUILD_ERROR, str(e))
 
 
 def umc_process(pipeline: Pipeline) -> None:

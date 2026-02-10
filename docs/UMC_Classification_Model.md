@@ -185,4 +185,4 @@ lastal -P threads db_prefix query.fa | last-split > output.maf
 
 ## 6. 备注
 
-- `delta_uc` / `epsilon_mc` 等歧义参数在当前实现中保留但未单独输出文件；可用于后续扩展或研究用途。
+- 早期设计中的 `delta_uc` / `epsilon_mc` 歧义参数已移除（从未在运行时使用）。

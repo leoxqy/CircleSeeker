@@ -185,4 +185,4 @@ Each detected CeccDNA includes:
 
 ## 6. Notes
 
-- `delta_uc` / `epsilon_mc` and other ambiguity parameters are retained in the current implementation but do not produce separate output files; they may be used for future extensions or research purposes.
+- The early-design `delta_uc` / `epsilon_mc` ambiguity parameters have been removed (they were never used at runtime).

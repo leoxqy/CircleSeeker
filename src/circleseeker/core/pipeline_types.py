@@ -64,6 +64,8 @@ class ResultKeys:
     CECC_CORE_CSV = "cecc_core_csv"
     CECC_BUILD_OUTPUT = "cecc_build_output"
     CECC_BUILD_COUNT = "cecc_build_count"
+    CECC_BUILD_FAILED = "cecc_build_failed"
+    CECC_BUILD_ERROR = "cecc_build_error"
     UECC_FASTA = "uecc_fasta"
     MECC_FASTA = "mecc_fasta"
     CECC_FASTA = "cecc_fasta"

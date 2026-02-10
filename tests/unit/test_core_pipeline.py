@@ -20,6 +20,7 @@ from circleseeker.core.pipeline import (
     Pipeline,
     ResultKeys,
 )
+from circleseeker.core.steps.definitions import PIPELINE_PHASES, PIPELINE_STEPS
 from circleseeker.config import Config
 from circleseeker.exceptions import PipelineError
 
@@ -582,3 +583,176 @@ def test_cecc_build_uses_unclassified_only(tmp_path):
     cecc_ids = set(cecc_after.get("query_id", pd.Series([], dtype=str)).astype(str))
     assert "read_mc" not in cecc_ids
     assert "read_c" in cecc_ids
+
+
+class TestPipelinePhases:
+    """Tests for PIPELINE_PHASES definitions."""
+
+    def test_phases_cover_all_steps(self):
+        """PIPELINE_PHASES must cover every step exactly once (no gaps, no overlaps)."""
+        total_steps = len(PIPELINE_STEPS)
+        covered = []
+        for _name, start, end in PIPELINE_PHASES:
+            assert start < end, f"Empty phase range: [{start}, {end})"
+            covered.extend(range(start, end))
+
+        assert covered == list(range(total_steps)), (
+            "PIPELINE_PHASES must cover indices 0..{} contiguously without overlap".format(
+                total_steps - 1
+            )
+        )
+
+    def test_phases_start_at_zero(self):
+        """First phase must start at index 0."""
+        assert PIPELINE_PHASES[0][1] == 0
+
+    def test_phases_end_at_step_count(self):
+        """Last phase must end at len(PIPELINE_STEPS)."""
+        assert PIPELINE_PHASES[-1][2] == len(PIPELINE_STEPS)
+
+    def test_phases_are_contiguous(self):
+        """Each phase's start must equal the previous phase's end."""
+        for i in range(1, len(PIPELINE_PHASES)):
+            prev_end = PIPELINE_PHASES[i - 1][2]
+            curr_start = PIPELINE_PHASES[i][1]
+            assert prev_end == curr_start, (
+                f"Gap between phase {i - 1} (end={prev_end}) and phase {i} (start={curr_start})"
+            )
+
+    def test_five_phases(self):
+        """There must be exactly 5 phases."""
+        assert len(PIPELINE_PHASES) == 5
+
+
+class TestCheckpointPolicy:
+    """Tests for checkpoint_policy behaviour when config changes."""
+
+    def _make_pipeline_with_checkpoint(self, tmp_path, *, completed=None, config_hash="old_hash"):
+        """Create a pipeline with a pre-existing checkpoint."""
+        import json
+
+        config = Config(output_dir=tmp_path / "out", prefix="sample")
+        pipeline = Pipeline(config)
+
+        # Write a fake checkpoint with a different config hash
+        checkpoint_data = {
+            "version": "2.0",
+            "completed_steps": completed or ["check_dependencies"],
+            "current_step": None,
+            "failed_step": None,
+            "results": {},
+            "step_metadata": {},
+            "pipeline_start_time": time.time() - 100,
+            "last_checkpoint_time": time.time(),
+            "config_hash": config_hash,
+        }
+        pipeline.state_file.parent.mkdir(parents=True, exist_ok=True)
+        pipeline.state_file.write_text(json.dumps(checkpoint_data))
+
+        return config, pipeline
+
+    def test_policy_continue_resumes(self, tmp_path):
+        """checkpoint_policy='continue' should resume despite config change."""
+        config, _ = self._make_pipeline_with_checkpoint(tmp_path)
+        config.runtime.checkpoint_policy = "continue"
+
+        pipeline = Pipeline(config)
+        assert "check_dependencies" in pipeline.state.completed_steps
+
+    def test_policy_reset_starts_fresh(self, tmp_path):
+        """checkpoint_policy='reset' should discard checkpoint on config change."""
+        config, _ = self._make_pipeline_with_checkpoint(tmp_path)
+        config.runtime.checkpoint_policy = "reset"
+
+        pipeline = Pipeline(config)
+        assert pipeline.state.completed_steps == []
+
+    def test_policy_fail_raises(self, tmp_path):
+        """checkpoint_policy='fail' should raise PipelineError on config change."""
+        config, _ = self._make_pipeline_with_checkpoint(tmp_path)
+        config.runtime.checkpoint_policy = "fail"
+
+        with pytest.raises(PipelineError, match="checkpoint_policy=fail"):
+            Pipeline(config)
+
+
+class TestSoftFailWarnings:
+    """Tests for soft-fail warning reporting."""
+
+    def test_report_soft_failures_cecc(self, tmp_path):
+        """_report_soft_failures should warn when cecc_build failed."""
+        config = Config(output_dir=tmp_path / "out", prefix="sample")
+        pipeline = Pipeline(config)
+        pipeline._set_result(ResultKeys.CECC_BUILD_FAILED, True)
+        pipeline._set_result(ResultKeys.CECC_BUILD_ERROR, "test error")
+
+        import logging
+
+        with patch.object(pipeline.logger, "warning") as mock_warn:
+            pipeline._report_soft_failures()
+            mock_warn.assert_called_once()
+            assert "cecc_build" in mock_warn.call_args[0][0]
+            assert "test error" in mock_warn.call_args[0][0]
+
+    def test_report_soft_failures_inference(self, tmp_path):
+        """_report_soft_failures should warn when inference failed."""
+        config = Config(output_dir=tmp_path / "out", prefix="sample")
+        pipeline = Pipeline(config)
+        pipeline._set_result(ResultKeys.INFERENCE_FAILED, True)
+        pipeline._set_result(ResultKeys.INFERENCE_ERROR, "boom")
+
+        with patch.object(pipeline.logger, "warning") as mock_warn:
+            pipeline._report_soft_failures()
+            mock_warn.assert_called_once()
+            assert "ecc_inference" in mock_warn.call_args[0][0]
+            assert "boom" in mock_warn.call_args[0][0]
+
+    def test_report_soft_failures_none(self, tmp_path):
+        """_report_soft_failures should not warn when nothing failed."""
+        config = Config(output_dir=tmp_path / "out", prefix="sample")
+        pipeline = Pipeline(config)
+
+        with patch.object(pipeline.logger, "warning") as mock_warn:
+            pipeline._report_soft_failures()
+            mock_warn.assert_not_called()
+
+    def test_report_soft_failures_both(self, tmp_path):
+        """_report_soft_failures should warn twice when both failed."""
+        config = Config(output_dir=tmp_path / "out", prefix="sample")
+        pipeline = Pipeline(config)
+        pipeline._set_result(ResultKeys.CECC_BUILD_FAILED, True)
+        pipeline._set_result(ResultKeys.CECC_BUILD_ERROR, "err1")
+        pipeline._set_result(ResultKeys.INFERENCE_FAILED, True)
+        pipeline._set_result(ResultKeys.INFERENCE_ERROR, "err2")
+
+        with patch.object(pipeline.logger, "warning") as mock_warn:
+            pipeline._report_soft_failures()
+            assert mock_warn.call_count == 2
+
+
+class TestTurboModeTupleOrdering:
+    """Test that _setup_turbo_mode returns correct tuple ordering."""
+
+    def test_return_tuple_first_element_is_shm_path(self, tmp_path):
+        """temp_dir (first element) must be the actual /dev/shm path, not the symlink."""
+        from pathlib import Path
+
+        config = Config(output_dir=tmp_path / "out", prefix="sample")
+        pipeline = Pipeline(config)
+
+        # Simulate what _setup_turbo_mode does without requiring /dev/shm
+        shm_path = tmp_path / "fake_shm"
+        shm_path.mkdir()
+        symlink_path = tmp_path / "out" / ".tmp"
+        symlink_path.parent.mkdir(parents=True, exist_ok=True)
+        symlink_path.symlink_to(shm_path)
+
+        # Verify the actual method's return signature by inspecting source
+        import inspect
+        source = inspect.getsource(pipeline._setup_turbo_mode)
+        # The return statement should have shm_path first
+        assert "return shm_path, shm_path, symlink_path" in source
+
+        # Cleanup
+        symlink_path.unlink()
+        shm_path.rmdir()

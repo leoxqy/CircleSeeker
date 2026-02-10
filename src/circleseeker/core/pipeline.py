@@ -23,7 +23,7 @@ from circleseeker.core.pipeline_types import (
     ResultKeys,
     StepMetadata,
 )
-from circleseeker.core.steps.definitions import PIPELINE_STEPS
+from circleseeker.core.steps.definitions import PIPELINE_PHASES, PIPELINE_STEPS
 
 # Step execution lives in `circleseeker.core.steps.*` and is imported lazily by
 # wrapper methods on `Pipeline` to keep imports light.
@@ -490,7 +490,7 @@ class Pipeline:
             return None
 
         self.logger.info(f"Turbo mode: /dev/shm available space {available_gb:.1f}GB")
-        return symlink_path, shm_path, symlink_path
+        return shm_path, shm_path, symlink_path
 
     def _setup_normal_mode(self, config: Config) -> None:
         """Setup normal mode with temp directory under output_dir."""
@@ -782,12 +782,6 @@ class Pipeline:
         click.echo("CircleSeeker Pipeline Steps:")
         click.echo("=" * 70)
 
-        step_groups = {
-            1: "CtcReads-Caller",
-            11: "SplitReads-Caller",
-            14: "Integration",
-        }
-
         name_width = max(
             (len((s.display_name or s.name)) for s in self.STEPS),
             default=0,
@@ -795,34 +789,34 @@ class Pipeline:
         name_width = max(name_width, 16)
         idx_width = len(str(len(self.STEPS)))
 
-        for i, step in enumerate(self.STEPS, 1):
-            group = step_groups.get(i)
-            if group:
-                click.echo(f"{group}:")
-            step_label = step.display_name or step.name
-            if step.name in self.state.completed_steps:
-                status = "✓"
-            elif step.name == self.state.current_step:
-                status = "◉"
-            elif step.name == self.state.failed_step:
-                status = "✗"
-            else:
-                status = "○"
+        for phase_idx, (phase_name, p_start, p_end) in enumerate(PIPELINE_PHASES, 1):
+            click.echo(f"Phase {phase_idx}: {phase_name}")
+            for i in range(p_start, p_end):
+                step = self.STEPS[i]
+                step_number = i + 1
+                step_label = step.display_name or step.name
+                if step.name in self.state.completed_steps:
+                    status = "✓"
+                elif step.name == self.state.current_step:
+                    status = "◉"
+                elif step.name == self.state.failed_step:
+                    status = "✗"
+                else:
+                    status = "○"
 
-            # Simplified output: aligned columns, no skippable info
-            click.echo(
-                f"{status} Step {i:{idx_width}d}: {step_label:<{name_width}} - {step.description}"
-            )
+                click.echo(
+                    f"  {status} {step_number:{idx_width}d}. {step_label:<{name_width}} - {step.description}"
+                )
 
-            # Detailed info (optional)
-            if detailed and step.name in self.state.step_metadata:
-                meta = self.state.step_metadata[step.name]
-                if meta.duration:
-                    click.echo(f"    Duration: {meta.duration:.1f}s")
-                if meta.error_message:
-                    click.echo(f"    Error: {meta.error_message}")
-                if meta.output_files:
-                    click.echo(f"    Output files: {len(meta.output_files)} files")
+                # Detailed info (optional)
+                if detailed and step.name in self.state.step_metadata:
+                    meta = self.state.step_metadata[step.name]
+                    if meta.duration:
+                        click.echo(f"       Duration: {meta.duration:.1f}s")
+                    if meta.error_message:
+                        click.echo(f"       Error: {meta.error_message}")
+                    if meta.output_files:
+                        click.echo(f"       Output files: {len(meta.output_files)} files")
 
         click.echo("=" * 70)
 
@@ -833,7 +827,7 @@ class Pipeline:
                 click.echo(f"Total runtime: {total_time:.1f}s")
 
         if detailed and self.state.failed_step:
-            click.echo(f"⚠️  Previous run failed at: {self.state.failed_step}")
+            click.echo(f"  Previous run failed at: {self.state.failed_step}")
             click.echo(
                 "   Use --force to restart from beginning, "
                 "or resume will continue from failure point"
@@ -860,7 +854,21 @@ class Pipeline:
         # Show completion status
         completed = len(self.state.completed_steps)
         total = len(self.STEPS)
-        click.echo(f"Progress: {completed}/{total} steps completed")
+
+        # Determine current phase
+        current_phase_num = len(PIPELINE_PHASES)
+        current_phase_name = PIPELINE_PHASES[-1][0]
+        for idx, (phase_name, p_start, p_end) in enumerate(PIPELINE_PHASES, 1):
+            phase_step_names = [self.STEPS[i].name for i in range(p_start, p_end)]
+            if not all(s in self.state.completed_steps for s in phase_step_names):
+                current_phase_num = idx
+                current_phase_name = phase_name
+                break
+
+        click.echo(
+            f"Progress: Phase {current_phase_num}/{len(PIPELINE_PHASES)} "
+            f"({current_phase_name}), {completed}/{total} steps completed"
+        )
 
         if self.state.completed_steps:
             click.echo(f"Completed: {', '.join(self.state.completed_steps)}")
@@ -881,6 +889,27 @@ class Pipeline:
                 click.echo(f"Total runtime: {runtime:.1f}s")
 
         click.echo("=" * 50)
+
+    def _report_soft_failures(self) -> None:
+        """Emit visible warnings for any steps that soft-failed during this run."""
+        from circleseeker.core.pipeline_types import ResultKeys
+
+        warnings: list[str] = []
+
+        if self._get_result(ResultKeys.CECC_BUILD_FAILED):
+            err = self._get_result(ResultKeys.CECC_BUILD_ERROR, "unknown error")
+            warnings.append(
+                f"CeccDNA detection (cecc_build) FAILED — 0 CeccDNA reported. Error: {err}"
+            )
+
+        if self._get_result(ResultKeys.INFERENCE_FAILED):
+            err = self._get_result(ResultKeys.INFERENCE_ERROR, "unknown error")
+            warnings.append(
+                f"SplitReads inference (ecc_inference) FAILED — 0 Inferred eccDNA reported. Error: {err}"
+            )
+
+        for msg in warnings:
+            self.logger.warning(msg)
 
     def run(
         self, start_from: Optional[int] = None, stop_at: Optional[int] = None, force: bool = False
@@ -906,67 +935,89 @@ class Pipeline:
                     f"start_from ({start_from}) cannot be greater than stop_at ({stop_at})"
                 )
 
-            # Determine step range
+            # Determine step range (1-based, for --start-from / --stop-at)
             start_idx = (start_from - 1) if start_from else 0
             end_idx = stop_at if stop_at else len(self.STEPS)
 
-            steps_slice = self.STEPS[start_idx:end_idx]
-            iterator = iter_progress(
-                steps_slice,
-                total=len(steps_slice),
-                desc="Process",
+            # Build list of (phase_name, [steps_in_phase]) honouring the slice
+            active_phases: list[tuple[str, list[tuple[int, PipelineStep]]]] = []
+            for phase_name, p_start, p_end in PIPELINE_PHASES:
+                # Intersect phase range [p_start, p_end) with requested [start_idx, end_idx)
+                eff_start = max(p_start, start_idx)
+                eff_end = min(p_end, end_idx)
+                if eff_start >= eff_end:
+                    continue
+                phase_steps = [
+                    (idx, self.STEPS[idx]) for idx in range(eff_start, eff_end)
+                ]
+                active_phases.append((phase_name, phase_steps))
+
+            total_phases = len(active_phases)
+            phase_iter = iter_progress(
+                active_phases,
+                total=total_phases,
+                desc="Pipeline",
                 enabled=getattr(self.config.runtime, "enable_progress", True),
             )
-            for step_index, step in enumerate(iterator, start_idx):
-                step_number = step_index + 1  # display is 1-based (matches --start-from/--stop-at)
-                step_label = step.display_name or step.name
-                if step.name in self.state.completed_steps and not force:
-                    self.logger.info(f"Skipping completed step {step_number}: {step_label}")
-                    continue
+            for phase_num, (phase_name, phase_steps) in enumerate(phase_iter, 1):
+                phase_start_time = time.time()
+                self.logger.info(f"Phase {phase_num}/{total_phases}: {phase_name}")
 
-                # Check skip condition
-                if step.skip_condition and getattr(self.config, step.skip_condition, False):
-                    self.logger.info(f"Skipping step {step_number}: {step_label} (user requested)")
-                    continue
+                for step_index, step in phase_steps:
+                    step_number = step_index + 1  # 1-based display
+                    step_label = step.display_name or step.name
+                    if step.name in self.state.completed_steps and not force:
+                        self.logger.debug(f"  skipping completed {step_label}")
+                        continue
 
-                self.logger.info(f"Running step {step_number}: {step_label}")
-                self.state.current_step = step.name
-                self.state.add_step_metadata(step.name)
-                self._save_state()
+                    # Check skip condition
+                    if step.skip_condition and getattr(self.config, step.skip_condition, False):
+                        self.logger.debug(f"  skipping {step_label} (user requested)")
+                        continue
 
-                # Execute step
-                step_start_time = time.time()
-                try:
-                    output_files = self._execute_step(step)
-
-                    # Mark as completed
-                    self.state.complete_step(step.name, output_files or [])
-                    self.state.current_step = None
-                    self.state.failed_step = None  # Clear any previous failure
-
-                    step_duration = time.time() - step_start_time
-                    self.logger.info(
-                        f"Completed step {step_number}: {step_label} ({step_duration:.1f}s)"
-                    )
-
-                except Exception as e:
-                    # Handle step failure
-                    error_msg = str(e)
-                    self.state.fail_step(step.name, error_msg)
-                    self.state.current_step = None
-
-                    step_duration = time.time() - step_start_time
-                    self.logger.error(f"Step {step_number} failed: {step_label} ({step_duration:.1f}s)")
-                    self.logger.error(f"Error: {error_msg}", exc_info=True)
-
-                    # Save state with failure info
+                    self.logger.debug(f"  running {step_label}...")
+                    self.state.current_step = step.name
+                    self.state.add_step_metadata(step.name)
                     self._save_state()
 
-                    # Re-raise the exception
-                    raise PipelineError(f"Pipeline failed at step {step.name}: {error_msg}") from e
+                    # Execute step
+                    step_start_time = time.time()
+                    try:
+                        output_files = self._execute_step(step)
 
-                # Save successful completion
-                self._save_state()
+                        # Mark as completed
+                        self.state.complete_step(step.name, output_files or [])
+                        self.state.current_step = None
+                        self.state.failed_step = None  # Clear any previous failure
+
+                        step_duration = time.time() - step_start_time
+                        self.logger.debug(
+                            f"  completed {step_label} ({step_duration:.1f}s)"
+                        )
+
+                    except Exception as e:
+                        # Handle step failure
+                        error_msg = str(e)
+                        self.state.fail_step(step.name, error_msg)
+                        self.state.current_step = None
+
+                        step_duration = time.time() - step_start_time
+                        self.logger.error(f"Step {step_number} failed: {step_label} ({step_duration:.1f}s)")
+                        self.logger.error(f"Error: {error_msg}", exc_info=True)
+
+                        # Save state with failure info
+                        self._save_state()
+
+                        # Re-raise the exception
+                        raise PipelineError(f"Pipeline failed at step {step.name}: {error_msg}") from e
+
+                    # Save successful completion
+                    self._save_state()
+
+                phase_duration = time.time() - phase_start_time
+                self.logger.info(
+                    f"Phase {phase_num}/{total_phases}: {phase_name} completed ({phase_duration:.1f}s)"
+                )
 
             # After successful completion, finalize outputs unless skipped
             if not getattr(self.config, "skip_organize", False):
@@ -974,6 +1025,9 @@ class Pipeline:
                 self.logger.info("Outputs organized to final directories")
             else:
                 self.logger.info("Skipping output organization (--skip-organize specified)")
+
+            # Surface soft-fail warnings so they are visible at INFO level
+            self._report_soft_failures()
 
             self.logger.info("Pipeline completed successfully")
             return self.state.results

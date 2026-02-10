@@ -127,11 +127,6 @@ Notes:
 
 #### Ambiguity Parameters
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `delta_uc` | float | `0.05` | U/C boundary ambiguity tolerance |
-| `epsilon_mc` | float | `0.05` | M/C boundary ambiguity tolerance |
-
 #### Legacy Compatible Parameters (Deprecated but Accepted)
 
 | Parameter | Type | Default | Description |
@@ -285,8 +280,6 @@ tools:
     u_high_mapq_threshold: 50
     theta_locus: 0.95
     pos_tol_bp: 50
-    delta_uc: 0.05
-    epsilon_mc: 0.05
 
   cecc_build:
     overlap_threshold: 0.95
@@ -346,5 +339,5 @@ Notes:
 ## 7. Related Docs
 
 - [CLI Reference](CLI_Reference_en.md) - Command-line options
-- [Pipeline Modules](Pipeline_Modules_en.md) - 16-step workflow
+- [Pipeline Modules](Pipeline_Modules_en.md) - 5-phase, 16-step workflow
 - [Output Format Reference](Output_Format_Reference_en.md) - Output file schemas

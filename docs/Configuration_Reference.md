@@ -135,11 +135,6 @@ circleseeker --debug --generate-config > config.yaml
 
 #### 模糊判定参数
 
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `delta_uc` | float | `0.05` | U/C 边界模糊容差 |
-| `epsilon_mc` | float | `0.05` | M/C 边界模糊容差 |
-
 #### 旧版兼容参数（已弃用但仍接受）
 
 | 参数 | 类型 | 默认值 | 说明 |
@@ -302,8 +297,6 @@ tools:
     u_high_mapq_threshold: 50
     theta_locus: 0.95
     pos_tol_bp: 50
-    delta_uc: 0.05
-    epsilon_mc: 0.05
 
   cecc_build:
     overlap_threshold: 0.95
@@ -364,5 +357,5 @@ tools:
 ## 7. 相关文档
 
 - [CLI 使用手册](CLI_Reference.md) - 命令行参数详解
-- [管道模块说明](Pipeline_Modules.md) - 16 步流程详解
+- [管道模块说明](Pipeline_Modules.md) - 5 阶段 16 步流程详解
 - [输出格式参考](Output_Format_Reference.md) - 输出文件格式定义

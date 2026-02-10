@@ -277,6 +277,22 @@ def execute_pipeline(
     # Print beautiful completion message
     print_formatted(formatter.separator())
     print_formatted(formatter.success_message())
+
+    # Surface soft-fail warnings prominently in terminal output
+    from circleseeker.core.pipeline_types import ResultKeys
+
+    soft_fail_msgs: list[str] = []
+    if pipeline.state.results.get(ResultKeys.CECC_BUILD_FAILED):
+        soft_fail_msgs.append(
+            "[!] CeccDNA detection (cecc_build) FAILED — 0 CeccDNA in results. Check logs for details."
+        )
+    if pipeline.state.results.get(ResultKeys.INFERENCE_FAILED):
+        soft_fail_msgs.append(
+            "[!] SplitReads inference FAILED — 0 Inferred eccDNA in results. Check logs for details."
+        )
+    for msg in soft_fail_msgs:
+        print_formatted(f"  {msg}")
+
     if not cfg.keep_tmp:
         print_formatted(formatter.cleanup_message())
     # Use user_output_dir for display (cfg.output_dir was changed to temp_dir by Pipeline)
