@@ -5,26 +5,41 @@ All notable changes to CircleSeeker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.1] - 2026-01-29
+## [1.1.1] - Unreleased
+
+### Added
+- **5-phase pipeline display**: Pipeline progress now shows 5 phases (Preprocessing / CtcReads-Caller / SplitReads-Caller / Integration / Packaging) instead of 16 flat steps. Internal 16-step granularity and checkpoint resume are unchanged.
+- **Soft-fail visibility**: When `cecc_build` or `ecc_inference` soft-fails, a prominent `[!]` warning is now shown in terminal output and WARNING-level logs, so users know inferred/CeccDNA results may be missing.
+- **`span_ratio_min` config**: UeccDNA span ratio threshold (default 0.95) is now configurable via `tools.um_classify.span_ratio_min` in YAML config.
+- **`--fast-align` option**: ~3x faster CeccDNA detection using `lastal --split` single-pass mode.
+- **Step dependency validation**: `depends_on` attribute on all 16 pipeline steps with automatic cycle detection via Kahn's algorithm.
+- **Dev versioning**: Switched to PEP 440 `.dev` suffix (`1.1.1.dev0`) with single-source version in `__version__.py`.
 
 ### Fixed
-- **Exception handling**: Narrowed overly broad `except Exception` clauses in `iecc_curator.py` and `tidehunter.py` to specific exception types (`OSError`, `ValueError`, `AttributeError`)
-- **Unused imports**: Removed unused `intervaltree` and `numpy` imports from `splitreads_core.py`
+- **Turbo mode tuple ordering**: `_setup_turbo_mode` returned wrong tuple order causing `temp_dir` to be set to the symlink instead of the actual `/dev/shm` path.
+- **Alignment preset fallback**: `run_alignment` preset fallback was `"sr"` (short-read) instead of `"map-hifi"`, which could produce incorrect alignments if config was passed as a raw dict.
+- **Temp file prefixing**: All temp files now use consistent prefix naming to avoid conflicts in parallel runs.
+- **LAST race condition**: Added file locking to prevent LAST database race conditions in parallel runs.
+- **Exception handling**: Narrowed overly broad `except Exception` clauses in `iecc_curator.py` and `tidehunter.py` to specific exception types.
+
+### Changed
+- **Pipeline display**: `--show-steps` output now groups steps under 5 phase headers. Progress bar shows `3/5` instead of `7/16`. Phase-level logs use INFO, sub-step details use DEBUG.
+- **`show-checkpoint` output**: Now shows `Phase 2/5 (CtcReads-Caller), 7/16 steps completed` instead of just `7/16 steps completed`.
+- **Documentation**: All docs (README, Pipeline_Modules, CLI_Reference, Configuration_Reference) updated to reflect 5-phase organization and new step ranges.
+
+### Removed
+- **Dead config params**: Removed `delta_uc` and `epsilon_mc` from config (were defined but never used at runtime).
 
 ### Improved
-- **Performance optimization**: Replaced 12 `iterrows()` calls with `itertuples()` or vectorized operations across `umc_process.py`, `ecc_unify.py`, and `ecc_output_formatter.py` for 3-6x speedup in DataFrame iterations
-- **Step dependency validation**: Added `depends_on` attribute to all 16 pipeline steps in `definitions.py` with automatic validation in `pipeline.py` using Kahn's algorithm for cycle detection
+- **Performance**: Replaced 12 `iterrows()` calls with `itertuples()` or vectorized operations for 3-6x speedup in DataFrame iterations.
+- **LAST pipeline**: `lastal --split` single-pass eliminates intermediate MAF file for faster CeccDNA detection.
 
-### Technical Details
-- **Files Modified**:
-  - `src/circleseeker/modules/iecc_curator.py`: Exception type narrowing
-  - `src/circleseeker/external/tidehunter.py`: Exception type narrowing
-  - `src/circleseeker/modules/splitreads_core.py`: Removed unused imports
-  - `src/circleseeker/modules/umc_process.py`: 5 iterrows optimizations
-  - `src/circleseeker/modules/ecc_unify.py`: 5 iterrows optimizations
-  - `src/circleseeker/modules/ecc_output_formatter.py`: 2 iterrows optimizations
-  - `src/circleseeker/core/steps/definitions.py`: Added depends_on for all steps
-  - `src/circleseeker/core/pipeline.py`: Added `_validate_step_dependencies()` method
+### Tests
+- Added `TestPipelinePhases` (5 tests): phase coverage, contiguity, and count validation.
+- Added `TestCheckpointPolicy` (3 tests): `reset` / `fail` / `continue` checkpoint policy behaviors.
+- Added `TestSoftFailWarnings` (4 tests): cecc_build and inference soft-fail warning output.
+- Added `TestTurboModeTupleOrdering` (1 test): regression guard for turbo mode return value.
+- Added PEP 440 version format validation test.
 
 ## [1.1.0] - 2026-01-25
 
@@ -473,7 +488,7 @@ After (0.9.4):
 
 ### Added
 - Initial public release
-- Comprehensive 16-step eccDNA detection pipeline
+- Comprehensive eccDNA detection pipeline (16 internal steps)
 - Support for dual inference engines (Cresil/Cyrcular)
 - HTML report generation
 - Checkpoint and resume functionality
