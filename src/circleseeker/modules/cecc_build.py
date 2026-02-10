@@ -463,25 +463,43 @@ class CeccBuild:
         reference, if not, build it there. This allows one-time indexing
         that persists across runs.
 
+        When tmp_dir is on a different filesystem (e.g. /dev/shm in turbo
+        mode), the database files are staged there to avoid slow random I/O
+        on network filesystems.  The canonical copy is kept for persistence.
+
         Uses file locking to prevent race conditions when multiple processes
         try to build the database simultaneously.
         """
         # Canonical path: next to reference genome
         canonical_prefix = self._canonical_lastdb_prefix(reference_fasta)
 
-        # Fallback: in tmp_dir if provided
+        # Local staging path: in tmp_dir if provided
         lastdb_in_temp = self.tmp_dir / canonical_prefix.name if self.tmp_dir else None
 
-        # Check candidates (LAST index consists of multiple files, .suf is required)
-        # Note: prefix is e.g. "ref.lastdb", so the .suf file is "ref.lastdb.suf"
-        # — we must append ".suf", not replace the existing suffix.
-        for candidate in [canonical_prefix, lastdb_in_temp]:
-            if candidate and Path(str(candidate) + ".suf").exists():
-                self.logger.info(f"Using existing LAST database: {candidate}")
-                return candidate
+        # ---- 1. If a local copy already exists in tmp_dir, use it directly ----
+        if lastdb_in_temp and Path(str(lastdb_in_temp) + ".suf").exists():
+            self.logger.info(f"Using local LAST database: {lastdb_in_temp}")
+            return lastdb_in_temp
 
-        # Not found, need to build. Use file lock to prevent race condition
-        # when multiple processes try to build simultaneously.
+        # ---- 2. Check canonical path (next to reference) ----
+        canonical_exists = Path(str(canonical_prefix) + ".suf").exists()
+
+        if not canonical_exists:
+            # Need to build at canonical location first
+            canonical_prefix = self._build_last_db(canonical_prefix, reference_fasta)
+            canonical_exists = True
+
+        # ---- 3. Stage to tmp_dir if it differs from canonical location ----
+        if lastdb_in_temp and lastdb_in_temp.parent.resolve() != canonical_prefix.parent.resolve():
+            staged = self._stage_lastdb_to_local(canonical_prefix, lastdb_in_temp)
+            if staged:
+                return lastdb_in_temp
+
+        self.logger.info(f"Using existing LAST database: {canonical_prefix}")
+        return canonical_prefix
+
+    def _build_last_db(self, canonical_prefix: Path, reference_fasta: Path) -> Path:
+        """Build LAST database at canonical location with file locking."""
         # IMPORTANT: The lock file must NOT be deleted after use. flock() is
         # inode-based — if the file is deleted and recreated, new processes
         # lock a different inode and the mutual exclusion breaks silently.
@@ -511,6 +529,52 @@ class CeccBuild:
 
             return canonical_prefix
             # Lock is released when file handle is closed (exiting with block)
+
+    def _stage_lastdb_to_local(self, src_prefix: Path, dst_prefix: Path) -> bool:
+        """Copy LAST database files to a local directory for faster I/O.
+
+        Returns True if staging succeeded, False on failure (caller should
+        fall back to the original path).
+        """
+        import shutil
+
+        # LAST database extensions (all required for lastal)
+        _LASTDB_EXTS = (".bck", ".des", ".prj", ".sds", ".ssp", ".suf", ".tis")
+
+        src_files = [Path(str(src_prefix) + ext) for ext in _LASTDB_EXTS]
+        missing = [f for f in src_files if not f.exists()]
+        if missing:
+            self.logger.warning(
+                f"Cannot stage LAST database: missing files: "
+                f"{[f.name for f in missing]}"
+            )
+            return False
+
+        total_bytes = sum(f.stat().st_size for f in src_files)
+        total_gb = total_bytes / (1024 ** 3)
+        self.logger.info(
+            f"Staging LAST database to local storage ({total_gb:.1f} GB): "
+            f"{src_prefix} -> {dst_prefix}"
+        )
+
+        try:
+            dst_prefix.parent.mkdir(parents=True, exist_ok=True)
+            for src_file in src_files:
+                dst_file = Path(str(dst_prefix) + src_file.suffix)
+                shutil.copy2(str(src_file), str(dst_file))
+            self.logger.info("LAST database staged successfully")
+            return True
+        except (OSError, shutil.Error) as e:
+            self.logger.warning(
+                f"Failed to stage LAST database to local storage: {e}. "
+                f"Falling back to network path."
+            )
+            # Clean up partial copy
+            for ext in _LASTDB_EXTS:
+                partial = Path(str(dst_prefix) + ext)
+                if partial.exists():
+                    partial.unlink(missing_ok=True)
+            return False
 
     @staticmethod
     def _read_log_tail(log_path: Path, max_bytes: int = 32000) -> str:

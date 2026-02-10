@@ -5,7 +5,7 @@ All notable changes to CircleSeeker will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.1] - Unreleased
+## [1.1.1.dev1] - Unreleased
 
 ### Added
 - **5-phase pipeline display**: Pipeline progress now shows 5 phases (Preprocessing / CtcReads-Caller / SplitReads-Caller / Integration / Packaging) instead of 16 flat steps. Internal 16-step granularity and checkpoint resume are unchanged.
@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`--fast-align` option**: ~3x faster CeccDNA detection using `lastal --split` single-pass mode.
 - **Step dependency validation**: `depends_on` attribute on all 16 pipeline steps with automatic cycle detection via Kahn's algorithm.
 - **Dev versioning**: Switched to PEP 440 `.dev` suffix (`1.1.1.dev0`) with single-source version in `__version__.py`.
+- **Turbo mode LAST database staging**: In `--turbo` mode, LAST database files are automatically staged from network filesystem to `/dev/shm` before alignment, eliminating random I/O bottleneck on HPC clusters with parallel filesystems (Lustre/GPFS).
 
 ### Fixed
 - **Turbo mode tuple ordering**: `_setup_turbo_mode` returned wrong tuple order causing `temp_dir` to be set to the symlink instead of the actual `/dev/shm` path.
