@@ -682,7 +682,10 @@ def format_output(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load data
-    unified_df = pd.read_csv(unified_csv)
+    unified_df = pd.read_csv(
+        unified_csv,
+        dtype={"low_mapq": "boolean", "low_identity": "boolean"},
+    )
 
     uecc_df = pd.read_csv(uecc_core_csv) if uecc_core_csv and uecc_core_csv.exists() else None
     mecc_df = pd.read_csv(mecc_sites_csv) if mecc_sites_csv and mecc_sites_csv.exists() else None

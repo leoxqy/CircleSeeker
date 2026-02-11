@@ -236,7 +236,10 @@ def run(args: argparse.Namespace) -> int:
         logger.error("Unified CSV not found: %s", unified_csv)
         return 1
 
-    unified_df = pd.read_csv(unified_csv)
+    unified_df = pd.read_csv(
+        unified_csv,
+        dtype={"low_mapq": "boolean", "low_identity": "boolean"},
+    )
     logger.info("Loaded unified CSV with %d entries", len(unified_df))
 
     # Renumber IDs with padding

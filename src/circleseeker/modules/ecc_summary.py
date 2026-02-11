@@ -217,7 +217,10 @@ class EccSummary:
         self.logger.debug(f"Collecting eccDNA statistics from {merged_csv}")
 
         try:
-            df = pd.read_csv(merged_csv)
+            df = pd.read_csv(
+                merged_csv,
+                dtype={"low_mapq": "boolean", "low_identity": "boolean"},
+            )
 
             # Function to calculate statistics for a subset
             def calc_stats(data: Any) -> dict[str, Any]:
