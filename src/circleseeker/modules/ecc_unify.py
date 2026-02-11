@@ -1463,7 +1463,7 @@ def merge_eccdna_tables(
     # Fill boolean quality-flag columns that are absent in Inferred entries
     for col in ("low_mapq", "low_identity"):
         if col in merged.columns:
-            merged[col] = merged[col].fillna(False).astype(bool)
+            merged[col] = merged[col].where(merged[col].notna(), False).astype(bool)
 
     # Renumber if requested
     if renumber:
