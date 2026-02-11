@@ -1029,9 +1029,14 @@ class CeccProcessor(BaseEccProcessor):
 
             seq_str = self.seq_library.find_sequence(query_id)
 
-            if seq_str and q_start > 0 and cons_len > 0:
+            # CeccDNA q_start is 0-based (LAST MAF format), unlike U/MeccDNA
+            # which use 1-based coordinates from minimap2.  Convert to 1-based
+            # for extract_ring_sequence (which does start_index = q_start - 1).
+            if seq_str and q_start >= 0 and cons_len > 0:
                 try:
-                    extracted_seq = extract_ring_sequence(seq_str, int(q_start), int(cons_len))
+                    extracted_seq = extract_ring_sequence(
+                        seq_str, int(q_start) + 1, int(cons_len)
+                    )
                     extracted_seq = canonicalize_circular_sequence(extracted_seq)
                     df.loc[query_mask, "eSeq"] = extracted_seq
                     sequences_found += 1
