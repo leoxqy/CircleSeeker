@@ -171,7 +171,7 @@ class TestEccPackager:
         # Check output directory was created
         output_dir = Path(args.out_dir)
         assert output_dir.exists()
-        assert (output_dir / "eccDNA_summary.csv").exists()
+        assert (output_dir / "test_sample_eccDNA_summary.csv").exists()
 
     def test_run_with_files(self, tmp_path):
         """Test packaging with actual files."""
@@ -224,8 +224,8 @@ class TestEccPackager:
         assert output_dir.exists()
 
         # Check for organized structure
-        assert (output_dir / "Uecc").exists()
-        assert (output_dir / "eccDNA_summary.csv").exists()
+        assert (output_dir / "UeccDNA").exists()
+        assert (output_dir / "test_sample_eccDNA_summary.csv").exists()
 
     def test_run_dry_run(self, tmp_path):
         """Test packaging in dry-run mode."""

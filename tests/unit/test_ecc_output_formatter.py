@@ -374,9 +374,9 @@ class TestGenerateFastaFiles:
         })
         generate_fasta_files(sequences, tmp_path, summary)
         assert (tmp_path / "eccDNA_all.fasta").exists()
-        assert (tmp_path / "Uecc" / "uecc.fasta").exists()
-        assert (tmp_path / "Mecc" / "mecc.fasta").exists()
-        assert (tmp_path / "Cecc" / "cecc.fasta").exists()
+        assert (tmp_path / "UeccDNA" / "uecc.fasta").exists()
+        assert (tmp_path / "MeccDNA" / "mecc.fasta").exists()
+        assert (tmp_path / "CeccDNA" / "cecc.fasta").exists()
 
     def test_header_format(self, tmp_path):
         sequences = {"U1": "ATCG"}

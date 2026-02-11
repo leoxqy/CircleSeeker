@@ -8,26 +8,26 @@ This module transforms internal CircleSeeker data into the standardized output f
 Target output layout
 --------------------
 <out_dir>/
-├── eccDNA_summary.csv          # Main table (one row per eccDNA)
-├── eccDNA_regions.csv          # All genomic regions
-├── eccDNA_reads.csv            # Read-level support
-├── eccDNA_all.fasta            # All sequences
+├── {prefix}_eccDNA_summary.csv   # Main table (one row per eccDNA)
+├── {prefix}_eccDNA_regions.csv   # All genomic regions
+├── {prefix}_eccDNA_reads.csv     # Read-level support
+├── {prefix}_eccDNA_all.fasta     # All sequences
 │
-├── Uecc/
-│   ├── uecc.bed
-│   └── uecc.fasta
+├── UeccDNA/
+│   ├── {prefix}_uecc.bed
+│   └── {prefix}_uecc.fasta
 │
-├── Mecc/
-│   ├── mecc_sites.bed
-│   └── mecc.fasta
+├── MeccDNA/
+│   ├── {prefix}_mecc_sites.bed
+│   └── {prefix}_mecc.fasta
 │
-├── Cecc/
-│   ├── cecc_segments.bed
-│   ├── cecc_junctions.bedpe
-│   └── cecc.fasta
+├── CeccDNA/
+│   ├── {prefix}_cecc_segments.bed
+│   ├── {prefix}_cecc_junctions.bedpe
+│   └── {prefix}_cecc.fasta
 │
-├── report.html
-└── summary.txt
+├── {prefix}_report.html
+└── {prefix}_summary.txt
 
 Key features:
 - eccDNA IDs use zero-padded format: UeccDNA0001, MeccDNA0001, CeccDNA0001
@@ -227,9 +227,9 @@ def run(args: argparse.Namespace) -> int:
 
     # Create output directories
     ensure_dir(out_dir, dry=dry, verbose=verbose)
-    ensure_dir(out_dir / "Uecc", dry=dry, verbose=verbose)
-    ensure_dir(out_dir / "Mecc", dry=dry, verbose=verbose)
-    ensure_dir(out_dir / "Cecc", dry=dry, verbose=verbose)
+    ensure_dir(out_dir / "UeccDNA", dry=dry, verbose=verbose)
+    ensure_dir(out_dir / "MeccDNA", dry=dry, verbose=verbose)
+    ensure_dir(out_dir / "CeccDNA", dry=dry, verbose=verbose)
 
     # Load unified CSV
     if not unified_csv or not unified_csv.exists():
@@ -311,19 +311,19 @@ def run(args: argparse.Namespace) -> int:
     reads_df = generate_reads_table(uecc_df, mecc_df, cecc_df)
 
     # Save CSV files
-    summary_df.to_csv(out_dir / "eccDNA_summary.csv", index=False)
-    regions_df.to_csv(out_dir / "eccDNA_regions.csv", index=False)
-    reads_df.to_csv(out_dir / "eccDNA_reads.csv", index=False)
+    summary_df.to_csv(out_dir / f"{sample}_eccDNA_summary.csv", index=False)
+    regions_df.to_csv(out_dir / f"{sample}_eccDNA_regions.csv", index=False)
+    reads_df.to_csv(out_dir / f"{sample}_eccDNA_reads.csv", index=False)
 
-    logger.info("Saved eccDNA_summary.csv (%d rows)", len(summary_df))
-    logger.info("Saved eccDNA_regions.csv (%d rows)", len(regions_df))
-    logger.info("Saved eccDNA_reads.csv (%d rows)", len(reads_df))
+    logger.info("Saved %s_eccDNA_summary.csv (%d rows)", sample, len(summary_df))
+    logger.info("Saved %s_eccDNA_regions.csv (%d rows)", sample, len(regions_df))
+    logger.info("Saved %s_eccDNA_reads.csv (%d rows)", sample, len(reads_df))
 
     # Generate BED files
-    generate_uecc_bed(regions_df, out_dir / "Uecc" / "uecc.bed")
-    generate_mecc_bed(regions_df, out_dir / "Mecc" / "mecc_sites.bed")
-    generate_cecc_bed(regions_df, out_dir / "Cecc" / "cecc_segments.bed")
-    generate_cecc_bedpe(regions_df, out_dir / "Cecc" / "cecc_junctions.bedpe")
+    generate_uecc_bed(regions_df, out_dir / "UeccDNA" / f"{sample}_uecc.bed")
+    generate_mecc_bed(regions_df, out_dir / "MeccDNA" / f"{sample}_mecc_sites.bed")
+    generate_cecc_bed(regions_df, out_dir / "CeccDNA" / f"{sample}_cecc_segments.bed")
+    generate_cecc_bedpe(regions_df, out_dir / "CeccDNA" / f"{sample}_cecc_junctions.bedpe")
 
     # Load and process FASTA files
     sequences = {}
@@ -351,13 +351,13 @@ def run(args: argparse.Namespace) -> int:
                     sequences[new_id] = seq
 
     # Generate FASTA files
-    generate_fasta_files(sequences, out_dir, summary_df)
+    generate_fasta_files(sequences, out_dir, summary_df, prefix=sample)
 
     # Copy report files
     if html_in:
-        copy_file(html_in, out_dir / "report.html", overwrite=args.overwrite, dry=dry, verbose=verbose)
+        copy_file(html_in, out_dir / f"{sample}_report.html", overwrite=args.overwrite, dry=dry, verbose=verbose)
     if txt_in:
-        copy_file(txt_in, out_dir / "summary.txt", overwrite=args.overwrite, dry=dry, verbose=verbose)
+        copy_file(txt_in, out_dir / f"{sample}_summary.txt", overwrite=args.overwrite, dry=dry, verbose=verbose)
 
     logger.info("[done] Output folder: %s", out_dir)
     return 0

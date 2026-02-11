@@ -583,6 +583,7 @@ def generate_fasta_files(
     sequences: dict[str, str],
     output_dir: Path,
     summary_df: pd.DataFrame,
+    prefix: str = "",
 ) -> None:
     """Generate FASTA files for all eccDNA and by type.
 
@@ -593,13 +594,16 @@ def generate_fasta_files(
         sequences: Dict mapping eccDNA_id to sequence
         output_dir: Output directory
         summary_df: Summary DataFrame to determine types
+        prefix: Sample prefix for output filenames
     """
     logger = get_logger("ecc_output_formatter")
 
+    # Map short type names to full directory names
+    _TYPE_TO_DIR = {"Uecc": "UeccDNA", "Mecc": "MeccDNA", "Cecc": "CeccDNA"}
+
     # Create type subdirectories
-    (output_dir / "Uecc").mkdir(parents=True, exist_ok=True)
-    (output_dir / "Mecc").mkdir(parents=True, exist_ok=True)
-    (output_dir / "Cecc").mkdir(parents=True, exist_ok=True)
+    for dir_name in _TYPE_TO_DIR.values():
+        (output_dir / dir_name).mkdir(parents=True, exist_ok=True)
 
     # Build header info from summary_df (vectorized)
     info_cols = ["location", "length", "state", "type"]
@@ -625,8 +629,11 @@ def generate_fasta_files(
         if ecc_type in type_seqs:
             type_seqs[ecc_type][ecc_id] = sequences[ecc_id]
 
+    # Build filename prefix
+    pfx = f"{prefix}_" if prefix else ""
+
     # Write all sequences
-    all_fasta_path = output_dir / "eccDNA_all.fasta"
+    all_fasta_path = output_dir / f"{pfx}eccDNA_all.fasta"
     with open(all_fasta_path, "w") as f:
         for ecc_id, seq in sequences.items():
             f.write(f"{format_header(ecc_id)}\n{seq}\n")
@@ -635,7 +642,8 @@ def generate_fasta_files(
     # Write type-specific FASTA files
     for ecc_type, seqs in type_seqs.items():
         if seqs:
-            fasta_path = output_dir / ecc_type / f"{ecc_type.lower()}.fasta"
+            dir_name = _TYPE_TO_DIR[ecc_type]
+            fasta_path = output_dir / dir_name / f"{pfx}{ecc_type.lower()}.fasta"
             with open(fasta_path, "w") as f:
                 for ecc_id, seq in seqs.items():
                     f.write(f"{format_header(ecc_id)}\n{seq}\n")
@@ -717,15 +725,15 @@ def format_output(
     logger.info(f"Saved eccDNA_reads.csv ({len(reads_df)} rows)")
 
     # Create type subdirectories
-    (output_dir / "Uecc").mkdir(exist_ok=True)
-    (output_dir / "Mecc").mkdir(exist_ok=True)
-    (output_dir / "Cecc").mkdir(exist_ok=True)
+    (output_dir / "UeccDNA").mkdir(exist_ok=True)
+    (output_dir / "MeccDNA").mkdir(exist_ok=True)
+    (output_dir / "CeccDNA").mkdir(exist_ok=True)
 
     # Generate BED files
-    generate_uecc_bed(regions_df, output_dir / "Uecc" / "uecc.bed")
-    generate_mecc_bed(regions_df, output_dir / "Mecc" / "mecc_sites.bed")
-    generate_cecc_bed(regions_df, output_dir / "Cecc" / "cecc_segments.bed")
-    generate_cecc_bedpe(regions_df, output_dir / "Cecc" / "cecc_junctions.bedpe")
+    generate_uecc_bed(regions_df, output_dir / "UeccDNA" / "uecc.bed")
+    generate_mecc_bed(regions_df, output_dir / "MeccDNA" / "mecc_sites.bed")
+    generate_cecc_bed(regions_df, output_dir / "CeccDNA" / "cecc_segments.bed")
+    generate_cecc_bedpe(regions_df, output_dir / "CeccDNA" / "cecc_junctions.bedpe")
 
     # Load and merge FASTA sequences
     sequences: dict[str, str] = {}
