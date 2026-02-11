@@ -15,6 +15,7 @@ with significant optimizations for HiFi data:
 from __future__ import annotations
 
 import logging
+import signal
 from collections import Counter
 from dataclasses import dataclass
 from itertools import chain
@@ -257,6 +258,12 @@ def _init_trim_worker(
     ref_merge_distance: int = 1000,
 ) -> None:
     """Initialize global variables in worker processes."""
+    # Reset signal handlers to default so workers don't inherit the parent's
+    # custom _handle_signal — otherwise pool.terminate() triggers noisy
+    # "SIGTERM received" tracebacks in every worker on normal shutdown.
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
     global _ref, _mapq, _list_ex_chr, _allow_gap, _allow_overlap, _ref_merge_distance
     MM_F_NO_LJOIN = 0x400
     _ref = mappy.Aligner(fref, preset=preset, extra_flags=MM_F_NO_LJOIN)
