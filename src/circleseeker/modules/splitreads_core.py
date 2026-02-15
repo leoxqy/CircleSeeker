@@ -15,15 +15,14 @@ with significant optimizations for HiFi data:
 from __future__ import annotations
 
 import logging
-import signal
+import subprocess
+import tempfile
 from collections import Counter
 from dataclasses import dataclass
-from itertools import chain
-from multiprocessing import Pool, cpu_count
+from multiprocessing import cpu_count
 from pathlib import Path
 from typing import Any, Optional
 
-import mappy
 import networkx as nx
 import pandas as pd
 import pybedtools as bt
@@ -239,8 +238,7 @@ class PdRegion:
         ]
 
 
-# Global variables for multiprocessing
-_ref: Optional[mappy.Aligner] = None
+# Global variables used by _check_read_pattern and _get_merge_all
 _mapq: int = 0
 _list_ex_chr: set[str] = set()
 _allow_gap: int = 0
@@ -248,65 +246,73 @@ _allow_overlap: int = 0
 _ref_merge_distance: int = 1000
 
 
-def _init_trim_worker(
-    fref: str,
-    mapq: int,
-    list_ex_chr: list[str],
-    allow_gap: int,
-    allow_overlap: int,
+def _run_minimap2_paf(
+    input_fasta: Path,
+    reference_mmi: Path,
     preset: str,
-    ref_merge_distance: int = 1000,
-) -> None:
-    """Initialize global variables in worker processes."""
-    # Reset signal handlers to default so workers don't inherit the parent's
-    # custom _handle_signal — otherwise pool.terminate() triggers noisy
-    # "SIGTERM received" tracebacks in every worker on normal shutdown.
-    signal.signal(signal.SIGTERM, signal.SIG_DFL)
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    threads: int,
+    mapq_threshold: int,
+    exclude_chrs: list[str],
+) -> dict[str, list[list[Any]]]:
+    """Run minimap2 subprocess and parse PAF output into per-read hit lists.
 
-    global _ref, _mapq, _list_ex_chr, _allow_gap, _allow_overlap, _ref_merge_distance
-    MM_F_NO_LJOIN = 0x400
-    _ref = mappy.Aligner(fref, preset=preset, extra_flags=MM_F_NO_LJOIN)
-    _mapq = mapq
-    _list_ex_chr = set(list_ex_chr)
-    _allow_gap = allow_gap
-    _allow_overlap = allow_overlap
-    _ref_merge_distance = ref_merge_distance
+    Returns a dict mapping read name to its list of hits, where each hit is
+    [readid, q_len, q_st, q_en, ctg, r_st, r_en, mlen, blen, mapq, strand].
+    """
+    exclude_set = set(exclude_chrs)
 
+    with tempfile.NamedTemporaryFile(suffix=".paf", delete=False) as tmp:
+        paf_path = Path(tmp.name)
 
-def _align_once(name: str, seq: str) -> list[list[Any]]:
-    """Align a read once and return primary hits in the shared trim format."""
-    global _ref, _mapq, _list_ex_chr
+    try:
+        cmd = [
+            "minimap2",
+            "-x", preset,
+            "-c",
+            "-t", str(threads),
+            "--no-long-join",
+            "--secondary=no",
+            "-o", str(paf_path),
+            str(reference_mmi),
+            str(input_fasta),
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
 
-    if _ref is None:
-        raise RuntimeError("SplitReads-Core worker not initialized (reference aligner is None)")
+        hits_by_read: dict[str, list[list[Any]]] = {}
+        with open(paf_path) as fh:
+            for line in fh:
+                cols = line.rstrip("\n").split("\t")
+                if len(cols) < 12:
+                    continue
+                mapq = int(cols[11])
+                if mapq < mapq_threshold:
+                    continue
+                ctg = cols[5]
+                if ctg in exclude_set:
+                    continue
 
-    len_seq = len(seq)
-    list_hit: list[list[Any]] = []
-    for hit in _ref.map(seq):
-        if hit.is_primary and hit.mapq >= _mapq and hit.ctg not in _list_ex_chr:
-            list_hit.append(
-                [
-                    name,
-                    len_seq,
-                    hit.q_st,
-                    hit.q_en,
-                    hit.ctg,
-                    hit.r_st,
-                    hit.r_en,
-                    hit.mlen,
-                    hit.blen,
-                    hit.mapq,
-                    hit.strand,
-                ]
-            )
-    return list_hit
+                qname = cols[0]
+                q_len = int(cols[1])
+                q_st = int(cols[2])
+                q_en = int(cols[3])
+                strand = 1 if cols[4] == "+" else -1
+                r_st = int(cols[7])
+                r_en = int(cols[8])
+                mlen = int(cols[9])
+                blen = int(cols[10])
+
+                hit = [qname, q_len, q_st, q_en, ctg, r_st, r_en, mlen, blen, mapq, strand]
+                hits_by_read.setdefault(qname, []).append(hit)
+
+        return hits_by_read
+    finally:
+        paf_path.unlink(missing_ok=True)
 
 
 def _check_read_pattern(name: str, seq: str, list_hit: Optional[list[list[Any]]] = None) -> list:
     """Check for CTC (Circular Tandem Copy) pattern in read."""
     if list_hit is None:
-        list_hit = _align_once(name, seq)
+        raise ValueError("list_hit is required (mappy backend removed)")
 
     list_result = []
 
@@ -389,7 +395,7 @@ def _get_merge_all(name: str, seq: str, list_hit: Optional[list[list[Any]]] = No
 
     list_merged_result = []
     if list_hit is None:
-        list_hit = _align_once(name, seq)
+        raise ValueError("list_hit is required (mappy backend removed)")
 
     if len(list_hit) > 0:
         header = [
@@ -463,20 +469,21 @@ def _get_merge_all(name: str, seq: str, list_hit: Optional[list[list[Any]]] = No
     return list_merged_result
 
 
-def _cal_pattern_trim(record: tuple[str, str]) -> list:
-    """Calculate pattern and trim for a single record."""
-    name, seq = record
+def _process_read_hits(name: str, list_hit: list[list[Any]]) -> list:
+    """Process pre-computed hits for a single read (pattern detection + merge).
 
-    list_result = []
+    Replaces _cal_pattern_trim: receives hits from minimap2 PAF instead of
+    calling mappy via _align_once.
+    """
+    list_result: list[Any] = []
 
-    list_hit = _align_once(name, seq)
-    list_chk_pattern = _check_read_pattern(name, seq, list_hit=list_hit)
+    list_chk_pattern = _check_read_pattern(name, "", list_hit=list_hit)
     if len(list_chk_pattern) > 0:
         for idx, rTab in enumerate(list_chk_pattern, start=0):
             oTab = rTab + ["{:.2f}".format((rTab[3] - rTab[2]) / rTab[11]), idx, True]
             list_result.append(oTab)
     else:
-        list_merged_result = _get_merge_all(name, seq, list_hit=list_hit)
+        list_merged_result = _get_merge_all(name, "", list_hit=list_hit)
         if len(list_merged_result) > 0:
             len_trim_read = list_merged_result[-1][3] - list_merged_result[0][2]
 
@@ -702,41 +709,35 @@ class SplitReadsCore:
         return eccDNA_file
 
     def _run_trim(self, input_fasta: Path) -> pd.DataFrame:
-        """Run trim phase."""
-        # Read all sequences
-        records: list[tuple[str, str]] = []
-        for record in SeqIO.parse(str(input_fasta), "fasta"):
-            records.append((record.id, str(record.seq)))
+        """Run trim phase using minimap2 subprocess."""
+        # Set globals used by _check_read_pattern / _get_merge_all
+        global _mapq, _list_ex_chr, _allow_gap, _allow_overlap, _ref_merge_distance
+        _mapq = self.config.mapq
+        _list_ex_chr = set(self.exclude_chrs)
+        _allow_gap = self.config.allow_gap
+        _allow_overlap = self.config.allow_overlap
+        _ref_merge_distance = self.config.ref_merge_distance
 
-        if not records:
+        # Run minimap2 subprocess to align all reads at once
+        hits_by_read = _run_minimap2_paf(
+            input_fasta,
+            self.reference_mmi,
+            self.config.preset,
+            self.threads,
+            self.config.mapq,
+            self.exclude_chrs,
+        )
+
+        if not hits_by_read:
             return pd.DataFrame()
 
-        self.logger.info(f"Processing {len(records)} reads")
+        self.logger.info(f"Processing {len(hits_by_read)} reads with alignments")
 
-        # Process in parallel
-        batch_size = 10000
+        # Process each read (pattern detection + merge) — single-threaded, CPU-light
         all_results: list[list[Any]] = []
-
-        with Pool(
-            processes=self.threads,
-            initializer=_init_trim_worker,
-            initargs=(
-                str(self.reference_mmi),
-                self.config.mapq,
-                self.exclude_chrs,
-                self.config.allow_gap,
-                self.config.allow_overlap,
-                self.config.preset,
-                self.config.ref_merge_distance,
-            ),
-        ) as pool:
-            for i in range(0, len(records), batch_size):
-                batch = records[i : i + batch_size]
-                batch_results = pool.map(_cal_pattern_trim, batch)
-                all_results.extend(chain.from_iterable(batch_results))
-
-                if (i + batch_size) % 10000 == 0:
-                    self.logger.debug(f"Processed {min(i + batch_size, len(records))} reads")
+        for name, list_hit in hits_by_read.items():
+            result = _process_read_hits(name, list_hit)
+            all_results.extend(result)
 
         if not all_results:
             return pd.DataFrame()
