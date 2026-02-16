@@ -59,7 +59,7 @@ class SplitReadsConfig:
     ref_merge_distance: int = 1000  # Maximum reference distance (bp) for merging adjacent alignments
 
     # Processing
-    threads: int = 0  # 0 = use all CPUs
+    threads: int = 0  # 0 = CircleSeeker defaults to cpu_count(), passed as minimap2 -t
     skip_variant: bool = True  # Always skip for HiFi (not needed)
 
     @classmethod
@@ -238,14 +238,6 @@ class PdRegion:
         ]
 
 
-# Global variables used by _check_read_pattern and _get_merge_all
-_mapq: int = 0
-_list_ex_chr: set[str] = set()
-_allow_gap: int = 0
-_allow_overlap: int = 0
-_ref_merge_distance: int = 1000
-
-
 def _run_minimap2_paf(
     input_fasta: Path,
     reference_mmi: Path,
@@ -389,10 +381,12 @@ def _merge_pd_regions(prev: "PdRegion", curr: "PdRegion", columns: pd.Index) -> 
     return PdRegion(series_new)
 
 
-def _get_merge_all(name: str, seq: str, list_hit: Optional[list[list[Any]]] = None) -> list:
+def _get_merge_all(
+    name: str, seq: str,
+    list_hit: Optional[list[list[Any]]] = None,
+    *, allow_gap: int, allow_overlap: int, ref_merge_distance: int,
+) -> list:
     """Get all merged alignments for a read."""
-    global _allow_gap, _allow_overlap, _ref_merge_distance
-
     list_merged_result = []
     if list_hit is None:
         raise ValueError("list_hit is required (mappy backend removed)")
@@ -430,12 +424,12 @@ def _get_merge_all(name: str, seq: str, list_hit: Optional[list[list[Any]]] = No
                     prev.q_start, prev.q_end, obj_.q_start, obj_.q_end
                 )
                 significant_overlap = (
-                    is_q_overlap and abs(prev.q_end - obj_.q_start) >= _allow_overlap
+                    is_q_overlap and abs(prev.q_end - obj_.q_start) >= allow_overlap
                 )
                 same_locus = prev.ref == obj_.ref and prev.strand == obj_.strand
                 close_on_ref = (
                     same_locus
-                    and abs(prev.r_end - obj_.r_start) <= _ref_merge_distance
+                    and abs(prev.r_end - obj_.r_start) <= ref_merge_distance
                 )
 
                 if significant_overlap:
@@ -453,7 +447,7 @@ def _get_merge_all(name: str, seq: str, list_hit: Optional[list[list[Any]]] = No
                 else:
                     # Insertion compensation: check with gap tolerance
                     is_gap_overlap = any_overlapping_range(
-                        prev.q_start, prev.q_end + _allow_gap,
+                        prev.q_start, prev.q_end + allow_gap,
                         obj_.q_start, obj_.q_end,
                     )
                     if is_gap_overlap and close_on_ref:
@@ -469,7 +463,10 @@ def _get_merge_all(name: str, seq: str, list_hit: Optional[list[list[Any]]] = No
     return list_merged_result
 
 
-def _process_read_hits(name: str, list_hit: list[list[Any]]) -> list:
+def _process_read_hits(
+    name: str, list_hit: list[list[Any]],
+    *, allow_gap: int, allow_overlap: int, ref_merge_distance: int,
+) -> list:
     """Process pre-computed hits for a single read (pattern detection + merge).
 
     Replaces _cal_pattern_trim: receives hits from minimap2 PAF instead of
@@ -483,7 +480,11 @@ def _process_read_hits(name: str, list_hit: list[list[Any]]) -> list:
             oTab = rTab + ["{:.2f}".format((rTab[3] - rTab[2]) / rTab[11]), idx, True]
             list_result.append(oTab)
     else:
-        list_merged_result = _get_merge_all(name, "", list_hit=list_hit)
+        list_merged_result = _get_merge_all(
+            name, "", list_hit=list_hit,
+            allow_gap=allow_gap, allow_overlap=allow_overlap,
+            ref_merge_distance=ref_merge_distance,
+        )
         if len(list_merged_result) > 0:
             len_trim_read = list_merged_result[-1][3] - list_merged_result[0][2]
 
@@ -710,13 +711,9 @@ class SplitReadsCore:
 
     def _run_trim(self, input_fasta: Path) -> pd.DataFrame:
         """Run trim phase using minimap2 subprocess."""
-        # Set globals used by _check_read_pattern / _get_merge_all
-        global _mapq, _list_ex_chr, _allow_gap, _allow_overlap, _ref_merge_distance
-        _mapq = self.config.mapq
-        _list_ex_chr = set(self.exclude_chrs)
-        _allow_gap = self.config.allow_gap
-        _allow_overlap = self.config.allow_overlap
-        _ref_merge_distance = self.config.ref_merge_distance
+        allow_gap = self.config.allow_gap
+        allow_overlap = self.config.allow_overlap
+        ref_merge_distance = self.config.ref_merge_distance
 
         # Run minimap2 subprocess to align all reads at once
         hits_by_read = _run_minimap2_paf(
@@ -736,7 +733,11 @@ class SplitReadsCore:
         # Process each read (pattern detection + merge) — single-threaded, CPU-light
         all_results: list[list[Any]] = []
         for name, list_hit in hits_by_read.items():
-            result = _process_read_hits(name, list_hit)
+            result = _process_read_hits(
+                name, list_hit,
+                allow_gap=allow_gap, allow_overlap=allow_overlap,
+                ref_merge_distance=ref_merge_distance,
+            )
             all_results.extend(result)
 
         if not all_results:

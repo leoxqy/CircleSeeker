@@ -268,7 +268,7 @@ class Pipeline:
             shutil.copy2(src_path, dest)
             self.logger.debug(f"Copied {src_path} -> {dest}")
             return True
-        except Exception as exc:
+        except (OSError, shutil.Error) as exc:
             self.logger.warning(f"Failed to copy {src_path} to {dest}: {exc}")
             return False
 
@@ -291,7 +291,7 @@ class Pipeline:
                     shutil.copy2(item, target)
             self.logger.debug(f"Copied directory contents {src_path} -> {dest}")
             return True
-        except Exception as exc:
+        except (OSError, shutil.Error) as exc:
             self.logger.warning(f"Failed to copy directory {src_path} to {dest}: {exc}")
             return False
 
@@ -353,7 +353,7 @@ class Pipeline:
                 target.unlink()
             legacy_simple.rename(target)
             self.logger.debug("Renamed inferred simple CSV to %s", target.name)
-        except Exception as exc:
+        except OSError as exc:
             self.logger.warning(
                 "Could not rename %s to %s: %s",
                 legacy_simple.name,
