@@ -236,6 +236,7 @@ def generate_summary_table(
         read_count = row.get("reads_count", row.get("read_count", 1))
         copy_number = row.get("copy_number", row.get("repeat_number", 1))
         confidence = row.get("confidence_score", row.get("confidence", ""))
+        inferred_reads = row.get("inferred_reads", 0)
 
         summary_rows.append({
             "eccDNA_id": ecc_id,
@@ -251,6 +252,7 @@ def generate_summary_table(
             "read_count": read_count,
             "copy_number": copy_number,
             "confidence": confidence,
+            "inferred_reads": inferred_reads,
         })
 
     summary_df = pd.DataFrame(summary_rows)
@@ -432,18 +434,34 @@ def generate_reads_table(
         if pd.isna(read_str) or not read_str:
             return []
 
+        read_names = [r.strip() for r in str(read_str).split(";") if r.strip()]
+
+        # Parse per-read copy_number (aligned with read names)
+        per_read_cn_str = str(row.get("per_read_copy_number", ""))
+        per_read_cns = per_read_cn_str.split(";") if per_read_cn_str else []
+
+        eccDNA_cn = row.get("copy_number", row.get("repeat_number", 1))
+
         rows: list[dict[str, Any]] = []
-        for read_name in str(read_str).split(";"):
-            read_name = read_name.strip()
-            if read_name:
-                rows.append({
-                    "eccDNA_id": ecc_id,
-                    "read_name": read_name,
-                    "copy_number": row.get("copy_number", row.get("repeat_number", 1)),
-                    "match_degree": row.get("match_degree", ""),
-                    "identity": row.get("identity_best", row.get("identity", "")),
-                    "mapq": row.get("mapq_best", row.get("mapq", "")),
-                })
+        for i, read_name in enumerate(read_names):
+            # Use per-read value if available, otherwise fall back to eccDNA-level
+            if i < len(per_read_cns) and per_read_cns[i].strip():
+                try:
+                    read_cn = int(float(per_read_cns[i].strip()))
+                except (ValueError, TypeError):
+                    read_cn = eccDNA_cn
+            else:
+                read_cn = eccDNA_cn
+
+            rows.append({
+                "eccDNA_id": ecc_id,
+                "read_name": read_name,
+                "copy_number": read_cn,
+                "eccDNA_copy_number": eccDNA_cn,
+                "match_degree": row.get("match_degree", ""),
+                "identity": row.get("identity_best", row.get("identity", "")),
+                "mapq": row.get("mapq_best", row.get("mapq", "")),
+            })
         return rows
 
     # Process each type

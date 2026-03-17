@@ -951,7 +951,7 @@ class TestPrepareInferredSimple:
         assert result.empty
 
     def test_preserves_metrics(self):
-        """num_split_reads, prob_present, hifi_abundance are preserved."""
+        """num_split_reads, prob_present, copy_number are preserved."""
         df = pd.DataFrame({
             "eccDNA_id": ["I1"],
             "chr": ["chr1"],
@@ -961,7 +961,7 @@ class TestPrepareInferredSimple:
             "strand": ["+"],
             "num_split_reads": [5],
             "prob_present": [0.95],
-            "hifi_abundance": [2.5],
+            "copy_number": [2.5],
         })
         result = prepare_inferred_simple(df, redundant_ids=set())
         assert result["reads_count"].iloc[0] == 5

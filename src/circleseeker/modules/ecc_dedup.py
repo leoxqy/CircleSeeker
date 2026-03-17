@@ -374,6 +374,8 @@ def _build_confirmed_table_base(
             agg_dict[col] = "max"
     if "reads_count" in df.columns:
         agg_dict["reads_count"] = "first"
+    if ColumnStandard.COPY_NUMBER in df.columns:
+        agg_dict[ColumnStandard.COPY_NUMBER] = "first"
 
     g = df.groupby("eccDNA_id", sort=False).agg(agg_dict).reset_index()
 
@@ -404,6 +406,8 @@ def _build_confirmed_table_base(
     cols = list(_CONFIRMED_OUTPUT_COLUMNS)
     if "reads_count" in g.columns:
         cols.append("reads_count")
+    if ColumnStandard.COPY_NUMBER in g.columns:
+        cols.append(ColumnStandard.COPY_NUMBER)
     for col in _CONFIDENCE_COLUMNS:
         if col in g.columns:
             cols.append(col)
@@ -1628,7 +1632,21 @@ class EccDedup:
         merged_groups = 0
         for root, members in groups.items():
             if len(members) == 1:
-                out_groups.append(df[df[ColumnStandard.ECCDNA_ID] == members[0]].copy())
+                single = df[df[ColumnStandard.ECCDNA_ID] == members[0]].copy()
+                # For single members, per_read_copy_number = the member's own copy_number
+                if "per_read_copy_number" not in single.columns:
+                    if reads_col and ColumnStandard.COPY_NUMBER in single.columns:
+                        def _build_single_per_read(row: pd.Series) -> str:
+                            cn = row.get(ColumnStandard.COPY_NUMBER, pd.NA)
+                            cn_str = str(int(cn)) if pd.notna(cn) else ""
+                            read_str = str(row.get(reads_col, ""))
+                            if not read_str or read_str == "nan":
+                                return cn_str
+                            return ";".join(cn_str for _ in read_str.split(";") if _.strip())
+                        single["per_read_copy_number"] = single.apply(_build_single_per_read, axis=1)
+                    else:
+                        single["per_read_copy_number"] = ""
+                out_groups.append(single)
                 continue
 
             merged_groups += 1
@@ -1663,6 +1681,29 @@ class EccDedup:
             else:
                 copy_number = pd.NA
 
+            # Build per-read copy_number mapping (read_name -> copyNum from TideHunter).
+            read_cn_map: dict[str, float] = {}
+            if reads_col and ColumnStandard.COPY_NUMBER in group_rows.columns:
+                for row_tuple in group_rows.itertuples(index=False):
+                    cn_val_raw = getattr(row_tuple, ColumnStandard.COPY_NUMBER, pd.NA)
+                    cn_val = float(cn_val_raw) if pd.notna(cn_val_raw) else 0.0
+                    read_str = str(getattr(row_tuple, reads_col, ""))
+                    for rname in read_str.split(";"):
+                        rname = rname.strip()
+                        if rname and rname != "nan" and rname != "":
+                            read_cn_map[rname] = max(read_cn_map.get(rname, 0.0), cn_val)
+
+            # Build semicolon-separated per-read copy_numbers aligned with merged_reads.
+            if merged_reads and read_cn_map:
+                per_read_cns = []
+                for rname in merged_reads.split(";"):
+                    rname = rname.strip()
+                    cn = read_cn_map.get(rname, 0.0)
+                    per_read_cns.append(str(int(cn)) if cn == int(cn) else str(cn))
+                per_read_cn_str = ";".join(per_read_cns)
+            else:
+                per_read_cn_str = ""
+
             # Numeric evidence fields
             def _agg_numeric(col: str, how: str) -> object:
                 if col not in group_rows.columns:
@@ -1688,6 +1729,7 @@ class EccDedup:
                 rep_rows[reads_col] = merged_reads
             if ColumnStandard.COPY_NUMBER in rep_rows.columns:
                 rep_rows[ColumnStandard.COPY_NUMBER] = copy_number
+            rep_rows["per_read_copy_number"] = per_read_cn_str
             rep_rows["num_merged"] = num_merged_total
             rep_rows["merged_from_ids"] = merged_from_ids
 
@@ -1780,6 +1822,7 @@ class EccDedup:
                 ColumnStandard.LOW_MAPQ: df.get(ColumnStandard.LOW_MAPQ, pd.NA),
                 ColumnStandard.LOW_IDENTITY: df.get(ColumnStandard.LOW_IDENTITY, pd.NA),
                 "copy_number": copy_number,
+                "per_read_copy_number": df.get("per_read_copy_number", ""),
                 "repeat_number": repeat_number,
                 "eccdna_type": "Uecc",
                 "num_merged": df.get("num_merged", 1),
@@ -1925,6 +1968,7 @@ class EccDedup:
                 ColumnStandard.LOW_MAPQ: df.get(ColumnStandard.LOW_MAPQ, pd.NA),
                 ColumnStandard.LOW_IDENTITY: df.get(ColumnStandard.LOW_IDENTITY, pd.NA),
                 "copy_number": df.get(ColumnStandard.COPY_NUMBER, pd.NA),
+                "per_read_copy_number": df.get("per_read_copy_number", ""),
                 "eccdna_type": "Mecc",
                 "hit_index": df["hit_index"],
                 "hit_count": df["hit_count"],
@@ -2167,6 +2211,7 @@ class EccDedup:
                 ColumnStandard.LOW_MAPQ: df.get(ColumnStandard.LOW_MAPQ, pd.NA),
                 ColumnStandard.LOW_IDENTITY: df.get(ColumnStandard.LOW_IDENTITY, pd.NA),
                 "copy_number": df.get(ColumnStandard.COPY_NUMBER, pd.NA),
+                "per_read_copy_number": df.get("per_read_copy_number", ""),
                 "num_merged": df.get("num_merged", 1),
                 "merged_from_ids": df.get("merged_from_ids", df["eccDNA_id"]),
                 "reads_count": df["reads_count"],

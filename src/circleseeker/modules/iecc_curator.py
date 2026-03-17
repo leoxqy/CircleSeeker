@@ -111,6 +111,7 @@ def curate_ecc_tables(input_tsv: Path | str) -> tuple[pd.DataFrame, pd.DataFrame
                     "prob_present": row.get("prob_present", row.get("prob_joint_event", 0)),
                     "prob_artifact": row.get("prob_artifact", 0),
                     "hifi_abundance": row.get("af_nanopore", 0),
+                    "copy_number": round(row.get("splitreads_coverage", 0)),
                 }
             )
             simple_idx += 1
@@ -153,6 +154,7 @@ def curate_ecc_tables(input_tsv: Path | str) -> tuple[pd.DataFrame, pd.DataFrame
                         "prob_present": row.get("prob_present", row.get("prob_joint_event", 0)),
                         "prob_artifact": row.get("prob_artifact", 0),
                         "hifi_abundance": row.get("af_nanopore", 0),
+                        "copy_number": round(row.get("splitreads_coverage", 0)),
                     }
                 )
             chimeric_idx += 1

@@ -224,7 +224,7 @@ def build_cecc_segment_index(
 
 def find_redundant_simple(
     inferred_df: pd.DataFrame, confirmed_df: pd.DataFrame, thr: float = 0.99, tol: int = 20
-) -> set[str]:
+) -> dict[str, str]:
     """Find inferred simple eccDNA that overlap with confirmed UeccDNA or CeccDNA segments.
 
     Args:
@@ -234,7 +234,7 @@ def find_redundant_simple(
         tol: Coordinate tolerance
 
     Returns:
-        Set of redundant eccDNA IDs
+        Dict mapping redundant inferred eccDNA_id to the overlapping confirmed eccDNA_id
     """
     # Build index from confirmed UeccDNA regions
     uecc_idx = build_chr_index(confirmed_df, type_filter="UeccDNA")
@@ -242,7 +242,12 @@ def find_redundant_simple(
     # Build index from confirmed CeccDNA segments (all segments, not just first)
     cecc_idx = build_cecc_segment_index(confirmed_df)
 
-    redundant_ids = set()
+    # Build ID lookup tables (indices match those stored by build_chr_index/build_cecc_segment_index)
+    has_ecc_id = "eccDNA_id" in confirmed_df.columns
+    uecc_filtered = confirmed_df[confirmed_df["eccDNA_type"] == "UeccDNA"].reset_index(drop=True)
+    cecc_filtered = confirmed_df[confirmed_df["eccDNA_type"] == "CeccDNA"].reset_index(drop=True)
+
+    redundant_map: dict[str, str] = {}
 
     # Resolve column names once
     chr_col = "chr" if "chr" in inferred_df.columns else ("Chr" if "Chr" in inferred_df.columns else None)
@@ -277,37 +282,41 @@ def find_redundant_simple(
             else:
                 continue
 
-        hit = False
+        matched_confirmed_id: Optional[str] = None
 
         # Check against confirmed UeccDNA entries on same chromosome
         uecc_cand = uecc_idx.get(ch, [])
-        for ts, te, _ in uecc_cand:
+        for ts, te, ridx in uecc_cand:
             if ts > e + tol:
                 break  # No more possible overlaps
             if te < s - tol:
                 continue  # Not overlapping yet
 
             if reciprocal_overlap_ok(s, e, ts, te, thr, tol):
-                hit = True
+                matched_confirmed_id = (
+                    str(uecc_filtered.at[ridx, "eccDNA_id"]) if has_ecc_id else f"_uecc_{ridx}"
+                )
                 break
 
         # If not redundant with UeccDNA, check against CeccDNA segments
-        if not hit:
+        if matched_confirmed_id is None:
             cecc_cand = cecc_idx.get(ch, [])
-            for ts, te, _ in cecc_cand:
+            for ts, te, ridx in cecc_cand:
                 if ts > e + tol:
                     break  # No more possible overlaps
                 if te < s - tol:
                     continue  # Not overlapping yet
 
                 if reciprocal_overlap_ok(s, e, ts, te, thr, tol):
-                    hit = True
+                    matched_confirmed_id = (
+                        str(cecc_filtered.at[ridx, "eccDNA_id"]) if has_ecc_id else f"_cecc_{ridx}"
+                    )
                     break
 
-        if hit:
-            redundant_ids.add(row.eccDNA_id)
+        if matched_confirmed_id is not None:
+            redundant_map[row.eccDNA_id] = matched_confirmed_id
 
-    return redundant_ids
+    return redundant_map
 
 
 def find_redundant_chimeric(
@@ -316,7 +325,7 @@ def find_redundant_chimeric(
     thr: float = 0.99,
     tol: int = 20,
     method: str = "overlap",
-) -> set[str]:
+) -> dict[str, str]:
     """Find inferred chimeric eccDNA that match confirmed CeccDNA.
 
     Supports two matching strategies:
@@ -331,7 +340,7 @@ def find_redundant_chimeric(
         method: Matching method - 'exact' or 'overlap' (default 'overlap')
 
     Returns:
-        Set of redundant eccDNA IDs
+        Dict mapping redundant inferred eccDNA_id to the overlapping confirmed eccDNA_id
     """
     if method == "exact":
         return find_redundant_chimeric_exact(inferred_df, confirmed_df)
@@ -343,28 +352,30 @@ def find_redundant_chimeric(
 
 def find_redundant_chimeric_exact(
     inferred_df: pd.DataFrame, confirmed_df: pd.DataFrame
-) -> set[str]:
+) -> dict[str, str]:
     """Find redundant chimeric eccDNA using exact string matching (legacy).
 
     This is the original implementation preserved for backward compatibility.
     """
     # Handle empty DataFrames
     if inferred_df.empty or confirmed_df.empty:
-        return set()
+        return {}
 
-    # Build set of confirmed CeccDNA region strings using vectorized operations
+    # Build mapping of confirmed CeccDNA region strings -> eccDNA_id
     confirmed_c = confirmed_df[confirmed_df["eccDNA_type"] == "CeccDNA"]
-    confirmed_regions = set()
+    has_ecc_id = "eccDNA_id" in confirmed_c.columns
+    confirmed_regions: dict[str, str] = {}
 
     regions_col = "Regions" if "Regions" in confirmed_c.columns else "regions"
     if regions_col in confirmed_c.columns:
-        for regions in confirmed_c[regions_col].dropna():
-            if regions:
+        for idx, crow in confirmed_c.iterrows():
+            regions = crow[regions_col]
+            if regions and pd.notna(regions):
                 normalized = str(regions).replace(" ", "")
-                confirmed_regions.add(normalized)
+                confirmed_regions[normalized] = str(crow["eccDNA_id"]) if has_ecc_id else f"_cecc_{idx}"
 
     # Check each inferred chimeric entry
-    redundant_ids = set()
+    redundant_map: dict[str, str] = {}
 
     for ecc_id, group in inferred_df.groupby("eccDNA_id"):
         group = group.sort_values("seg_index")
@@ -382,9 +393,9 @@ def find_redundant_chimeric_exact(
         if segments:
             inferred_region = ";".join(segments)
             if inferred_region in confirmed_regions:
-                redundant_ids.add(ecc_id)
+                redundant_map[ecc_id] = confirmed_regions[inferred_region]
 
-    return redundant_ids
+    return redundant_map
 
 
 def find_redundant_chimeric_overlap(
@@ -394,7 +405,7 @@ def find_redundant_chimeric_overlap(
     tol: int = 20,
     detect_subset: bool = True,
     check_strand: bool = True,
-) -> set[str]:
+) -> dict[str, str]:
     """Find redundant chimeric eccDNA using segment-wise reciprocal overlap.
 
     This method compares each segment individually using the same strategy
@@ -418,13 +429,13 @@ def find_redundant_chimeric_overlap(
         check_strand: If True, consider strand information in matching (default True)
 
     Returns:
-        Set of redundant eccDNA IDs
+        Dict mapping redundant inferred eccDNA_id to the overlapping confirmed eccDNA_id
     """
     # Handle empty DataFrames
     if inferred_df.empty or confirmed_df.empty:
-        return set()
+        return {}
 
-    redundant_ids = set()
+    redundant_map: dict[str, str] = {}
 
     # Filter confirmed CeccDNA and parse their segments.
     # Split into two clear branches to keep types stable for mypy and reduce
@@ -432,7 +443,7 @@ def find_redundant_chimeric_overlap(
     confirmed_c = confirmed_df[confirmed_df["eccDNA_type"] == "CeccDNA"]
 
     if check_strand:
-        confirmed_segs_list_stranded: list[list[tuple[str, int, int, str]]] = []
+        confirmed_entries_stranded: list[tuple[str, list[tuple[str, int, int, str]]]] = []
         # Resolve column names once for confirmed_c
         conf_regions_col = "Regions" if "Regions" in confirmed_c.columns else "regions"
         conf_strand_col = "Strand" if "Strand" in confirmed_c.columns else "strand"
@@ -445,7 +456,7 @@ def find_redundant_chimeric_overlap(
                 strand_str = strand if strand and pd.notna(strand) else "+"
                 segs_stranded = parse_chimeric_regions_with_strand(regions, strand_str)
                 if segs_stranded:
-                    confirmed_segs_list_stranded.append(segs_stranded)
+                    confirmed_entries_stranded.append((str(row.eccDNA_id), segs_stranded))
 
         for ecc_id, group in inferred_df.groupby("eccDNA_id"):
             group = group.sort_values("seg_index")
@@ -466,18 +477,18 @@ def find_redundant_chimeric_overlap(
             if not inferred_segs_stranded:
                 continue
 
-            for conf_segs_stranded in confirmed_segs_list_stranded:
+            for conf_id, conf_segs_stranded in confirmed_entries_stranded:
                 if _segments_match_with_strand(inferred_segs_stranded, conf_segs_stranded, thr, tol):
-                    redundant_ids.add(ecc_id)
+                    redundant_map[ecc_id] = conf_id
                     break
 
                 if detect_subset and _is_subset_of_with_strand(
                     inferred_segs_stranded, conf_segs_stranded, thr, tol
                 ):
-                    redundant_ids.add(ecc_id)
+                    redundant_map[ecc_id] = conf_id
                     break
     else:
-        confirmed_segs_list_unstranded: list[list[tuple[str, int, int]]] = []
+        confirmed_entries_unstranded: list[tuple[str, list[tuple[str, int, int]]]] = []
         # Resolve column name once for confirmed_c
         conf_regions_col_u = "Regions" if "Regions" in confirmed_c.columns else "regions"
         has_regions_u = conf_regions_col_u in confirmed_c.columns
@@ -486,7 +497,7 @@ def find_redundant_chimeric_overlap(
             if regions and pd.notna(regions):
                 segs_unstranded = parse_chimeric_regions(regions)
                 if segs_unstranded:
-                    confirmed_segs_list_unstranded.append(segs_unstranded)
+                    confirmed_entries_unstranded.append((str(row.eccDNA_id), segs_unstranded))
 
         for ecc_id, group in inferred_df.groupby("eccDNA_id"):
             group = group.sort_values("seg_index")
@@ -504,18 +515,18 @@ def find_redundant_chimeric_overlap(
             if not inferred_segs_unstranded:
                 continue
 
-            for conf_segs_unstranded in confirmed_segs_list_unstranded:
+            for conf_id, conf_segs_unstranded in confirmed_entries_unstranded:
                 if _segments_match(inferred_segs_unstranded, conf_segs_unstranded, thr, tol):
-                    redundant_ids.add(ecc_id)
+                    redundant_map[ecc_id] = conf_id
                     break
 
                 if detect_subset and _is_subset_of(
                     inferred_segs_unstranded, conf_segs_unstranded, thr, tol
                 ):
-                    redundant_ids.add(ecc_id)
+                    redundant_map[ecc_id] = conf_id
                     break
 
-    return redundant_ids
+    return redundant_map
 
 
 def _segments_match(
@@ -779,7 +790,7 @@ def prepare_inferred_simple(df: pd.DataFrame, redundant_ids: set[str]) -> pd.Dat
     Preserves available metrics from SplitReads-Core inference:
     - num_split_reads → reads_count
     - prob_present → confidence_score
-    - hifi_abundance → copy_number (coverage-based estimate)
+    - copy_number (raw coverage from SplitReads-Core)
     """
     # Filter out redundant entries
     filtered = df[~df["eccDNA_id"].isin(redundant_ids)].copy()
@@ -799,9 +810,9 @@ def prepare_inferred_simple(df: pd.DataFrame, redundant_ids: set[str]) -> pd.Dat
     # prob_present: probability that eccDNA is present (0-1 scale)
     confidence = filtered.get("prob_present", pd.Series([pd.NA] * len(filtered)))
 
-    # hifi_abundance: coverage-based abundance estimate
-    copy_number = filtered.get("hifi_abundance", pd.Series([pd.NA] * len(filtered)))
-    # If hifi_abundance is 0 or missing, use 1.0 as default
+    # copy_number: raw coverage depth from SplitReads-Core (proxy for copy number)
+    copy_number = filtered.get("copy_number", pd.Series([pd.NA] * len(filtered)))
+    # If copy_number is 0 or missing, use 1.0 as default
     copy_number = copy_number.apply(lambda x: x if pd.notna(x) and x > 0 else 1.0)
 
     # Map to standard columns
@@ -831,7 +842,7 @@ def prepare_inferred_chimeric(df: pd.DataFrame, redundant_ids: set[str]) -> pd.D
     Preserves available metrics from SplitReads-Core inference:
     - num_split_reads → reads_count
     - prob_present → confidence_score
-    - hifi_abundance → copy_number (coverage-based estimate)
+    - copy_number (raw coverage from SplitReads-Core)
     """
     # Filter out redundant entries
     filtered = df[~df["eccDNA_id"].isin(redundant_ids)].copy()
@@ -860,10 +871,10 @@ def prepare_inferred_chimeric(df: pd.DataFrame, redundant_ids: set[str]) -> pd.D
         # Extract available metrics from inferred data
         num_split_reads = first_row.get("num_split_reads", 1)
         prob_present = first_row.get("prob_present", pd.NA)
-        hifi_abundance = first_row.get("hifi_abundance", pd.NA)
+        raw_copy_number = first_row.get("copy_number", pd.NA)
 
-        # If hifi_abundance is 0 or missing, use 1.0 as default
-        copy_number = hifi_abundance if pd.notna(hifi_abundance) and hifi_abundance > 0 else 1.0
+        # If copy_number is 0 or missing, use 1.0 as default
+        copy_number = raw_copy_number if pd.notna(raw_copy_number) and raw_copy_number > 0 else 1.0
 
         result_rows.append(
             {
@@ -1342,6 +1353,80 @@ def generate_overlap_statistics(
     return stats
 
 
+def _augment_confirmed_from_overlap(
+    confirmed_df: pd.DataFrame,
+    simple_df: Optional[pd.DataFrame],
+    simple_map: dict[str, str],
+    chimeric_df: Optional[pd.DataFrame],
+    chimeric_map: dict[str, str],
+) -> None:
+    """Augment confirmed entries with evidence from overlapping inferred entries.
+
+    When a confirmed and inferred eccDNA overlap, the inferred one is removed as
+    redundant. But since SplitReads-Caller operates on non-CtcReads (Step 10 filters
+    out CtcReads), the inferred evidence is complementary. This function adds the
+    inferred copy_number and reads_count to the overlapping confirmed entry.
+
+    Modifies confirmed_df in place.
+    """
+    logger = get_logger("ecc_unify")
+
+    if not simple_map and not chimeric_map:
+        return
+
+    # Collect per-confirmed-id augmentation: {conf_id: (add_copy_number, add_reads)}
+    augment: dict[str, list[float]] = {}  # conf_id -> [copy_number_sum, reads_sum]
+
+    def _collect(inf_df: Optional[pd.DataFrame], overlap_map: dict[str, str]) -> None:
+        if inf_df is None or inf_df.empty or not overlap_map:
+            return
+        for inf_id, conf_id in overlap_map.items():
+            inf_rows = inf_df[inf_df["eccDNA_id"] == inf_id]
+            if inf_rows.empty:
+                continue
+            first = inf_rows.iloc[0]
+            cn = first.get("copy_number", 0)
+            reads = first.get("num_split_reads", 0)
+            cn_val = float(cn) if pd.notna(cn) else 0.0
+            reads_val = int(reads) if pd.notna(reads) else 0
+            if conf_id not in augment:
+                augment[conf_id] = [0.0, 0.0]
+            augment[conf_id][0] += cn_val
+            augment[conf_id][1] += reads_val
+
+    _collect(simple_df, simple_map)
+    _collect(chimeric_df, chimeric_map)
+
+    if not augment:
+        return
+
+    # Ensure inferred_reads column exists (default 0)
+    if "inferred_reads" not in confirmed_df.columns:
+        confirmed_df["inferred_reads"] = 0
+
+    # Apply augmentation to confirmed_df
+    for conf_id, (add_cn, add_reads) in augment.items():
+        mask = confirmed_df["eccDNA_id"] == conf_id
+        if not mask.any():
+            continue
+        if "copy_number" in confirmed_df.columns:
+            old_cn = confirmed_df.loc[mask, "copy_number"].iloc[0]
+            confirmed_df.loc[mask, "copy_number"] = (
+                (float(old_cn) if pd.notna(old_cn) else 0.0) + add_cn
+            )
+        if "reads_count" in confirmed_df.columns:
+            old_rc = confirmed_df.loc[mask, "reads_count"].iloc[0]
+            confirmed_df.loc[mask, "reads_count"] = (
+                (int(old_rc) if pd.notna(old_rc) else 0) + int(add_reads)
+            )
+        confirmed_df.loc[mask, "inferred_reads"] = int(add_reads)
+
+    augmented_count = len(augment)
+    logger.info(
+        f"Augmented {augmented_count} confirmed entries with overlapping inferred evidence"
+    )
+
+
 def merge_eccdna_tables(
     confirmed_file: Path | str | pd.DataFrame,
     inferred_simple: Path | str | pd.DataFrame | None = None,
@@ -1383,8 +1468,8 @@ def merge_eccdna_tables(
     # Load inferred tables if needed
     simple_df = None
     chimeric_df = None
-    simple_redundant = set()
-    chimeric_redundant = set()
+    simple_redundant: dict[str, str] = {}
+    chimeric_redundant: dict[str, str] = {}
 
     if inferred_simple is not None:
         if isinstance(inferred_simple, (str, Path)):
@@ -1398,7 +1483,7 @@ def merge_eccdna_tables(
         else:
             chimeric_df = inferred_chimeric
 
-    # Find redundant entries before merging
+    # Find redundant entries before merging (returns inferred_id -> confirmed_id mapping)
     if simple_df is not None and not simple_df.empty:
         simple_redundant = find_redundant_simple(
             simple_df, confirmed_df, overlap_threshold, tolerance
@@ -1408,6 +1493,11 @@ def merge_eccdna_tables(
         chimeric_redundant = find_redundant_chimeric(
             chimeric_df, confirmed_df, overlap_threshold, tolerance
         )
+
+    # Augment confirmed entries with evidence from overlapping inferred entries
+    _augment_confirmed_from_overlap(
+        confirmed_df, simple_df, simple_redundant, chimeric_df, chimeric_redundant
+    )
 
     # Generate overlap statistics (JSON)
     overlap_stats = generate_overlap_statistics(
@@ -1464,6 +1554,10 @@ def merge_eccdna_tables(
     for col in ("low_mapq", "low_identity"):
         if col in merged.columns:
             merged[col] = merged[col].where(merged[col].notna(), False).astype(bool)
+
+    # Fill inferred_reads with 0 for entries without overlap augmentation
+    if "inferred_reads" in merged.columns:
+        merged["inferred_reads"] = merged["inferred_reads"].fillna(0).astype(int)
 
     # Renumber if requested
     if renumber:
