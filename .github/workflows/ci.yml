@@ -107,14 +107,16 @@ jobs:
           python -c "
           import re, sys
 
-          # Read version from __version__.py
+          # Read version from __version__.py (source of truth)
           with open('src/circleseeker/__version__.py') as f:
               match = re.search(r'__version__\s*=\s*\"(.+?)\"', f.read())
               ver_py = match.group(1) if match else None
 
-          # Read version from pyproject.toml
+          # Read version from pyproject.toml (may be dynamic)
           with open('pyproject.toml') as f:
-              match = re.search(r'^version\s*=\s*\"(.+?)\"', f.read(), re.MULTILINE)
+              content = f.read()
+              is_dynamic = bool(re.search(r'^dynamic\s*=\s*\[.*\"version\".*\]', content, re.MULTILINE))
+              match = re.search(r'^version\s*=\s*\"(.+?)\"', content, re.MULTILINE)
               ver_toml = match.group(1) if match else None
 
           # Read version from conda-recipe/meta.yaml
@@ -122,19 +124,28 @@ jobs:
               match = re.search(r'\{%\s*set\s+version\s*=\s*\"(.+?)\"\s*%\}', f.read())
               ver_conda = match.group(1) if match else None
 
-          versions = {
-              '__version__.py': ver_py,
-              'pyproject.toml': ver_toml,
-              'conda-recipe/meta.yaml': ver_conda,
-          }
-
           print('Version check:')
-          for src, ver in versions.items():
-              status = 'OK' if ver == ver_py else 'MISMATCH'
-              print(f'  {src}: {ver} [{status}]')
+          print(f'  __version__.py: {ver_py}')
+          if is_dynamic:
+              print(f'  pyproject.toml: dynamic (from __version__.py) [OK]')
+          else:
+              status = 'OK' if ver_toml == ver_py else 'MISMATCH'
+              print(f'  pyproject.toml: {ver_toml} [{status}]')
+          status = 'OK' if ver_conda == ver_py else 'MISMATCH'
+          print(f'  conda-recipe/meta.yaml: {ver_conda} [{status}]')
 
-          if len(set(versions.values())) != 1 or None in versions.values():
+          errors = []
+          if ver_py is None:
+              errors.append('Could not read version from __version__.py')
+          if not is_dynamic and ver_toml != ver_py:
+              errors.append(f'pyproject.toml version {ver_toml} != {ver_py}')
+          if ver_conda != ver_py:
+              errors.append(f'conda-recipe/meta.yaml version {ver_conda} != {ver_py}')
+
+          if errors:
               print(f'\nERROR: Version mismatch detected!')
+              for e in errors:
+                  print(f'  - {e}')
               sys.exit(1)
           else:
               print(f'\nAll versions consistent: {ver_py}')
