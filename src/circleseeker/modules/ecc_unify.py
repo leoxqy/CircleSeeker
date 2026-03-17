@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Collection, Optional
 
 import pandas as pd
 from circleseeker.utils.logging import get_logger
@@ -783,7 +783,7 @@ def _is_subset_of_with_strand(
     return False
 
 
-def prepare_inferred_simple(df: pd.DataFrame, redundant_ids: set[str]) -> pd.DataFrame:
+def prepare_inferred_simple(df: pd.DataFrame, redundant_ids: Collection[str]) -> pd.DataFrame:
     """Prepare inferred simple table for merging.
 
     Converts from inferred format to standard format and removes redundant entries.
@@ -835,7 +835,7 @@ def prepare_inferred_simple(df: pd.DataFrame, redundant_ids: set[str]) -> pd.Dat
     return result
 
 
-def prepare_inferred_chimeric(df: pd.DataFrame, redundant_ids: set[str]) -> pd.DataFrame:
+def prepare_inferred_chimeric(df: pd.DataFrame, redundant_ids: Collection[str]) -> pd.DataFrame:
     """Prepare inferred chimeric table for merging.
 
     Converts from segment-based format to unified format and removes redundant entries.
@@ -983,8 +983,8 @@ def generate_overlap_stats_json(
     confirmed_df: pd.DataFrame,
     inferred_simple: pd.DataFrame | None,
     inferred_chimeric: pd.DataFrame | None,
-    simple_redundant: set[str],
-    chimeric_redundant: set[str],
+    simple_redundant: Collection[str],
+    chimeric_redundant: Collection[str],
     output_file: Path | str | None = None,
 ) -> dict:
     """Generate overlap statistics in JSON format for downstream processing.
@@ -1119,8 +1119,8 @@ def generate_overlap_report(
     confirmed_df: pd.DataFrame,
     inferred_simple: pd.DataFrame | None,
     inferred_chimeric: pd.DataFrame | None,
-    simple_redundant: set[str],
-    chimeric_redundant: set[str],
+    simple_redundant: Collection[str],
+    chimeric_redundant: Collection[str],
     output_file: Path | str | None = None,
 ) -> str:
     """Generate detailed overlap statistics report.
@@ -1250,8 +1250,8 @@ def generate_overlap_statistics(
     confirmed_df: pd.DataFrame,
     inferred_simple: pd.DataFrame | None,
     inferred_chimeric: pd.DataFrame | None,
-    simple_redundant: set[str],
-    chimeric_redundant: set[str],
+    simple_redundant: Collection[str],
+    chimeric_redundant: Collection[str],
     output_file: Path | str | None = None,
 ) -> dict:
     """Generate structured overlap statistics for reporting.
