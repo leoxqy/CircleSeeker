@@ -130,14 +130,15 @@ def read_filter(pipeline: Pipeline) -> None:
 
     tandem_to_ring_csv = pipeline.config.output_dir / f"{pipeline.config.prefix}_tandem_to_ring.csv"
 
-    original_fasta = pipeline.config.input_file
-    if original_fasta is None:
+    original_input = pipeline.config.input_file
+    if original_input is None:
         raise PipelineError("Input file is required")
-    if not original_fasta.exists():
-        pipeline.logger.error("Original input FASTA file not found; cannot run sieve step")
-        raise PipelineError(f"Missing input FASTA: {original_fasta}")
+    if not original_input.exists():
+        pipeline.logger.error("Original input file not found; cannot run sieve step")
+        raise PipelineError(f"Missing input file: {original_input}")
 
-    output_fasta = pipeline.config.output_dir / f"{pipeline.config.prefix}_all_filtered.fasta"
+    ext = pipeline.config.seq_ext
+    output_fasta = pipeline.config.output_dir / f"{pipeline.config.prefix}_all_filtered{ext}"
 
     sieve = Sieve(pipeline.logger.getChild("read_filter"))
 
@@ -146,13 +147,13 @@ def read_filter(pipeline: Pipeline) -> None:
             "TandemToRing CSV not found; skipping CtcR filtering and retaining all reads"
         )
         stats = sieve.filter_fasta_files(
-            input_fastas=[original_fasta],
+            input_fastas=[original_input],
             output_fasta=output_fasta,
         )
     else:
         stats = sieve.run_sieve(
             tandem_to_ring_csv=tandem_to_ring_csv,
-            input_fastas=[original_fasta],
+            input_fastas=[original_input],
             output_fasta=output_fasta,
             ctcr_classes=None,
         )
@@ -177,7 +178,8 @@ def minimap2(pipeline: Pipeline, *, force_alignment: bool = False) -> None:
     if sieve_output and Path(sieve_output).exists() and Path(sieve_output).stat().st_size > 0:
         input_fasta = Path(sieve_output)
     else:
-        input_fasta = pipeline.config.output_dir / f"{pipeline.config.prefix}_all_filtered.fasta"
+        ext = pipeline.config.seq_ext
+        input_fasta = pipeline.config.output_dir / f"{pipeline.config.prefix}_all_filtered{ext}"
         try:
             seen_fastas: set[Path] = set()
             with open(input_fasta, "wb") as out_f:
@@ -399,7 +401,8 @@ def run_splitreads_core_inference(pipeline: Pipeline) -> None:
     if sieve_output and Path(sieve_output).exists():
         input_fasta = Path(sieve_output)
     else:
-        input_fasta = pipeline.config.output_dir / f"{pipeline.config.prefix}_all_filtered.fasta"
+        ext = pipeline.config.seq_ext
+        input_fasta = pipeline.config.output_dir / f"{pipeline.config.prefix}_all_filtered{ext}"
         if not input_fasta.exists() or input_fasta.stat().st_size == 0:
             pipeline.logger.warning(
                 "No filtered FASTA found; skipping SplitReads-Core inference. "

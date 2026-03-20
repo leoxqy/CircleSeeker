@@ -13,7 +13,8 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from circleseeker.config import (
-    RuntimeConfig, PerformanceConfig, ToolConfig, Config, load_config
+    RuntimeConfig, PerformanceConfig, ToolConfig, Config, load_config,
+    apply_platform_preset, PLATFORM_PRESETS,
 )
 from circleseeker.exceptions import ConfigurationError
 
@@ -308,8 +309,8 @@ class TestConfig:
             # Should not raise any exception
             config.validate()
 
-    def test_config_validate_rejects_fastq_input(self):
-        """Input file must be FASTA; FASTQ should fail fast with helpful message."""
+    def test_config_validate_accepts_fastq_input(self):
+        """FASTQ input should be accepted (both HiFi and ONT can use FASTQ)."""
         with tempfile.NamedTemporaryFile(suffix=".fastq") as input_f, \
              tempfile.NamedTemporaryFile(suffix=".fa") as ref_f:
 
@@ -323,15 +324,11 @@ class TestConfig:
             config.reference = Path(ref_f.name)
             config.threads = 4  # Safe value for CI
 
-            with pytest.raises(ConfigurationError) as exc_info:
-                config.validate()
+            # Should not raise
+            config.validate()
 
-            message = str(exc_info.value)
-            assert "FASTQ" in message
-            assert "requires FASTA" in message
-
-    def test_config_validate_at_header_not_fastq(self):
-        """Files starting with '@' but not FASTQ (e.g., SAM headers) must not be misdetected."""
+    def test_config_validate_rejects_unknown_format(self):
+        """Files that are neither FASTA nor FASTQ should be rejected."""
         with tempfile.NamedTemporaryFile(suffix=".sam") as input_f, \
              tempfile.NamedTemporaryFile(suffix=".fa") as ref_f:
 
@@ -349,8 +346,7 @@ class TestConfig:
                 config.validate()
 
             message = str(exc_info.value)
-            assert "FASTQ" not in message
-            assert "does not look like FASTA" in message
+            assert "does not look like FASTA or FASTQ" in message
 
     def test_config_to_dict(self):
         """Test config to_dict conversion."""
@@ -617,3 +613,107 @@ class TestConfigIntegration:
             assert loaded_config.skip_tandem_to_ring is True
         finally:
             config_path.unlink()
+
+
+class TestPlatformPreset:
+    """Test cases for platform preset functionality."""
+
+    def test_config_default_platform_is_hifi(self):
+        """Test Config default platform is hifi."""
+        config = Config()
+        assert config.platform == "hifi"
+
+    def test_apply_platform_preset_hifi_no_changes(self):
+        """Applying hifi platform preset should not change defaults."""
+        config = Config()
+        original_e = config.tools.tidehunter.e
+        original_preset = config.tools.minimap2_align.preset
+
+        config.platform = "hifi"
+        apply_platform_preset(config)
+
+        assert config.tools.tidehunter.e == original_e
+        assert config.tools.minimap2_align.preset == original_preset
+
+    def test_apply_platform_preset_ont(self):
+        """Applying ont platform preset should adjust all expected parameters."""
+        config = Config()
+        config.platform = "ont"
+        apply_platform_preset(config)
+
+        # TideHunter
+        assert config.tools.tidehunter.e == 0.20
+        assert config.tools.tidehunter.p == 50
+
+        # tandem_to_ring
+        assert config.tools.tandem_to_ring.min_ave_match == 95.0
+
+        # minimap2_align
+        assert config.tools.minimap2_align.preset == "map-ont"
+        assert config.tools.minimap2_align.min_identity == 90.0
+        assert config.tools.minimap2_align.identity_decay_per_10kb == 2.0
+        assert config.tools.minimap2_align.min_identity_floor == 85.0
+
+        # minimap2 (inference)
+        assert config.tools.minimap2.preset == "map-ont"
+
+        # um_classify
+        assert config.tools.um_classify.theta_full == 0.85
+        assert config.tools.um_classify.theta_u == 0.85
+        assert config.tools.um_classify.theta_m == 0.85
+        assert config.tools.um_classify.theta_u2_max == 0.15
+
+        # cecc_build
+        assert config.tools.cecc_build.overlap_threshold == 0.85
+        assert config.tools.cecc_build.min_match_degree == 85.0
+
+        # splitreads
+        assert config.tools.splitreads.mapq_threshold == 10
+        assert config.tools.splitreads.min_avg_depth == 3.0
+
+    def test_apply_platform_preset_ont_preserves_unset_defaults(self):
+        """ONT preset should not change parameters not in the preset."""
+        config = Config()
+        config.platform = "ont"
+        apply_platform_preset(config)
+
+        # These should remain at their defaults
+        assert config.tools.tidehunter.k == 16
+        assert config.tools.tidehunter.c == 2
+        assert config.tools.minimap2_align.max_target_seqs == 5
+        assert config.tools.cecc_build.min_segments == 2
+        assert config.tools.splitreads.min_region_size == 200
+
+    def test_apply_platform_preset_invalid(self):
+        """Invalid platform should raise ConfigurationError."""
+        config = Config()
+        config.platform = "illumina"
+        with pytest.raises(ConfigurationError, match="Invalid platform"):
+            apply_platform_preset(config)
+
+    def test_load_config_with_platform(self):
+        """Test loading config with platform field from YAML."""
+        config_data = {
+            "platform": "ont",
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(config_data, f)
+            config_path = Path(f.name)
+
+        try:
+            config = load_config(config_path)
+            assert config.platform == "ont"
+        finally:
+            config_path.unlink()
+
+    def test_platform_presets_dict_completeness(self):
+        """PLATFORM_PRESETS should have entries for both hifi and ont."""
+        assert "hifi" in PLATFORM_PRESETS
+        assert "ont" in PLATFORM_PRESETS
+
+    def test_ont_preset_all_tools_exist_on_toolconfig(self):
+        """All tools referenced in ONT preset should exist on ToolConfig."""
+        config = Config()
+        for tool_name in PLATFORM_PRESETS["ont"]:
+            assert hasattr(config.tools, tool_name), f"Tool {tool_name} not found on ToolConfig"

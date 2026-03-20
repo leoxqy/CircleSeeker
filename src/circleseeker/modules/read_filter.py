@@ -1,13 +1,14 @@
 """
-Read Filter - FASTA Sequence Filtering Module
+Read Filter - Sequence Filtering Module
 
-This module filters FASTA sequences based on TandemToRing (formerly Carousel)
+This module filters FASTA/FASTQ sequences based on TandemToRing (formerly Carousel)
 classification results, removing sequences classified as CtcReads variants
 (legacy label: CtcR-* in `tandem_to_ring.csv`).
 
 Key features:
 - Reads TandemToRing output CSV with readName and readClass columns
 - Filters out sequences with specific CtcR-* classifications (CtcReads variants)
+- Supports both FASTA and FASTQ input (output is always FASTA)
 - Memory-efficient processing for large files
 - Generates samtools faidx index for output
 
@@ -24,7 +25,7 @@ import subprocess
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import IO, Optional
 from circleseeker.exceptions import PipelineError
 
 # Increase CSV field size limit to handle large sequence fields
@@ -54,8 +55,29 @@ class FilterStats:
         return (self.retained_reads / self.total_reads) * 100
 
 
+def _detect_input_format(path: Path) -> str:
+    """Detect whether a sequence file is FASTA or FASTQ.
+
+    Returns 'fasta', 'fastq', or 'unknown'.
+    """
+    try:
+        with open(path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith(">"):
+                    return "fasta"
+                if line.startswith("@"):
+                    return "fastq"
+                return "unknown"
+    except OSError:
+        return "unknown"
+    return "unknown"
+
+
 class Sieve:
-    """Filter FASTA sequences based on TandemToRing classification."""
+    """Filter FASTA/FASTQ sequences based on TandemToRing classification."""
 
     # Default CtcR classes to filter out
     DEFAULT_CTCR_CLASSES = {"CtcR-perfect", "CtcR-inversion", "CtcR-hybrid"}
@@ -154,12 +176,15 @@ class Sieve:
         self, input_fastas: list[Path], output_fasta: Path, generate_index: bool = True
     ) -> FilterStats:
         """
-        Filter and combine multiple FASTA files.
+        Filter and combine multiple FASTA/FASTQ files.
+
+        Accepts both FASTA and FASTQ input. Output format matches the input:
+        FASTA in → FASTA out, FASTQ in → FASTQ out (quality values preserved).
 
         Args:
-            input_fastas: List of input FASTA files to filter
+            input_fastas: List of input FASTA/FASTQ files to filter
             output_fasta: Path for combined filtered output
-            generate_index: Whether to generate samtools faidx index
+            generate_index: Whether to generate samtools faidx index (FASTA only)
 
         Returns:
             FilterStats object with filtering statistics
@@ -167,62 +192,26 @@ class Sieve:
         output_fasta = Path(output_fasta)
         output_fasta.parent.mkdir(parents=True, exist_ok=True)
 
-        self.logger.info(f"Filtering {len(input_fastas)} FASTA file(s)...")
+        self.logger.info(f"Filtering {len(input_fastas)} sequence file(s)...")
 
-        # Open output file
+        output_is_fastq = False
         with open(output_fasta, "w") as outfile:
-            for input_fasta in input_fastas:
-                if not input_fasta.exists():
-                    self.logger.warning(f"Input file not found, skipping: {input_fasta}")
+            for input_file in input_fastas:
+                if not input_file.exists():
+                    self.logger.warning(f"Input file not found, skipping: {input_file}")
                     continue
 
-                self.logger.info(f"Processing: {input_fasta}")
+                fmt = _detect_input_format(input_file)
+                self.logger.info(f"Processing ({fmt.upper()}): {input_file}")
 
-                # Process each input file
-                with open(input_fasta, "r") as infile:
-                    current_header: Optional[str] = None
-                    current_sequence: list[str] = []
-                    write_current = True
+                if fmt == "fastq":
+                    output_is_fastq = True
+                    self._filter_fastq(input_file, outfile)
+                else:
+                    self._filter_fasta(input_file, outfile)
 
-                    for line in infile:
-                        line = line.rstrip("\n")
-
-                        if line.startswith(">"):
-                            # Write previous sequence if needed
-                            if current_header is not None:
-                                self.stats.total_reads += 1
-                                if write_current:
-                                    outfile.write(f"{current_header}\n")
-                                    outfile.write("\n".join(current_sequence) + "\n")
-                                    self.stats.retained_reads += 1
-                                else:
-                                    self.stats.filtered_reads += 1
-
-                            # Start new sequence
-                            current_header = line
-                            current_sequence = []
-
-                            # Extract read ID (first part after >)
-                            read_id = line[1:].split()[0]
-
-                            # Check if should be filtered
-                            write_current = read_id not in self.reads_to_filter
-
-                        elif line:  # Sequence line
-                            current_sequence.append(line)
-
-                    # Write last sequence
-                    if current_header is not None:
-                        self.stats.total_reads += 1
-                        if write_current:
-                            outfile.write(f"{current_header}\n")
-                            outfile.write("\n".join(current_sequence) + "\n")
-                            self.stats.retained_reads += 1
-                        else:
-                            self.stats.filtered_reads += 1
-
-        # Generate samtools index if requested
-        if generate_index and self.has_samtools:
+        # Generate samtools index only for FASTA output
+        if generate_index and self.has_samtools and not output_is_fastq:
             self.generate_faidx_index(output_fasta)
 
         # Log final statistics
@@ -238,6 +227,69 @@ class Sieve:
         self.logger.info(f"  Output: {output_fasta}")
 
         return self.stats
+
+    def _filter_fasta(self, input_file: Path, outfile: IO[str]) -> None:
+        """Filter a FASTA file, writing retained records to outfile."""
+        with open(input_file, "r") as infile:
+            current_header: Optional[str] = None
+            current_sequence: list[str] = []
+            write_current = True
+
+            for line in infile:
+                line = line.rstrip("\n")
+
+                if line.startswith(">"):
+                    # Write previous sequence if needed
+                    if current_header is not None:
+                        self.stats.total_reads += 1
+                        if write_current:
+                            outfile.write(f"{current_header}\n")
+                            outfile.write("\n".join(current_sequence) + "\n")
+                            self.stats.retained_reads += 1
+                        else:
+                            self.stats.filtered_reads += 1
+
+                    current_header = line
+                    current_sequence = []
+                    read_id = line[1:].split()[0]
+                    write_current = read_id not in self.reads_to_filter
+
+                elif line:
+                    current_sequence.append(line)
+
+            # Write last sequence
+            if current_header is not None:
+                self.stats.total_reads += 1
+                if write_current:
+                    outfile.write(f"{current_header}\n")
+                    outfile.write("\n".join(current_sequence) + "\n")
+                    self.stats.retained_reads += 1
+                else:
+                    self.stats.filtered_reads += 1
+
+    def _filter_fastq(self, input_file: Path, outfile: IO[str]) -> None:
+        """Filter a FASTQ file, writing retained records as FASTQ (preserving quality)."""
+        with open(input_file, "r") as infile:
+            while True:
+                header = infile.readline()
+                if not header:
+                    break
+                header = header.rstrip("\n")
+                if not header.startswith("@"):
+                    continue
+
+                sequence = infile.readline().rstrip("\n")
+                plus_line = infile.readline().rstrip("\n")
+                qual_line = infile.readline().rstrip("\n")
+
+                read_id = header[1:].split()[0]
+                self.stats.total_reads += 1
+
+                if read_id not in self.reads_to_filter:
+                    outfile.write(f"{header}\n{sequence}\n{plus_line}\n{qual_line}\n")
+                    self.stats.retained_reads += 1
+                else:
+                    self.stats.filtered_reads += 1
 
     def generate_faidx_index(self, fasta_file: Path) -> bool:
         """

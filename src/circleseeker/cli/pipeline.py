@@ -10,7 +10,7 @@ from typing import Optional
 
 import click
 
-from circleseeker.config import Config, load_config, save_config, apply_preset, PRESETS
+from circleseeker.config import Config, load_config, save_config, apply_preset, apply_platform_preset, PRESETS
 from circleseeker.cli.exit_codes import EXIT_ERROR, EXIT_USAGE
 from circleseeker.utils.display import ConsoleFormatter, print_formatted
 from circleseeker.utils.logging import setup_logging
@@ -49,6 +49,8 @@ class PipelineOptions:
     # Logging options from CLI (used to determine if config should override)
     noise: int = 0  # -n count
     debug: bool = False  # --debug flag
+    # Sequencing platform: hifi (default), ont
+    platform: Optional[str] = None
     # Sensitivity preset: relaxed, balanced (default), strict
     preset: Optional[str] = None
 
@@ -90,9 +92,20 @@ def execute_pipeline(
     # Load configuration first to allow config file values
     cfg = load_config(opts.config_path) if opts.config_path else Config()
 
+    # Apply platform preset if specified
+    # Priority: CLI --platform > config file > default (hifi)
+    if opts.platform:
+        cfg.platform = opts.platform
+    if cfg.platform != "hifi":
+        try:
+            apply_platform_preset(cfg)
+        except (ValueError, KeyError) as exc:
+            click.echo(f"Error: {exc}", err=True)
+            sys.exit(EXIT_ERROR)
+
     # Apply sensitivity preset if specified
-    # Preset is applied AFTER loading config but BEFORE CLI overrides
-    # This allows: defaults -> config file -> preset -> CLI args
+    # Preset is applied AFTER platform preset but BEFORE CLI overrides
+    # This allows: defaults -> config file -> platform -> preset -> CLI args
     if opts.preset:
         try:
             apply_preset(cfg, opts.preset)  # type: ignore[arg-type]
@@ -206,6 +219,7 @@ def execute_pipeline(
         click.echo(f"\nWould process: {input_file}")
         click.echo(f"With reference: {reference}")
         click.echo(f"Output to: {user_output_dir.absolute()}")
+        click.echo(f"Platform: {cfg.platform}")
         click.echo(f"Using {cfg.threads} threads")
         return
 
@@ -258,6 +272,7 @@ def execute_pipeline(
         "input_file": input_file.name,
         "reference": reference.name,
         "output_dir": str(user_output_dir.absolute()),
+        "platform": cfg.platform.upper(),
         "threads": cfg.threads,
     }
     if turbo_status:

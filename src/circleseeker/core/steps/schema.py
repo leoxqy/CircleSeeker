@@ -14,27 +14,28 @@ if TYPE_CHECKING:
     from circleseeker.core.pipeline import Pipeline
 
 
-def _format_template(template: str, *, prefix: str) -> str:
+def _format_template(template: str, *, prefix: str, seq_ext: str = ".fasta") -> str:
     try:
-        return template.format(prefix=prefix)
+        return template.format(prefix=prefix, seq_ext=seq_ext)
     except (KeyError, IndexError, ValueError):
         return template
 
 
 def resolve_artifact_path(pipeline: Pipeline, spec: ArtifactSpec) -> Optional[Path]:
     """Resolve an ArtifactSpec to a concrete path for a specific pipeline run."""
+    seq_ext = getattr(pipeline.config, "seq_ext", ".fasta")
     if spec.base == "output":
         base = Path(pipeline.config.output_dir)
-        return base / _format_template(spec.template, prefix=pipeline.config.prefix)
+        return base / _format_template(spec.template, prefix=pipeline.config.prefix, seq_ext=seq_ext)
     if spec.base == "final":
         base = Path(pipeline.final_output_dir)
-        return base / _format_template(spec.template, prefix=pipeline.config.prefix)
+        return base / _format_template(spec.template, prefix=pipeline.config.prefix, seq_ext=seq_ext)
     if spec.base == "config":
         value = getattr(pipeline.config, spec.template, None)
         if value is None:
             return None
         return Path(value)
-    return Path(_format_template(spec.template, prefix=pipeline.config.prefix))
+    return Path(_format_template(spec.template, prefix=pipeline.config.prefix, seq_ext=seq_ext))
 
 
 def _read_header(path: Path, *, delimiter: str) -> list[str]:

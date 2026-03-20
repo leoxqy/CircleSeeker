@@ -262,14 +262,14 @@ STEP_CONTRACTS: dict[str, StepContract] = {
             _cfg("input_fasta", "input_file", required=True),
         ),
         outputs=(
-            _out("all_filtered_fasta", "{prefix}_all_filtered.fasta", kind="fasta", required=True),
+            _out("all_filtered_fasta", "{prefix}_all_filtered{seq_ext}", kind="fasta", required=True),
         ),
     ),
     "minimap2": StepContract(
         step_name="minimap2",
         outputs=(
             _out("sorted_bam", "{prefix}_sorted.bam", kind="bam", required=False),
-            _out("all_filtered_fasta", "{prefix}_all_filtered.fasta", kind="fasta", required=False),
+            _out("all_filtered_fasta", "{prefix}_all_filtered{seq_ext}", kind="fasta", required=False),
         ),
     ),
     "ecc_inference": StepContract(

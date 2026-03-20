@@ -62,6 +62,7 @@ def _detect_sequence_file_format(path: Path) -> str:
 # Three sensitivity presets: relaxed (high recall), balanced (default), strict (high precision)
 
 PresetName = Literal["relaxed", "balanced", "strict"]
+PlatformName = Literal["hifi", "ont"]
 
 PRESETS: dict[PresetName, dict[str, dict[str, Any]]] = {
     # ------------------------------------------------
@@ -144,6 +145,74 @@ PRESETS: dict[PresetName, dict[str, dict[str, Any]]] = {
         },
     },
 }
+
+
+PLATFORM_PRESETS: dict[PlatformName, dict[str, dict[str, Any]]] = {
+    "hifi": {
+        # Empty dict = use default values (HiFi is the baseline)
+    },
+    "ont": {
+        "tidehunter": {
+            "e": 0.20,
+            "p": 50,
+        },
+        "tandem_to_ring": {
+            "min_ave_match": 95.0,
+        },
+        "minimap2_align": {
+            "preset": "map-ont",
+            "min_identity": 90.0,
+            "identity_decay_per_10kb": 2.0,
+            "min_identity_floor": 85.0,
+        },
+        "minimap2": {
+            "preset": "map-ont",
+        },
+        "um_classify": {
+            "theta_full": 0.85,
+            "theta_u": 0.85,
+            "theta_m": 0.85,
+            "theta_u2_max": 0.15,
+        },
+        "cecc_build": {
+            "overlap_threshold": 0.85,
+            "min_match_degree": 85.0,
+        },
+        "splitreads": {
+            "mapq_threshold": 10,
+            "min_avg_depth": 3.0,
+        },
+    },
+}
+
+
+def apply_platform_preset(cfg: "Config") -> None:
+    """Apply platform-specific parameter overrides.
+
+    Only modifies parameters that have NOT been explicitly set via config file.
+    The platform preset is applied as a baseline before sensitivity presets.
+
+    Args:
+        cfg: Configuration object to modify in-place
+
+    Raises:
+        ConfigurationError: If platform name is invalid
+    """
+    platform = cfg.platform
+    if platform not in PLATFORM_PRESETS:
+        valid = ", ".join(PLATFORM_PRESETS.keys())
+        raise ConfigurationError(f"Invalid platform '{platform}'. Valid options: {valid}")
+
+    preset_values = PLATFORM_PRESETS[platform]
+    for tool_name, params in preset_values.items():
+        if hasattr(cfg.tools, tool_name):
+            tool_config = getattr(cfg.tools, tool_name)
+            if isinstance(tool_config, dict):
+                tool_config.update(params)
+            elif hasattr(tool_config, '__dataclass_fields__'):
+                for key, value in params.items():
+                    if hasattr(tool_config, key):
+                        setattr(tool_config, key, value)
 
 
 def apply_preset(cfg: "Config", preset: PresetName) -> None:
@@ -476,6 +545,12 @@ class Config:
     output_dir: Path = Path("circleseeker_output")
     prefix: str = "sample"
 
+    # Sequencing platform
+    platform: str = "hifi"
+
+    # Input format (auto-detected during validation: "fasta" or "fastq")
+    input_format: str = "fasta"
+
     # Feature flags
     enable_xecc: bool = True
 
@@ -506,6 +581,11 @@ class Config:
     def keep_tmp(self, value: bool) -> None:
         self.runtime.keep_tmp = value
 
+    @property
+    def seq_ext(self) -> str:
+        """File extension matching the input format ('.fasta' or '.fastq')."""
+        return ".fastq" if self.input_format == "fastq" else ".fasta"
+
     def validate(self) -> None:
         """Validate configuration."""
         if not self.input_file:
@@ -518,26 +598,20 @@ class Config:
             raise ConfigurationError(f"Reference file not found: {self.reference}")
 
         # Basic file format checks (fail fast with actionable errors).
-        # TideHunter is known to crash on invalid/FASTQ input in some environments.
         input_fmt = _detect_sequence_file_format(self.input_file)
-        if input_fmt != "fasta":
-            if input_fmt == "fastq":
-                raise ConfigurationError(
-                    "Input file appears to be FASTQ, but CircleSeeker requires FASTA. "
-                    "Convert first (e.g. seqtk seq -A reads.fastq > reads.fasta). "
-                    f"Got: {self.input_file}"
-                )
+        if input_fmt not in ("fasta", "fastq"):
             if input_fmt == "gzip":
                 raise ConfigurationError(
                     "Input file appears to be gzip-compressed. Please provide an "
-                    f"uncompressed FASTA file. Got: {self.input_file}"
+                    f"uncompressed FASTA/FASTQ file. Got: {self.input_file}"
                 )
             if input_fmt == "empty":
-                raise ConfigurationError(f"Input FASTA file is empty: {self.input_file}")
+                raise ConfigurationError(f"Input file is empty: {self.input_file}")
             raise ConfigurationError(
-                "Input file does not look like FASTA (expected '>' header). "
+                "Input file does not look like FASTA or FASTQ. "
                 f"Got: {self.input_file}"
             )
+        self.input_format = input_fmt
 
         ref_fmt = _detect_sequence_file_format(self.reference)
         if ref_fmt != "fasta":
@@ -707,6 +781,8 @@ def load_config(path: Path) -> Config:
             cfg.output_dir = Path(data["output_dir"])
         if "prefix" in data:
             cfg.prefix = data["prefix"]
+        if "platform" in data:
+            cfg.platform = data["platform"]
         if "enable_xecc" in data:
             cfg.enable_xecc = data["enable_xecc"]
         if "threads" in data and data["threads"] is not None:

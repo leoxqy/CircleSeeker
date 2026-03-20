@@ -39,6 +39,7 @@ from .common_options import (
     output_option,
     prefix_option,
     config_option,
+    platform_option,
     threads_option,
     keep_tmp_option,
     turbo_option,
@@ -119,6 +120,7 @@ def _print_advanced_help(ctx: click.Context, _param: click.Parameter, value: boo
 @output_option
 @prefix_option
 @config_option
+@platform_option
 @threads_option
 @keep_tmp_option
 @turbo_option
@@ -170,6 +172,7 @@ def cli(
     output: Optional[Path],
     prefix: Optional[str],
     config: Optional[Path],
+    platform: Optional[str],
     threads: Optional[int],
     keep_tmp: bool,
     turbo: bool,
@@ -185,7 +188,7 @@ def cli(
     dry_run: bool,
     debug: bool,
 ) -> None:
-    """CircleSeeker: Comprehensive eccDNA detection from HiFi sequencing data.
+    """CircleSeeker: Comprehensive eccDNA detection from long-read sequencing data.
 
     Run directly as: CircleSeeker -i <reads.fa> -r <ref.fa> [options]
     """
@@ -237,6 +240,7 @@ def cli(
             keep_tmp=keep_tmp,
             turbo=turbo,
             fast_align=fast_align,
+            platform=platform,
             start_from=start_from,
             stop_at=stop_at,
             resume=resume,

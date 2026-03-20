@@ -11,6 +11,10 @@ reference: ~
 output_dir: "circleseeker_output"
 prefix: "sample"
 
+# Sequencing platform: "hifi" (PacBio HiFi) or "ont" (Oxford Nanopore)
+# ONT mode automatically adjusts tool parameters for higher error rates
+platform: "hifi"
+
 # Feature flags
 enable_xecc: true
 

@@ -15,6 +15,16 @@ import click
 F = TypeVar("F", bound=Callable[..., None])
 
 
+def platform_option(func: F) -> F:
+    """Sequencing platform option."""
+    return click.option(
+        "--platform",
+        type=click.Choice(["hifi", "ont"], case_sensitive=False),
+        default=None,
+        help="Sequencing platform: hifi (default) or ont",
+    )(func)
+
+
 def input_option(func: F) -> F:
     """Input FASTA file option."""
     return click.option(
@@ -23,7 +33,7 @@ def input_option(func: F) -> F:
         "input_file",
         type=click.Path(exists=True, path_type=Path),
         required=False,
-        help="Input FASTA file (HiFi reads)",
+        help="Input FASTA file (long reads)",
     )(func)
 
 
@@ -220,6 +230,7 @@ def common_pipeline_options(func: F) -> F:
         output_option,
         prefix_option,
         config_option,
+        platform_option,
         threads_option,
         keep_tmp_option,
         turbo_option,
