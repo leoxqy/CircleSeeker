@@ -144,12 +144,17 @@ class NGSCircleDetect:
         results = self._filter_and_classify(kept)
         self.logger.info(f"NGS detect: {len(results)} final circles")
 
-        if results:
-            df = pd.DataFrame(results)
-            out_csv = output_dir / f"{prefix}_ngs_circles.csv"
-            df.to_csv(out_csv, index=False)
-            return df
-        return pd.DataFrame()
+        if not results:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(results)
+
+        # Step 5: Reclassify multi-locus circles as MeccDNA
+        df = self.reclassify_mecc(df)
+
+        out_csv = output_dir / f"{prefix}_ngs_circles.csv"
+        df.to_csv(out_csv, index=False)
+        return df
 
     # ── Alignment ──────────────────────────────────────────────────────
 
@@ -355,3 +360,112 @@ class NGSCircleDetect:
             })
             idx += 1
         return results
+
+    # ── MeccDNA reclassification ──────────────────────────────────────
+
+    def reclassify_mecc(
+        self,
+        circles_df: pd.DataFrame,
+        min_loci: int = 2,
+        min_query_cov: float = 0.7,
+    ) -> pd.DataFrame:
+        """Reclassify UeccDNA as MeccDNA by re-aligning circle sequences.
+
+        For each detected circle, extract its sequence from the reference
+        and align back to the full genome.  If the sequence has full-length
+        hits at ≥2 distinct genomic locations, the circle is from a
+        repetitive/multi-copy region and is reclassified as MeccDNA.
+
+        Args:
+            circles_df: DataFrame from run_from_bam (UeccDNA detections)
+            min_loci: Minimum distinct loci for MeccDNA (default 2)
+            min_query_cov: Minimum query coverage for a "full-length" hit
+
+        Returns:
+            Updated DataFrame with eccdna_type reclassified where applicable.
+        """
+        if circles_df.empty:
+            return circles_df
+
+        import subprocess
+        import tempfile
+
+        ref_fasta = pysam.FastaFile(str(self.reference))
+        tmpdir = Path(tempfile.mkdtemp())
+
+        # Write circle sequences
+        circle_fa = tmpdir / "circles.fasta"
+        with open(circle_fa, "w") as f:
+            for _, row in circles_df.iterrows():
+                try:
+                    seq = ref_fasta.fetch(
+                        str(row["chr"]), int(row["start"]), int(row["end"])
+                    )
+                    f.write(f">{row['eccDNA_id']}\n{seq}\n")
+                except (ValueError, KeyError):
+                    continue
+        ref_fasta.close()
+
+        # Align circle sequences to reference (allow many secondaries)
+        paf_out = tmpdir / "circles_vs_ref.paf"
+        subprocess.run(
+            f"minimap2 -cx asm5 --secondary=yes -N 20 -p 0.1 "
+            f"-t {self.config.threads} "
+            f"{self.reference} {circle_fa} > {paf_out} 2>/dev/null",
+            shell=True,
+            timeout=300,
+        )
+
+        # Parse: count distinct full-length loci per circle
+        circle_loci: dict[str, list[tuple]] = defaultdict(list)
+        with open(paf_out) as f:
+            for line in f:
+                cols = line.rstrip().split("\t")
+                eid = cols[0]
+                qlen = int(cols[1])
+                qs, qe = int(cols[2]), int(cols[3])
+                tname = cols[5]
+                ts, te = int(cols[7]), int(cols[8])
+
+                if (qe - qs) / qlen < min_query_cov:
+                    continue
+                circle_loci[eid].append((tname, ts, te))
+
+        # Deduplicate loci and reclassify
+        def _ofrac(s1, e1, s2, e2):
+            ov = max(0, min(e1, e2) - max(s1, s2))
+            return min(ov / max(e1 - s1, 1), ov / max(e2 - s2, 1))
+
+        mecc_ids = set()
+        mecc_loci_count = {}
+        for eid, loci in circle_loci.items():
+            unique = []
+            for loc in sorted(loci, key=lambda x: (-abs(x[2]-x[1]))):
+                if not any(
+                    loc[0] == u[0] and _ofrac(loc[1], loc[2], u[1], u[2]) > 0.5
+                    for u in unique
+                ):
+                    unique.append(loc)
+            if len(unique) >= min_loci:
+                mecc_ids.add(eid)
+                mecc_loci_count[eid] = len(unique)
+
+        # Update DataFrame
+        circles_df = circles_df.copy()
+        mask = circles_df["eccDNA_id"].isin(mecc_ids)
+        circles_df.loc[mask, "eccdna_type"] = "Mecc"
+        circles_df.loc[mask, "n_genomic_loci"] = circles_df.loc[mask, "eccDNA_id"].map(
+            mecc_loci_count
+        )
+
+        n_mecc = mask.sum()
+        self.logger.info(
+            f"MeccDNA reclassification: {n_mecc}/{len(circles_df)} circles "
+            f"reclassified as MeccDNA (≥{min_loci} genomic loci)"
+        )
+
+        # Cleanup
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+        return circles_df
