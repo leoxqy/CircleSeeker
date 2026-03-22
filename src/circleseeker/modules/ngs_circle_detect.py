@@ -172,12 +172,20 @@ class NGSCircleDetect:
     # ── Evidence extraction ────────────────────────────────────────────
 
     def _extract_evidence(self, bam_path: Path) -> dict:
-        """Extract per-region evidence from BAM."""
+        """Extract per-region evidence from BAM.
+
+        Reads are NOT filtered by MAPQ. Instead, back-jump reads are
+        stored in separate buckets by MAPQ:
+          - "bj": MAPQ ≥ mapq_threshold (UeccDNA signal)
+          - "bj_low": MAPQ < mapq_threshold (MeccDNA signal)
+        This allows downstream classification of UeccDNA vs MeccDNA
+        based on mapping ambiguity.
+        """
         cfg = self.config
         bam = pysam.AlignmentFile(str(bam_path), "rb")
 
         regions = defaultdict(lambda: {
-            "bj": set(), "fj": set(),
+            "bj": set(), "bj_low": set(), "fj": set(),
             "do": set(), "di": set(),
             "cl": set(), "cr": set(),
             "positions": [],
@@ -186,22 +194,25 @@ class NGSCircleDetect:
         for read in bam.fetch():
             if read.is_unmapped or read.is_secondary or read.is_duplicate:
                 continue
-            if read.mapping_quality < cfg.min_mapq:
-                continue
 
             chrom = read.reference_name
             rstart, rend = read.reference_start, read.reference_end
 
-            # ── Split reads ──
+            # ── Split reads (all MAPQ, stratified internally) ──
             if read.has_tag("SA"):
                 self._process_split(read, chrom, rstart, rend, regions)
 
-            # ── Discordant pairs ──
-            if read.is_paired and not read.mate_is_unmapped and read.is_read1:
+            # ── Discordant pairs (require min MAPQ) ──
+            if (
+                read.mapping_quality >= cfg.min_mapq
+                and read.is_paired
+                and not read.mate_is_unmapped
+                and read.is_read1
+            ):
                 self._process_discordant(read, chrom, rstart, rend, regions)
 
             # ── Soft-clips ──
-            if read.cigartuples:
+            if read.mapping_quality >= cfg.min_mapq and read.cigartuples:
                 self._process_softclip(read, chrom, rstart, rend, regions)
 
         bam.close()
@@ -241,7 +252,11 @@ class NGSCircleDetect:
 
             key = (chrom, left // cfg.bin_size, right // cfg.bin_size)
             if second_r < first_r:
-                regions[key]["bj"].add(read.query_name)
+                # Back-jump: stratify by MAPQ
+                if read.mapping_quality >= cfg.min_mapq:
+                    regions[key]["bj"].add(read.query_name)
+                else:
+                    regions[key]["bj_low"].add(read.query_name)
             else:
                 regions[key]["fj"].add(read.query_name)
             regions[key]["positions"].append((left, right))
@@ -277,7 +292,8 @@ class NGSCircleDetect:
     def _score_regions(self, regions: dict) -> list[dict]:
         scored = []
         for key, ev in regions.items():
-            total = len(ev["bj"]) + len(ev["fj"]) + len(ev["do"]) + len(ev["di"])
+            total = (len(ev["bj"]) + len(ev.get("bj_low", set()))
+                     + len(ev["fj"]) + len(ev["do"]) + len(ev["di"]))
             if total < self.config.min_evidence:
                 continue
 
@@ -294,8 +310,10 @@ class NGSCircleDetect:
             if size < self.config.min_circle_size:
                 continue
 
+            # For scoring, combine high+low MAPQ back-jumps as total signal
+            total_bj = len(ev["bj"]) + len(ev.get("bj_low", set()))
             features = np.array([
-                len(ev["bj"]), len(ev["fj"]),
+                total_bj, len(ev["fj"]),
                 len(ev["do"]), len(ev["di"]),
                 len(ev["cl"]), len(ev["cr"]),
                 np.log10(max(size, 1)),
@@ -309,10 +327,12 @@ class NGSCircleDetect:
             scored.append({
                 "chr": chrom, "start": med_s, "end": med_e, "size": size,
                 "score": score,
-                "n_backjump": len(ev["bj"]), "n_fwdjump": len(ev["fj"]),
+                "n_backjump": len(ev["bj"]),
+                "n_backjump_low": len(ev.get("bj_low", set())),
+                "n_fwdjump": len(ev["fj"]),
                 "n_disc_outward": len(ev["do"]), "n_disc_inward": len(ev["di"]),
                 "n_clip_left": len(ev["cl"]), "n_clip_right": len(ev["cr"]),
-                "n_reads": len(ev["bj"] | ev["fj"] | ev["do"] | ev["di"]),
+                "n_reads": len(ev["bj"] | ev.get("bj_low", set()) | ev["fj"] | ev["do"] | ev["di"]),
             })
 
         return scored
@@ -339,26 +359,51 @@ class NGSCircleDetect:
     # ── Classify ───────────────────────────────────────────────────────
 
     def _filter_and_classify(self, candidates: list[dict]) -> list[dict]:
+        """Classify circles as UeccDNA or MeccDNA based on MAPQ stratification.
+
+        - High-MAPQ back-jumps (bj) → UeccDNA (unique mapping)
+        - Low-MAPQ back-jumps (bj_low) → MeccDNA (multi-mapping = multi-locus)
+        - Regions with BOTH → classified by dominant signal
+        """
         results = []
-        idx = 1
+        uecc_idx = 1
+        mecc_idx = 1
+
         for cand in candidates:
             if cand["score"] < self.config.score_threshold:
                 continue
+
+            n_bj_hi = cand.get("n_backjump", 0)
+            n_bj_lo = cand.get("n_backjump_low", 0)
+
+            # Classify by dominant MAPQ signal
+            if n_bj_hi > 0 and n_bj_hi >= n_bj_lo:
+                etype = "Uecc"
+                eid = f"NGS_Uecc{uecc_idx:05d}"
+                uecc_idx += 1
+            elif n_bj_lo > 0:
+                etype = "Mecc"
+                eid = f"NGS_Mecc{mecc_idx:05d}"
+                mecc_idx += 1
+            else:
+                continue
+
             results.append({
-                "eccDNA_id": f"NGS_Uecc{idx:05d}",
+                "eccDNA_id": eid,
                 "chr": cand["chr"],
                 "start": cand["start"],
                 "end": cand["end"],
                 "length": cand["size"],
-                "eccdna_type": "Uecc",
+                "eccdna_type": etype,
                 "state": "Confirmed",
                 "score": round(cand["score"], 4),
-                "n_backjump": cand["n_backjump"],
-                "n_discordant": cand["n_disc_outward"] + cand["n_disc_inward"],
-                "n_softclip": cand["n_clip_left"] + cand["n_clip_right"],
-                "n_reads": cand["n_reads"],
+                "n_backjump": n_bj_hi,
+                "n_backjump_low": n_bj_lo,
+                "n_discordant": cand.get("n_disc_outward", 0) + cand.get("n_disc_inward", 0),
+                "n_softclip": cand.get("n_clip_left", 0) + cand.get("n_clip_right", 0),
+                "n_reads": cand.get("n_reads", 0),
             })
-            idx += 1
+
         return results
 
     # ── MeccDNA reclassification ──────────────────────────────────────
