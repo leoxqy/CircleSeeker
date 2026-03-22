@@ -1195,6 +1195,231 @@ class EccDedup:
         result = self._finalize_dataframe(result, dtype)
         return result
 
+    def merge_uecc_by_coordinates(
+        self, df: pd.DataFrame, min_reciprocal_overlap: float = 0.5
+    ) -> pd.DataFrame:
+        """Merge UeccDNA entries with overlapping genomic coordinates.
+
+        CD-HIT may fail to cluster noisy ONT consensus sequences from the same
+        eccDNA. This step merges entries on the same chromosome whose coordinates
+        overlap by at least `min_reciprocal_overlap` (reciprocal overlap fraction).
+
+        The entry with the highest confidence score is kept as representative.
+        """
+        if df.empty or len(df) <= 1:
+            return df
+
+        required = [ColumnStandard.ECCDNA_ID, ColumnStandard.CHR,
+                     ColumnStandard.START0, ColumnStandard.END0]
+        if not all(c in df.columns for c in required):
+            return df
+
+        df = df.copy()
+        # Ensure numeric coordinates
+        df[ColumnStandard.START0] = pd.to_numeric(df[ColumnStandard.START0], errors="coerce")
+        df[ColumnStandard.END0] = pd.to_numeric(df[ColumnStandard.END0], errors="coerce")
+        df = df.dropna(subset=[ColumnStandard.START0, ColumnStandard.END0])
+
+        # Union-Find
+        idx_list = list(df.index)
+        parent = {i: i for i in idx_list}
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        # Group by chromosome, then find overlapping pairs
+        for _, chr_group in df.groupby(ColumnStandard.CHR, sort=False):
+            if len(chr_group) <= 1:
+                continue
+            # Sort by start coordinate for sweep
+            sorted_grp = chr_group.sort_values(ColumnStandard.START0)
+            indices = list(sorted_grp.index)
+            starts = sorted_grp[ColumnStandard.START0].values
+            ends = sorted_grp[ColumnStandard.END0].values
+
+            for i in range(len(indices)):
+                for j in range(i + 1, len(indices)):
+                    if starts[j] >= ends[i]:
+                        break  # No more overlaps possible (sorted by start)
+                    # Compute reciprocal overlap
+                    ov = min(ends[i], ends[j]) - max(starts[i], starts[j])
+                    if ov <= 0:
+                        continue
+                    len_i = max(ends[i] - starts[i], 1)
+                    len_j = max(ends[j] - starts[j], 1)
+                    recip = min(ov / len_i, ov / len_j)
+                    if recip >= min_reciprocal_overlap:
+                        union(indices[i], indices[j])
+
+        # Group by root
+        groups: dict[int, list[int]] = defaultdict(list)
+        for idx in idx_list:
+            groups[find(idx)].append(idx)
+
+        merged_count = sum(1 for g in groups.values() if len(g) > 1)
+        if merged_count == 0:
+            return df
+
+        # For each group, keep the representative with highest confidence
+        conf_col = ColumnStandard.CONFIDENCE_SCORE
+        reads_col = ColumnStandard.READS
+        keep_indices = []
+        for root, members in groups.items():
+            if len(members) == 1:
+                keep_indices.append(members[0])
+            else:
+                member_df = df.loc[members]
+                if conf_col in member_df.columns:
+                    scores = pd.to_numeric(member_df[conf_col], errors="coerce").fillna(0)
+                    best_idx = scores.idxmax()
+                else:
+                    best_idx = members[0]
+                # Aggregate reads and num_merged from all members
+                if reads_col in df.columns:
+                    all_reads = merge_read_lists(member_df[reads_col])
+                    df.at[best_idx, reads_col] = all_reads
+                if "num_merged" in df.columns:
+                    total_merged = pd.to_numeric(
+                        member_df["num_merged"], errors="coerce"
+                    ).fillna(1).sum()
+                    df.at[best_idx, "num_merged"] = int(total_merged)
+                if "merged_from_ids" in df.columns:
+                    all_ids = ";".join(
+                        str(x) for x in member_df[ColumnStandard.ECCDNA_ID].unique()
+                    )
+                    df.at[best_idx, "merged_from_ids"] = all_ids
+                keep_indices.append(best_idx)
+
+        before = len(df)
+        result = df.loc[keep_indices].copy()
+        self.logger.info(
+            "UeccDNA coordinate merge (>=%d%% reciprocal overlap): %d -> %d entries (%d merged)",
+            int(min_reciprocal_overlap * 100), before, len(result), merged_count,
+        )
+        return result
+
+    def merge_mecc_by_loci_set(
+        self, df: pd.DataFrame, min_loci_overlap: float = 0.6
+    ) -> pd.DataFrame:
+        """Merge MeccDNA entries whose full loci sets overlap.
+
+        Unlike merge_uecc_by_coordinates (which compares individual segments),
+        this method compares the COMPLETE set of loci for each MeccDNA entry.
+        Two entries are merged only when >= min_loci_overlap of BOTH entries'
+        loci are reciprocally matched, preventing distinct MeccDNA that share
+        a single locus from being incorrectly merged.
+        """
+        if df.empty or len(df) <= 1:
+            return df
+
+        id_col = ColumnStandard.ECCDNA_ID if ColumnStandard.ECCDNA_ID in df.columns else "eccDNA_id"
+        chr_col = ColumnStandard.CHR if ColumnStandard.CHR in df.columns else "chr"
+        s_col = ColumnStandard.START0 if ColumnStandard.START0 in df.columns else "start0"
+        e_col = ColumnStandard.END0 if ColumnStandard.END0 in df.columns else "end0"
+
+        # Build loci set per eccDNA_id
+        id_loci: dict[str, list[tuple[str, int, int]]] = {}
+        for eid, grp in df.groupby(id_col):
+            loci = []
+            for _, r in grp.iterrows():
+                try:
+                    loci.append((str(r[chr_col]), int(r[s_col]), int(r[e_col])))
+                except (ValueError, TypeError):
+                    continue
+            if loci:
+                id_loci[eid] = loci
+
+        eids = list(id_loci.keys())
+        n = len(eids)
+        if n <= 1:
+            return df
+
+        # Union-Find
+        parent = list(range(n))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        def _seg_overlap(s1: int, e1: int, s2: int, e2: int) -> float:
+            ov = max(0, min(e1, e2) - max(s1, s2))
+            return min(ov / max(e1 - s1, 1), ov / max(e2 - s2, 1))
+
+        def _loci_set_overlap(la: list, lb: list) -> float:
+            ma = sum(
+                1 for ca, sa, ea in la
+                if any(cb == ca and _seg_overlap(sa, ea, sb, eb) >= 0.5 for cb, sb, eb in lb)
+            )
+            mb = sum(
+                1 for cb, sb, eb in lb
+                if any(ca == cb and _seg_overlap(sa, ea, sb, eb) >= 0.5 for ca, sa, ea in la)
+            )
+            fa = ma / len(la) if la else 0
+            fb = mb / len(lb) if lb else 0
+            return min(fa, fb)
+
+        # Index by chromosome for candidate pair generation
+        chr_to_idx: dict[str, set[int]] = defaultdict(set)
+        for i, eid in enumerate(eids):
+            for c, _s, _e in id_loci[eid]:
+                chr_to_idx[c].add(i)
+
+        merge_count = 0
+        for _c, indices in chr_to_idx.items():
+            idx_list = sorted(indices)
+            for ii in range(len(idx_list)):
+                for jj in range(ii + 1, len(idx_list)):
+                    i, j = idx_list[ii], idx_list[jj]
+                    if find(i) == find(j):
+                        continue
+                    if _loci_set_overlap(id_loci[eids[i]], id_loci[eids[j]]) >= min_loci_overlap:
+                        union(i, j)
+                        merge_count += 1
+
+        if merge_count == 0:
+            return df
+
+        # Keep representative per cluster (most loci, then highest confidence)
+        groups: dict[int, list[int]] = defaultdict(list)
+        for i in range(n):
+            groups[find(i)].append(i)
+
+        conf_col = ColumnStandard.CONFIDENCE_SCORE if ColumnStandard.CONFIDENCE_SCORE in df.columns else None
+        keep_eids = []
+        for members in groups.values():
+            best = max(
+                members,
+                key=lambda m: (
+                    len(id_loci[eids[m]]),
+                    float(df[df[id_col] == eids[m]][conf_col].max()) if conf_col else 0,
+                ),
+            )
+            keep_eids.append(eids[best])
+
+        before = len(eids)
+        result = df[df[id_col].isin(keep_eids)].copy()
+        after = result[id_col].nunique()
+        self.logger.info(
+            "MeccDNA loci-set merge (>=%d%% reciprocal loci overlap): %d -> %d entries (%d merged)",
+            int(min_loci_overlap * 100), before, after, before - after,
+        )
+        return result
+
     def process_mecc_cecc(
         self, df: pd.DataFrame, clusters: CDHitClusters, dtype: str
     ) -> pd.DataFrame:
@@ -2557,6 +2782,7 @@ class EccDedup:
                     uecc_df["eccDNA_id"] = uecc_df["eccdna_id"]
 
                 processed_uecc = self.process_uecc(uecc_df, uecc_clusters, "Uecc")
+                processed_uecc = self.merge_uecc_by_coordinates(processed_uecc)
                 processed_uecc = self.renumber_eccdna_ids(processed_uecc, "Uecc")
 
                 results["Uecc"] = processed_uecc
@@ -2580,6 +2806,7 @@ class EccDedup:
                     mecc_df["eccDNA_id"] = mecc_df["eccdna_id"]
 
                 processed_mecc = self.process_mecc_cecc(mecc_df, mecc_clusters, "Mecc")
+                processed_mecc = self.merge_mecc_by_loci_set(processed_mecc, min_loci_overlap=0.6)
                 processed_mecc = self.renumber_eccdna_ids(processed_mecc, "Mecc")
 
                 results["Mecc"] = processed_mecc

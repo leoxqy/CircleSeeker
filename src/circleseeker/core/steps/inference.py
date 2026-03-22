@@ -552,6 +552,24 @@ def curate_inferred_ecc(pipeline: Pipeline) -> list[str] | None:
                 min_two_seg_splits,
             )
 
+    # For inferred CeccDNA without circularity evidence (ctc=False),
+    # require segments from >= 2 different chromosomes (inter-chromosomal).
+    # Intra-chromosomal multi-segment calls without ctc validation are
+    # overwhelmingly structural-variant artifacts, not real eccDNA.
+    # Confirmed CeccDNA (from TideHunter + cecc_build) is NOT affected.
+    if not chimeric_df.empty and "chr" in chimeric_df.columns and "eccDNA_id" in chimeric_df.columns:
+        before_ic = int(chimeric_df["eccDNA_id"].nunique())
+        n_chr_per_id = chimeric_df.groupby("eccDNA_id")["chr"].nunique()
+        inter_chr_ids = set(n_chr_per_id[n_chr_per_id >= 2].index)
+        chimeric_df = chimeric_df[chimeric_df["eccDNA_id"].isin(inter_chr_ids)].copy()
+        after_ic = int(chimeric_df["eccDNA_id"].nunique())
+        if after_ic != before_ic:
+            pipeline.logger.info(
+                "Filtered inferred CeccDNA (require inter-chromosomal): %d -> %d circles",
+                before_ic,
+                after_ic,
+            )
+
     inferred_prefix = pipeline.config.output_dir / pipeline.config.prefix
     reference_for_inferred: Optional[Path] = None
     if pipeline.config.reference:

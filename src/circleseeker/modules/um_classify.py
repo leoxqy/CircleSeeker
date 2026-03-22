@@ -65,7 +65,7 @@ class UMeccClassifier:
         theta_u2_max: Optional[float] = None,
         mapq_u_min: int = 0,
         mapq_m_ambiguous_threshold: int = 0,
-        mecc_identity_gap_threshold: float = 0,  # Disabled by default
+        mecc_identity_gap_threshold: float = 1.0,
         u_secondary_min_frac: float = 0.01,
         u_secondary_min_bp: int = 50,
         u_contig_gap_bp: int = 1000,

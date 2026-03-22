@@ -54,7 +54,7 @@ def um_classify(pipeline: Pipeline) -> None:
         mapq_u_min=um_cfg.get("mapq_u_min", 0),
         # Additional filters for ambiguous classifications
         mapq_m_ambiguous_threshold=um_cfg.get("mapq_m_ambiguous_threshold", 0),
-        mecc_identity_gap_threshold=um_cfg.get("mecc_identity_gap_threshold", 0),
+        mecc_identity_gap_threshold=um_cfg.get("mecc_identity_gap_threshold", 1.0),
         u_secondary_min_frac=um_cfg.get("u_secondary_min_frac", 0.01),
         u_secondary_min_bp=um_cfg.get("u_secondary_min_bp", 50),
         u_contig_gap_bp=um_cfg.get("u_contig_gap_bp", 1000),
@@ -264,6 +264,24 @@ def cecc_build(pipeline: Pipeline) -> None:
             exclude_from_c = uecc_ids | mecc_ids
             if exclude_from_c:
                 df_cecc = df_cecc[~df_cecc["query_id"].astype(str).isin(exclude_from_c)].copy()
+                df_cecc.to_csv(output_file, index=False)
+
+        # ONT platform: filter out intra-chromosomal CeccDNA.
+        # ONT's higher error rate causes LAST to generate spurious intra-chr
+        # chimeric calls.  HiFi data is unaffected (high-accuracy LAST).
+        if (
+            not df_cecc.empty
+            and "CeccClass" in df_cecc.columns
+            and getattr(pipeline.config, "platform", "") == "ont"
+        ):
+            before_cnt = int(df_cecc["query_id"].nunique())
+            df_cecc = df_cecc[df_cecc["CeccClass"] != "Cecc-IntraChr"].copy()
+            after_cnt = int(df_cecc["query_id"].nunique())
+            if after_cnt != before_cnt:
+                pipeline.logger.info(
+                    "ONT: removed intra-chromosomal CeccDNA: %d -> %d reads",
+                    before_cnt, after_cnt,
+                )
                 df_cecc.to_csv(output_file, index=False)
 
         pipeline._set_result(ResultKeys.CECC_BUILD_OUTPUT, str(output_file))

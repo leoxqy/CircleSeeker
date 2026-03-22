@@ -57,7 +57,7 @@ tools:
     mapq_u_min: 0
     # Mecc ambiguity filters (0 = disabled)
     mapq_m_ambiguous_threshold: 0
-    mecc_identity_gap_threshold: 0
+    mecc_identity_gap_threshold: 1.0
     # Secondary mapping veto for U calls
     u_secondary_min_frac: 0.01
     u_secondary_min_bp: 50
@@ -129,7 +129,7 @@ tools:
     min_avg_depth: 5.0           # Minimum average coverage depth
 
     # Inferred CeccDNA filtering
-    min_inferred_chimeric_segments: 3    # Minimum segments for inferred Cecc
+    min_inferred_chimeric_segments: 2    # Minimum segments for inferred Cecc
     min_inferred_two_segment_split_reads: 0  # 0 = disable 2-segment Cecc
 
     # Merge parameters

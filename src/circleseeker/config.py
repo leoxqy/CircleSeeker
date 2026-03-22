@@ -153,34 +153,42 @@ PLATFORM_PRESETS: dict[PlatformName, dict[str, dict[str, Any]]] = {
     },
     "ont": {
         "tidehunter": {
-            "e": 0.20,
-            "p": 50,
+            "e": 0.25,       # ONT error rate ~5-10%, allow more errors
+            "p": 30,         # Detect shorter periods (ONT reads are shorter)
         },
         "tandem_to_ring": {
-            "min_ave_match": 95.0,
+            "min_ave_match": 85.0,  # ONT consensus quality ~91%, lowered from 95
+        },
+        "alignment": {
+            "min_identity": 80.0,   # Override: tightened from 75 after identity bug fix
         },
         "minimap2_align": {
             "preset": "map-ont",
-            "min_identity": 90.0,
+            "min_identity": 80.0,   # Tightened from 75 to reduce FP
             "identity_decay_per_10kb": 2.0,
-            "min_identity_floor": 85.0,
+            "min_identity_floor": 75.0,
         },
         "minimap2": {
             "preset": "map-ont",
         },
         "um_classify": {
-            "theta_full": 0.85,
-            "theta_u": 0.85,
-            "theta_m": 0.85,
-            "theta_u2_max": 0.15,
+            "theta_full": 0.80,     # Tightened from 0.75: balance recall vs FP
+            "theta_u": 0.80,
+            "theta_m": 0.85,        # Mecc needs stricter threshold to reduce FP
+            "theta_u2_max": 0.15,   # Tightened from 0.20 to reduce Mecc FP
+            "gap_threshold": 15.0,  # Tightened from 20
+            "span_ratio_min": 0.85, # Tightened from 0.80
         },
         "cecc_build": {
-            "overlap_threshold": 0.85,
-            "min_match_degree": 85.0,
+            "overlap_threshold": 0.85,  # Tightened from 0.75 to reduce Cecc FP
+            "min_match_degree": 85.0,   # Tightened from 75
+            "edge_tolerance": 30,       # Tightened from 50
+            "theta_chain": 0.85,        # Tightened from 0.75
         },
         "splitreads": {
             "mapq_threshold": 10,
-            "min_avg_depth": 3.0,
+            "min_avg_depth": 1.5,
+            "min_breakpoint_depth": 1,
         },
     },
 }
@@ -340,7 +348,7 @@ class UMClassifyConfig(ToolConfigMixin):
     # MAPQ thresholds
     mapq_u_min: int = 0
     mapq_m_ambiguous_threshold: int = 0
-    mecc_identity_gap_threshold: float = 0.0
+    mecc_identity_gap_threshold: float = 1.0
     # Secondary evidence thresholds
     u_secondary_min_frac: float = 0.01
     u_secondary_min_bp: int = 50
@@ -437,7 +445,7 @@ class SplitReadsConfig(ToolConfigMixin):
     # Post-processing / curation filters (applied to inferred CeccDNA)
     # Chimeric (Cecc) candidates with only 2 segments are prone to artifacts in
     # split-read graph inference; default keeps >=3 segments for precision.
-    min_inferred_chimeric_segments: int = 3
+    min_inferred_chimeric_segments: int = 2
     # Optional: allow 2-segment inferred Cecc when split-read support is high.
     # Set to 0 to disable.
     min_inferred_two_segment_split_reads: int = 0
