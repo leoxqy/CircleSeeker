@@ -226,7 +226,7 @@ class NGSCircleDetect:
                 continue
             sa_chr, sa_pos = parts[0], int(parts[1]) - 1
             sa_mapq = int(parts[4])
-            if sa_chr != chrom or sa_mapq < cfg.min_mapq:
+            if sa_chr != chrom:
                 continue
 
             sa_rev = parts[2] == "-"
@@ -252,8 +252,9 @@ class NGSCircleDetect:
 
             key = (chrom, left // cfg.bin_size, right // cfg.bin_size)
             if second_r < first_r:
-                # Back-jump: stratify by MAPQ
-                if read.mapping_quality >= cfg.min_mapq:
+                # Back-jump: stratify by min(primary, SA) MAPQ
+                effective_mapq = min(read.mapping_quality, sa_mapq)
+                if effective_mapq >= cfg.min_mapq:
                     regions[key]["bj"].add(read.query_name)
                 else:
                     regions[key]["bj_low"].add(read.query_name)
@@ -291,6 +292,10 @@ class NGSCircleDetect:
 
     def _score_regions(self, regions: dict) -> list[dict]:
         scored = []
+        # LR coefficients without log_size penalty
+        coefs_no_size = _MODEL_COEFS.copy()
+        coefs_no_size[6] = 0.0
+
         for key, ev in regions.items():
             total = (len(ev["bj"]) + len(ev.get("bj_low", set()))
                      + len(ev["fj"]) + len(ev["do"]) + len(ev["di"]))
@@ -312,24 +317,32 @@ class NGSCircleDetect:
 
             # For scoring, combine high+low MAPQ back-jumps as total signal
             total_bj = len(ev["bj"]) + len(ev.get("bj_low", set()))
+            n_fj = len(ev["fj"])
             features = np.array([
-                total_bj, len(ev["fj"]),
+                total_bj, n_fj,
                 len(ev["do"]), len(ev["di"]),
                 len(ev["cl"]), len(ev["cr"]),
                 np.log10(max(size, 1)),
             ])
 
-            # Normalize and score
+            # Hybrid scoring: LR (without size penalty) + backjump dominance
             normed = (features - _SCALER_MEAN) / np.maximum(_SCALER_STD, 1e-6)
-            logit = float(np.dot(normed, _MODEL_COEFS) + _MODEL_INTERCEPT)
+            logit = float(np.dot(normed, coefs_no_size) + _MODEL_INTERCEPT)
             score = _sigmoid(logit)
+
+            # Backjump dominance rescue: if backjumps clearly dominate
+            # forward-jumps, the candidate is likely real regardless of LR score
+            if total_bj >= 2 and n_fj == 0:
+                score = max(score, 0.5)
+            elif total_bj >= 1 and total_bj > n_fj * 2:
+                score = max(score, 0.35)
 
             scored.append({
                 "chr": chrom, "start": med_s, "end": med_e, "size": size,
                 "score": score,
                 "n_backjump": len(ev["bj"]),
                 "n_backjump_low": len(ev.get("bj_low", set())),
-                "n_fwdjump": len(ev["fj"]),
+                "n_fwdjump": n_fj,
                 "n_disc_outward": len(ev["do"]), "n_disc_inward": len(ev["di"]),
                 "n_clip_left": len(ev["cl"]), "n_clip_right": len(ev["cr"]),
                 "n_reads": len(ev["bj"] | ev.get("bj_low", set()) | ev["fj"] | ev["do"] | ev["di"]),
@@ -495,18 +508,31 @@ class NGSCircleDetect:
                 mecc_ids.add(eid)
                 mecc_loci_count[eid] = len(unique)
 
-        # Update DataFrame
+        # Update DataFrame — bidirectional reclassification
         circles_df = circles_df.copy()
-        mask = circles_df["eccDNA_id"].isin(mecc_ids)
-        circles_df.loc[mask, "eccdna_type"] = "Mecc"
-        circles_df.loc[mask, "n_genomic_loci"] = circles_df.loc[mask, "eccDNA_id"].map(
-            mecc_loci_count
+        all_aligned = set(circle_loci.keys())
+
+        # ≥2 loci → Mecc (regardless of initial classification)
+        mask_to_mecc = circles_df["eccDNA_id"].isin(mecc_ids)
+        circles_df.loc[mask_to_mecc, "eccdna_type"] = "Mecc"
+        circles_df.loc[mask_to_mecc, "n_genomic_loci"] = (
+            circles_df.loc[mask_to_mecc, "eccDNA_id"].map(mecc_loci_count)
         )
 
-        n_mecc = mask.sum()
+        # 1 locus → Uecc (fix Mecc that were misclassified by MAPQ)
+        single_locus_ids = all_aligned - mecc_ids
+        mask_to_uecc = (
+            (circles_df["eccDNA_id"].isin(single_locus_ids))
+            & (circles_df["eccdna_type"] == "Mecc")
+        )
+        circles_df.loc[mask_to_uecc, "eccdna_type"] = "Uecc"
+        circles_df.loc[mask_to_uecc, "n_genomic_loci"] = 1
+
+        n_to_mecc = mask_to_mecc.sum()
+        n_to_uecc = mask_to_uecc.sum()
         self.logger.info(
-            f"MeccDNA reclassification: {n_mecc}/{len(circles_df)} circles "
-            f"reclassified as MeccDNA (≥{min_loci} genomic loci)"
+            f"MeccDNA reclassification: {n_to_mecc} → Mecc (≥{min_loci} loci), "
+            f"{n_to_uecc} → Uecc (1 locus)"
         )
 
         # Cleanup
