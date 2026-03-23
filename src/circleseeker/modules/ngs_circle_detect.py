@@ -60,38 +60,38 @@ FEATURE_NAMES = [
     "n_clip_left", "n_clip_right", "log_size",
 ]
 
-# ── CeccDNA LR model coefficients (trained on ara rep1 with MAPQ) ─────
+# ── CeccDNA LR model coefficients (trained on ara rep1, validated rep2/3) ──
 _CECC_MODEL_COEFS = np.array([
-    +0.0880,   # n_junctions
-    +0.0382,   # mean_reads_per_junction
-    -0.0196,   # min_reads_per_junction
-    +0.0234,   # split_disc_ratio
-    +0.0412,   # log_total_reads
-    +0.0103,   # n_fragments
-    +0.0103,   # n_chromosomes
-    -0.0205,   # log_total_length
-    +0.0990,   # max_min_frag_ratio
-    -0.0330,   # strand_closure
-    +0.0940,   # n_strand_flips
-    +0.0383,   # frag_overlap_uecc_ratio
-    -0.0124,   # all_frags_overlap
-    +0.0457,   # mean_bj_at_frags
-    +0.0515,   # mean_disc_at_frags
-    +0.0200,   # mean_junction_mapq
-    +0.0255,   # min_junction_mapq
+    +0.0693,   # n_junctions
+    +0.0260,   # mean_reads_per_junction
+    -0.0221,   # min_reads_per_junction
+    +0.0319,   # split_disc_ratio
+    +0.1033,   # log_total_reads
+    -0.1057,   # n_fragments
+    -0.1057,   # n_chromosomes
+    +0.2093,   # log_total_length
+    +0.1299,   # max_min_frag_ratio
+    -0.0999,   # strand_closure
+    +0.0833,   # n_strand_flips
+    +0.1721,   # frag_overlap_uecc_ratio
+    +0.0376,   # all_frags_overlap
+    +0.0260,   # mean_bj_at_frags
+    +0.1258,   # mean_disc_at_frags
+    -0.0188,   # mean_junction_mapq
+    +0.0289,   # min_junction_mapq
 ])
-_CECC_MODEL_INTERCEPT = 0.0846
+_CECC_MODEL_INTERCEPT = 0.4381
 _CECC_SCALER_MEAN = np.array([
-    1.9655, 7.9114, 3.0287, 0.1789, 1.2964,
-    1.2529, 1.2529, 2.7264, 1.7738, 0.2816,
-    1.7759, 0.5450, 0.3736, 11.0043, 13.8740,
-    21.9885, 4.9138,
+    4.5000, 18.1130, 6.9342, 0.4095, 1.8198,
+    2.1053, 2.1053, 3.4735, 3.2979, 0.6842,
+    4.0526, 0.4846, 0.0921, 8.9572, 9.8958,
+    50.3421, 11.2500,
 ])
 _CECC_SCALER_STD = np.array([
-    2.5049, 11.0497, 5.0780, 0.2099, 0.7549,
-    0.8739, 0.8739, 1.5158, 1.9779, 0.4498,
-    2.2822, 0.4028, 0.4837, 10.5880, 13.5507,
-    25.0512, 5.8160,
+    1.7206, 9.7342, 5.6530, 0.0799, 0.2961,
+    0.3832, 0.3832, 0.2412, 2.1262, 0.4648,
+    1.6535, 0.2313, 0.2892, 6.2337, 7.6093,
+    3.0677, 2.4822,
 ])
 
 CECC_FEATURE_NAMES = [
@@ -153,7 +153,7 @@ class NGSDetectConfig:
     min_circle_size: int = 100
     max_circle_size: int = 100000
     score_threshold: float = 0.3  # default threshold (0.3 → F1≈0.915)
-    cecc_score_threshold: float = 0.50  # CeccDNA LR threshold
+    cecc_score_threshold: float = 0.43  # CeccDNA LR threshold (val Prec=86%)
     mecc_score_threshold: float = 0.32  # MeccDNA LR threshold
     threads: int = 4
     minimap2_preset: str = "sr"
