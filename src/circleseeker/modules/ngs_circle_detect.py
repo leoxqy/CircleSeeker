@@ -60,6 +60,50 @@ FEATURE_NAMES = [
     "n_clip_left", "n_clip_right", "log_size",
 ]
 
+# ── CeccDNA LR model coefficients (trained on ara rep1 with MAPQ) ─────
+_CECC_MODEL_COEFS = np.array([
+    +0.0880,   # n_junctions
+    +0.0382,   # mean_reads_per_junction
+    -0.0196,   # min_reads_per_junction
+    +0.0234,   # split_disc_ratio
+    +0.0412,   # log_total_reads
+    +0.0103,   # n_fragments
+    +0.0103,   # n_chromosomes
+    -0.0205,   # log_total_length
+    +0.0990,   # max_min_frag_ratio
+    -0.0330,   # strand_closure
+    +0.0940,   # n_strand_flips
+    +0.0383,   # frag_overlap_uecc_ratio
+    -0.0124,   # all_frags_overlap
+    +0.0457,   # mean_bj_at_frags
+    +0.0515,   # mean_disc_at_frags
+    +0.0200,   # mean_junction_mapq
+    +0.0255,   # min_junction_mapq
+])
+_CECC_MODEL_INTERCEPT = 0.0846
+_CECC_SCALER_MEAN = np.array([
+    1.9655, 7.9114, 3.0287, 0.1789, 1.2964,
+    1.2529, 1.2529, 2.7264, 1.7738, 0.2816,
+    1.7759, 0.5450, 0.3736, 11.0043, 13.8740,
+    21.9885, 4.9138,
+])
+_CECC_SCALER_STD = np.array([
+    2.5049, 11.0497, 5.0780, 0.2099, 0.7549,
+    0.8739, 0.8739, 1.5158, 1.9779, 0.4498,
+    2.2822, 0.4028, 0.4837, 10.5880, 13.5507,
+    25.0512, 5.8160,
+])
+
+CECC_FEATURE_NAMES = [
+    "n_junctions", "mean_reads_per_junction", "min_reads_per_junction",
+    "split_disc_ratio", "log_total_reads",
+    "n_fragments", "n_chromosomes", "log_total_length", "max_min_frag_ratio",
+    "strand_closure", "n_strand_flips",
+    "frag_overlap_uecc_ratio", "all_frags_overlap",
+    "mean_bj_at_frags", "mean_disc_at_frags",
+    "mean_junction_mapq", "min_junction_mapq",
+]
+
 
 def _sigmoid(x: float) -> float:
     return 1.0 / (1.0 + math.exp(-x)) if x > -500 else 0.0
@@ -78,6 +122,7 @@ class NGSDetectConfig:
     min_circle_size: int = 100
     max_circle_size: int = 100000
     score_threshold: float = 0.3  # default threshold (0.3 → F1≈0.915)
+    cecc_score_threshold: float = 0.50  # CeccDNA LR threshold
     threads: int = 4
     minimap2_preset: str = "sr"
 
@@ -122,21 +167,51 @@ class NGSCircleDetect:
         output_dir: Path,
         prefix: str = "ngs",
     ) -> pd.DataFrame:
-        """Detect eccDNA from an existing sorted BAM."""
+        """Detect eccDNA from an existing sorted BAM.
+
+        Pipeline order: CeccDNA-first to prevent intra-chr signal theft.
+        """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Step 1: Extract evidence (intra-chr + cross-chr)
-        regions, crosschr = self._extract_evidence(bam_path)
+        regions, crosschr, crosschr_readnames = self._extract_evidence(bam_path)
         self.logger.info(
             f"NGS detect: {len(regions)} intra-chr regions, "
-            f"{len(crosschr)} cross-chr junctions"
+            f"{len(crosschr)} cross-chr junctions, "
+            f"{len(crosschr_readnames)} cross-chr reads"
         )
 
-        # Step 2-5: Uecc/Mecc pipeline
+        # Step 2: CeccDNA detection FIRST (before Uecc/Mecc)
+        cecc_df, cecc_fragments = self._detect_cecc_early(crosschr)
+        self.logger.info(f"NGS detect: {len(cecc_df)} CeccDNA circles (raw)")
+
+        # Step 3: Build exclusion zones from ALL CeccDNA fragments (liberal)
+        exclusion_zones = self._build_exclusion_zones(cecc_fragments)
+
+        # Step 4-6: Uecc/Mecc pipeline (with CeccDNA exclusion)
         um_df = pd.DataFrame()
         if regions:
-            scored = self._score_regions(regions)
+            scored, cecc_rescued = self._score_regions(
+                regions, exclusion_zones=exclusion_zones
+            )
+            if cecc_rescued:
+                # Add rescued DISC-dominant regions as Cecc fragments
+                rescued_df = pd.DataFrame(cecc_rescued)
+                cecc_idx = len(cecc_df) + 1
+                rescued_df["eccDNA_id"] = [
+                    f"NGS_Cecc_frag{i:05d}"
+                    for i in range(cecc_idx, cecc_idx + len(rescued_df))
+                ]
+                cecc_df = pd.concat([cecc_df, rescued_df], ignore_index=True)
+                self.logger.info(
+                    f"NGS detect: rescued {len(cecc_rescued)} DISC-dominant "
+                    f"regions as Cecc fragments"
+                )
+            # Apply CeccDNA LR scoring
+            if not cecc_df.empty:
+                cecc_df = self._compute_cecc_features(cecc_df, regions)
+                cecc_df = self._score_cecc_lr(cecc_df)
             kept = self._dedup(scored)
             self.logger.info(f"NGS detect: {len(kept)} after dedup")
             results = self._filter_and_classify(kept)
@@ -145,10 +220,43 @@ class NGSCircleDetect:
                 um_df = pd.DataFrame(results)
                 um_df = self.reclassify_mecc(um_df)
 
-        # Step 6: CeccDNA detection from cross-chr evidence
-        # Run after Uecc/Mecc so we can filter CeccDNA overlapping known circles
-        cecc_df = self._detect_cecc(crosschr, existing_circles=um_df)
-        self.logger.info(f"NGS detect: {len(cecc_df)} CeccDNA circles")
+        # Step 7: Reclassify Uecc in CeccDNA exclusion zones
+        # Disabled: low precision reclassification hurts CeccDNA Prec target (>=90%)
+
+        # Step 8: Filter out Cecc_frag ghost detections
+        # Rescued fragments with no junctions and no fragment structure
+        # are DISC-dominant single regions, not valid standalone CeccDNA.
+        if not cecc_df.empty:
+            before_n = len(cecc_df)
+            has_junctions = cecc_df.get("n_junctions", pd.Series(dtype=float)).fillna(0) > 0
+            has_fragments = cecc_df.get("fragments", pd.Series(dtype=object)).fillna("").astype(str).str.len() > 0
+            cecc_keep = has_junctions | has_fragments
+            n_ghost = int((~cecc_keep).sum())
+            if n_ghost:
+                cecc_df = cecc_df[cecc_keep].reset_index(drop=True)
+                self.logger.info(
+                    f"NGS detect: filtered {n_ghost} Cecc_frag ghost detections "
+                    f"(no junctions, no fragments), kept {len(cecc_df)}/{before_n}"
+                )
+
+        # Step 9: Filter Mecc ghost large circles
+        # Mecc detections with 0 high-MAPQ backjump and very low reads density
+        # are noise from discordant reads in repetitive regions.
+        # Use n_backjump (high-MAPQ only) because all Mecc have n_backjump_low > 0
+        # by definition (that's how they become Mecc in _filter_and_classify).
+        if not um_df.empty:
+            mecc_mask = um_df["eccdna_type"] == "Mecc"
+            n_bj_hi = um_df["n_backjump"].fillna(0)
+            length_kb = um_df["length"].fillna(1) / 1000.0
+            reads_per_kb = um_df["n_reads"].fillna(0) / length_kb.clip(lower=0.001)
+            ghost_mecc = mecc_mask & (n_bj_hi == 0) & (reads_per_kb < 3.0)
+            n_ghost_mecc = int(ghost_mecc.sum())
+            if n_ghost_mecc:
+                um_df = um_df[~ghost_mecc].reset_index(drop=True)
+                self.logger.info(
+                    f"NGS detect: filtered {n_ghost_mecc} Mecc ghost detections "
+                    f"(0 high-MAPQ backjumps, reads/kb < 3.0)"
+                )
 
         # Merge results
         dfs = [d for d in [um_df, cecc_df] if not d.empty]
@@ -179,10 +287,11 @@ class NGSCircleDetect:
         """Extract per-region evidence from BAM.
 
         Returns:
-            (regions, crosschr_junctions)
+            (regions, crosschr_junctions, crosschr_readnames)
             - regions: dict of intra-chromosomal evidence (for Uecc/Mecc)
-            - crosschr_junctions: list of cross-chr split read junctions
-              for CeccDNA detection, each as (chr_a, pos_a, chr_b, pos_b, read_name)
+            - crosschr_junctions: list of cross-chr junctions, each as
+              (chr_a, pos_a, strand_a, chr_b, pos_b, strand_b, read_name, evidence_type)
+            - crosschr_readnames: set of read names involved in cross-chr junctions
         """
         cfg = self.config
         bam = pysam.AlignmentFile(str(bam_path), "rb")
@@ -224,7 +333,8 @@ class NGSCircleDetect:
                 self._process_softclip(read, chrom, rstart, rend, regions)
 
         bam.close()
-        return dict(regions), crosschr_junctions
+        crosschr_readnames = {item[6] for item in crosschr_junctions}
+        return dict(regions), crosschr_junctions, crosschr_readnames
 
     def _process_split(self, read, chrom, rstart, rend, regions, crosschr):
         cfg = self.config
@@ -241,10 +351,15 @@ class NGSCircleDetect:
 
             if sa_chr != chrom:
                 # Cross-chromosome split read → CeccDNA evidence
-                # Breakpoint: end of primary clip → start of SA
+                # Require min MAPQ for both primary and SA
+                effective_mapq = min(read.mapping_quality, sa_mapq)
+                if effective_mapq < cfg.min_mapq:
+                    continue
                 pri_bp = rend if not read.is_reverse else rstart
                 sa_bp = sa_pos if not sa_rev else sa_pos + sa_ref_len
-                crosschr.append((chrom, pri_bp, sa_chr, sa_bp, read.query_name))
+                pri_strand = "-" if read.is_reverse else "+"
+                sa_strand = "-" if sa_rev else "+"
+                crosschr.append((chrom, pri_bp, pri_strand, sa_chr, sa_bp, sa_strand, read.query_name, "split", effective_mapq))
                 continue
 
             sa_leading_clip = int(cigar_ops[0][0]) if cigar_ops[0][1] in "SH" else 0
@@ -284,7 +399,9 @@ class NGSCircleDetect:
             mate_chr = read.next_reference_name
             pri_pos = rend if not read.is_reverse else rstart
             mate_pos = read.next_reference_start
-            crosschr.append((chrom, pri_pos, mate_chr, mate_pos, read.query_name))
+            pri_strand = "-" if read.is_reverse else "+"
+            mate_strand = "-" if read.mate_is_reverse else "+"
+            crosschr.append((chrom, pri_pos, pri_strand, mate_chr, mate_pos, mate_strand, read.query_name, "disc", read.mapping_quality))
             return
         mate_pos = read.next_reference_start
         left = min(rstart, mate_pos)
@@ -308,10 +425,36 @@ class NGSCircleDetect:
             key = (chrom, rend // cfg.bin_size, rend // cfg.bin_size)
             regions[key]["cr"].add(read.query_name)
 
+    # ── Exclusion zone helpers ────────────────────────────────────────
+
+    @staticmethod
+    def _region_in_exclusion(
+        chrom: str, start: int, end: int, exclusion_zones: dict,
+    ) -> bool:
+        """Check if a region overlaps any CeccDNA exclusion zone.
+
+        Uses max of both overlap fractions so that a small exclusion zone
+        fully within a large region still triggers (and vice versa).
+        """
+        for zone_s, zone_e in exclusion_zones.get(chrom, []):
+            if zone_s >= end:
+                break
+            if zone_e <= start:
+                continue
+            ov = min(zone_e, end) - max(zone_s, start)
+            ov_region = ov / max(end - start, 1)
+            ov_zone = ov / max(zone_e - zone_s, 1)
+            if max(ov_region, ov_zone) > 0.3:
+                return True
+        return False
+
     # ── Scoring ────────────────────────────────────────────────────────
 
-    def _score_regions(self, regions: dict) -> list[dict]:
+    def _score_regions(
+        self, regions: dict, exclusion_zones: Optional[dict] = None,
+    ) -> tuple[list[dict], list[dict]]:
         scored = []
+        cecc_rescued = []  # DISC-dominant regions in exclusion zones → Cecc fragments
         # LR coefficients without log_size penalty
         coefs_no_size = _MODEL_COEFS.copy()
         coefs_no_size[6] = 0.0
@@ -338,6 +481,43 @@ class NGSCircleDetect:
             # For scoring, combine high+low MAPQ back-jumps as total signal
             total_bj = len(ev["bj"]) + len(ev.get("bj_low", set()))
             n_fj = len(ev["fj"])
+
+            # Check exclusion zones: rescue DISC-dominant regions as Cecc fragments
+            if exclusion_zones and self._region_in_exclusion(
+                chrom, med_s, med_e, exclusion_zones
+            ):
+                n_disc = len(ev["do"]) + len(ev["di"])
+                if total_bj <= n_disc and n_disc >= 12:
+                    # DISC-dominant with solid evidence → CeccDNA fragment
+                    n_total_resc = len(ev["bj"] | ev.get("bj_low", set()) | ev["fj"] | ev["do"] | ev["di"])
+                    cecc_rescued.append({
+                        "chr": chrom, "start": med_s, "end": med_e,
+                        "length": size,
+                        "eccdna_type": "Cecc",
+                        "state": "Confirmed",
+                        "score": round(min(1.0, n_disc / 20.0), 4),
+                        "n_backjump": len(ev["bj"]),
+                        "n_backjump_low": len(ev.get("bj_low", set())),
+                        "n_discordant": n_disc,
+                        "n_softclip": len(ev["cl"]) + len(ev["cr"]),
+                        "n_reads": n_total_resc,
+                        # LR features (defaults for rescued fragments)
+                        "n_junctions": 0,
+                        "n_fragments": 1,
+                        "n_chromosomes": 1,
+                        "mean_reads_per_junction": 0,
+                        "min_reads_per_junction": 0,
+                        "split_disc_ratio": 0,
+                        "log_total_reads": round(float(np.log10(max(n_total_resc, 1))), 4),
+                        "max_min_frag_ratio": 1.0,
+                        "log_total_length": round(float(np.log10(max(size, 1))), 4),
+                        "strand_closure": 0,
+                        "n_strand_flips": 0,
+                        "mean_junction_mapq": 0,
+                        "min_junction_mapq": 0,
+                    })
+                    continue
+
             features = np.array([
                 total_bj, n_fj,
                 len(ev["do"]), len(ev["di"]),
@@ -368,7 +548,7 @@ class NGSCircleDetect:
                 "n_reads": len(ev["bj"] | ev.get("bj_low", set()) | ev["fj"] | ev["do"] | ev["di"]),
             })
 
-        return scored
+        return scored, cecc_rescued
 
     # ── Dedup ──────────────────────────────────────────────────────────
 
@@ -532,21 +712,47 @@ class NGSCircleDetect:
         circles_df = circles_df.copy()
         all_aligned = set(circle_loci.keys())
 
-        # ≥2 loci → Mecc (regardless of initial classification)
-        mask_to_mecc = circles_df["eccDNA_id"].isin(mecc_ids)
+        # ≥2 loci → Mecc, BUT require backjump evidence for borderline cases
+        # (n_loci == 2 without any backjump is likely sequence similarity noise)
+        confident_mecc_ids = set()
+        for eid in mecc_ids:
+            row = circles_df.loc[circles_df["eccDNA_id"] == eid]
+            if row.empty:
+                continue
+            r = row.iloc[0]
+            n_loci = mecc_loci_count.get(eid, 0)
+            n_bj_hi = int(r.get("n_backjump", 0))
+            n_bj_lo = int(r.get("n_backjump_low", 0))
+            # >=3 loci: confident Mecc (strong multi-copy evidence)
+            # ==2 loci: only Mecc if low-MAPQ backjump dominates.
+            #   If high-MAPQ backjumps dominate (n_bj_hi > n_bj_lo),
+            #   the circle maps uniquely → likely Uecc in paralogous region.
+            if n_loci >= 3:
+                confident_mecc_ids.add(eid)
+            elif n_loci == 2 and n_bj_lo > n_bj_hi:
+                confident_mecc_ids.add(eid)
+
+        mask_to_mecc = circles_df["eccDNA_id"].isin(confident_mecc_ids)
         circles_df.loc[mask_to_mecc, "eccdna_type"] = "Mecc"
         circles_df.loc[mask_to_mecc, "n_genomic_loci"] = (
             circles_df.loc[mask_to_mecc, "eccDNA_id"].map(mecc_loci_count)
         )
 
-        # 1 locus → Uecc (fix Mecc that were misclassified by MAPQ)
-        single_locus_ids = all_aligned - mecc_ids
+        # 1 locus or unconfident 2-locus → Uecc
+        demote_ids = (all_aligned - confident_mecc_ids) | (mecc_ids - confident_mecc_ids)
         mask_to_uecc = (
-            (circles_df["eccDNA_id"].isin(single_locus_ids))
+            (circles_df["eccDNA_id"].isin(demote_ids))
             & (circles_df["eccdna_type"] == "Mecc")
         )
         circles_df.loc[mask_to_uecc, "eccdna_type"] = "Uecc"
         circles_df.loc[mask_to_uecc, "n_genomic_loci"] = 1
+
+        n_demoted_2loci = len(mecc_ids - confident_mecc_ids)
+        if n_demoted_2loci:
+            self.logger.info(
+                f"MeccDNA reclassification: demoted {n_demoted_2loci} "
+                f"2-loci detections without backjump → Uecc"
+            )
 
         n_to_mecc = mask_to_mecc.sum()
         n_to_uecc = mask_to_uecc.sum()
@@ -561,44 +767,248 @@ class NGSCircleDetect:
 
         return circles_df
 
-    # ── CeccDNA detection ─────────────────────────────────────────────
+    # ── CeccDNA post-filter ─────────────────────────────────────────────
 
-    def _detect_cecc(
+    def _filter_cecc_by_intrachr(
+        self, cecc_df: pd.DataFrame, regions: dict,
+        min_bj_for_overlap: int = 3,
+    ) -> pd.DataFrame:
+        """Remove CeccDNA whose ALL fragments overlap strong intra-chr BJ regions.
+
+        Multi-copy (Mecc) regions create false cross-chr junctions from
+        multi-mapping reads. These regions also have strong intra-chr back-jump
+        signals. Real CeccDNA fragments should NOT have independent back-jump
+        evidence at each fragment location.
+        """
+        # Build lookup of regions with strong back-jump evidence
+        bj_regions: dict[str, list] = defaultdict(list)
+        for key, ev in regions.items():
+            n_bj = len(ev["bj"]) + len(ev.get("bj_low", set()))
+            if n_bj >= min_bj_for_overlap and ev["positions"]:
+                chrom = key[0]
+                starts = [p[0] for p in ev["positions"]]
+                ends = [p[1] for p in ev["positions"]]
+                bj_regions[chrom].append(
+                    (int(np.median(starts)), int(np.median(ends)))
+                )
+        for c in bj_regions:
+            bj_regions[c].sort()
+
+        if not bj_regions:
+            return cecc_df
+
+        def _frag_has_bj(fc, fs, fe):
+            for s, e in bj_regions.get(fc, []):
+                if s >= fe:
+                    break
+                if e <= fs:
+                    continue
+                ov = min(e, fe) - max(s, fs)
+                if ov / max(fe - fs, 1) > 0.3:
+                    return True
+            return False
+
+        keep_mask = []
+        for _, row in cecc_df.iterrows():
+            frags_str = row.get("fragments", "")
+            if pd.isna(frags_str) or not frags_str:
+                # Single-region entry (e.g. rescued fragment) — already vetted
+                keep_mask.append(True)
+                continue
+            else:
+                frag_list = []
+                for frag in str(frags_str).split(";"):
+                    parts = frag.split(":")
+                    if len(parts) == 2:
+                        coords = parts[1].split("-")
+                        if len(coords) == 2:
+                            frag_list.append((parts[0], int(coords[0]), int(coords[1])))
+            if not frag_list:
+                keep_mask.append(True)
+                continue
+
+            # If ALL fragments overlap strong BJ regions → likely Mecc/Uecc, not CeccDNA
+            all_overlap = all(_frag_has_bj(fc, fs, fe) for fc, fs, fe in frag_list)
+            keep_mask.append(not all_overlap)
+
+        n_filtered = sum(1 for k in keep_mask if not k)
+        if n_filtered:
+            self.logger.info(
+                f"CeccDNA intrachr filter: removed {n_filtered} with "
+                f"strong BJ evidence at all fragments"
+            )
+        return cecc_df[keep_mask].reset_index(drop=True)
+
+    # ── CeccDNA LR feature computation ────────────────────────────────
+
+    def _compute_cecc_features(
+        self, cecc_df: pd.DataFrame, regions: dict,
+        min_bj_for_overlap: int = 3,
+    ) -> pd.DataFrame:
+        """Compute overlap and intra-chr evidence features for CeccDNA."""
+        # Build per-chromosome evidence lookup from intra-chr regions
+        evidence_lookup: dict[str, list] = defaultdict(list)
+        for key, ev in regions.items():
+            chrom = key[0]
+            n_bj = len(ev["bj"]) + len(ev.get("bj_low", set()))
+            n_disc = len(ev["do"]) + len(ev["di"])
+            if ev["positions"]:
+                starts = [p[0] for p in ev["positions"]]
+                ends = [p[1] for p in ev["positions"]]
+                med_s, med_e = int(np.median(starts)), int(np.median(ends))
+            else:
+                med_s = key[1] * self.config.bin_size
+                med_e = key[2] * self.config.bin_size
+            evidence_lookup[chrom].append((med_s, med_e, n_bj, n_disc))
+        for c in evidence_lookup:
+            evidence_lookup[c].sort()
+
+        overlap_ratios = []
+        all_overlaps = []
+        mean_bjs = []
+        mean_discs = []
+
+        for _, row in cecc_df.iterrows():
+            frags_str = row.get("fragments", "")
+            if pd.isna(frags_str) or not frags_str:
+                frags = [(row["chr"], int(row["start"]), int(row["end"]))]
+            else:
+                frags = []
+                for frag in str(frags_str).split(";"):
+                    parts = frag.split(":")
+                    if len(parts) == 2:
+                        coords = parts[1].split("-")
+                        if len(coords) == 2:
+                            frags.append((parts[0], int(coords[0]), int(coords[1])))
+            if not frags:
+                frags = [(row["chr"], int(row["start"]), int(row["end"]))]
+
+            n_bj_overlap = 0
+            bj_vals = []
+            disc_vals = []
+            for fc, fs, fe in frags:
+                max_bj = 0
+                max_disc = 0
+                has_bj = False
+                for rs, re, rn_bj, rn_disc in evidence_lookup.get(fc, []):
+                    if rs >= fe:
+                        break
+                    if re <= fs:
+                        continue
+                    ov = min(re, fe) - max(rs, fs)
+                    if ov / max(fe - fs, 1) > 0.3:
+                        if rn_bj >= min_bj_for_overlap:
+                            has_bj = True
+                        max_bj = max(max_bj, rn_bj)
+                        max_disc = max(max_disc, rn_disc)
+                if has_bj:
+                    n_bj_overlap += 1
+                bj_vals.append(max_bj)
+                disc_vals.append(max_disc)
+
+            n_frags = len(frags)
+            overlap_ratios.append(round(n_bj_overlap / max(n_frags, 1), 4))
+            all_overlaps.append(
+                1 if n_bj_overlap == n_frags and n_frags > 0 else 0
+            )
+            mean_bjs.append(
+                round(float(np.mean(bj_vals)), 3) if bj_vals else 0.0
+            )
+            mean_discs.append(
+                round(float(np.mean(disc_vals)), 3) if disc_vals else 0.0
+            )
+
+        cecc_df = cecc_df.copy()
+        cecc_df["frag_overlap_uecc_ratio"] = overlap_ratios
+        cecc_df["all_frags_overlap"] = all_overlaps
+        cecc_df["mean_bj_at_frags"] = mean_bjs
+        cecc_df["mean_disc_at_frags"] = mean_discs
+        return cecc_df
+
+    def _score_cecc_lr(self, cecc_df: pd.DataFrame) -> pd.DataFrame:
+        """Apply CeccDNA LR model to score and filter candidates."""
+        if cecc_df.empty:
+            return cecc_df
+
+        threshold = self.config.cecc_score_threshold
+        if threshold <= 0.0:
+            return cecc_df  # LR filter disabled
+
+        features = np.zeros((len(cecc_df), len(CECC_FEATURE_NAMES)))
+        for i, col in enumerate(CECC_FEATURE_NAMES):
+            if col in cecc_df.columns:
+                features[:, i] = cecc_df[col].fillna(0).values
+
+        normed = (features - _CECC_SCALER_MEAN) / np.maximum(_CECC_SCALER_STD, 1e-6)
+        logits = normed @ _CECC_MODEL_COEFS + _CECC_MODEL_INTERCEPT
+        scores = np.array([_sigmoid(float(l)) for l in logits])
+
+        cecc_df = cecc_df.copy()
+        cecc_df["score_cecc_lr"] = np.round(scores, 4)
+
+        mask = scores >= threshold
+        n_filtered = int((~mask).sum())
+        if n_filtered:
+            self.logger.info(
+                f"CeccDNA LR filter: removed {n_filtered}/{len(cecc_df)}, "
+                f"kept {int(mask.sum())} (threshold={threshold})"
+            )
+
+        return cecc_df[mask].reset_index(drop=True)
+
+    # ── CeccDNA detection (early — runs before Uecc/Mecc) ──────────────
+
+    def _detect_cecc_early(
         self,
         crosschr: list,
-        existing_circles: Optional[pd.DataFrame] = None,
-        min_junction_reads: int = 5,
-        min_total_reads: int = 15,
+        min_junction_reads: int = 3,
+        min_total_reads: int = 8,
+        min_output_reads: int = 15,
+        min_output_junctions: int = 2,
         cluster_dist: int = 500,
         max_fragment_size: int = 100000,
         max_total_size: int = 500000,
-    ) -> pd.DataFrame:
-        """Detect CeccDNA from cross-chromosome split reads and discordant pairs.
+    ) -> tuple[pd.DataFrame, list]:
+        """Detect CeccDNA early from cross-chr split reads and discordant pairs.
 
-        Strategy:
-        1. Cluster cross-chr junctions by (chr_a, chr_b, pos_a_bin, pos_b_bin)
-        2. Filter clusters with enough supporting reads
-        3. Build a junction graph: nodes = chromosomal fragments, edges = junctions
-        4. Connected components with ≥2 chromosomes = CeccDNA candidates
-        5. Filter by fragment size and total size to remove over-clustered SVs
+        Runs BEFORE Uecc/Mecc to claim cross-chr signals first.
+        Uses two-tier thresholds: liberal for exclusion zone building,
+        strict for reported CeccDNA output.
+
+        Returns:
+            (cecc_df, cecc_fragment_intervals) where cecc_fragment_intervals
+            is a list of (chr, start, end) tuples for building exclusion zones.
         """
         if not crosschr:
-            return pd.DataFrame()
+            return pd.DataFrame(), []
 
-        # Step 1: Bin and cluster junctions
+        # Step 1: Bin and cluster junctions (8-element tuples)
         junction_bins = defaultdict(lambda: {
-            "reads": set(), "positions_a": [], "positions_b": [],
+            "reads": set(), "split_reads": set(), "disc_reads": set(),
+            "positions_a": [], "positions_b": [],
+            "strands_a": [], "strands_b": [],
+            "mapqs": [],
         })
 
-        for chr_a, pos_a, chr_b, pos_b, rname in crosschr:
+        for item in crosschr:
+            chr_a, pos_a, strand_a, chr_b, pos_b, strand_b, rname, etype = item[:8]
+            mapq = item[8] if len(item) > 8 else 0
             if chr_a > chr_b:
-                chr_a, pos_a, chr_b, pos_b = chr_b, pos_b, chr_a, pos_a
+                chr_a, pos_a, strand_a, chr_b, pos_b, strand_b = \
+                    chr_b, pos_b, strand_b, chr_a, pos_a, strand_a
             bin_a = pos_a // cluster_dist
             bin_b = pos_b // cluster_dist
             key = (chr_a, bin_a, chr_b, bin_b)
             junction_bins[key]["reads"].add(rname)
+            if etype == "split":
+                junction_bins[key]["split_reads"].add(rname)
+            else:
+                junction_bins[key]["disc_reads"].add(rname)
+            junction_bins[key]["mapqs"].append(mapq)
             junction_bins[key]["positions_a"].append(pos_a)
             junction_bins[key]["positions_b"].append(pos_b)
+            junction_bins[key]["strands_a"].append(strand_a)
+            junction_bins[key]["strands_b"].append(strand_b)
 
         # Step 2: Filter junctions with enough support
         junctions = []
@@ -609,19 +1019,42 @@ class NGSCircleDetect:
             chr_a, _, chr_b, _ = key
             med_a = int(np.median(ev["positions_a"]))
             med_b = int(np.median(ev["positions_b"]))
+            # Dominant strand per side
+            dominant_strand_a = max(
+                set(ev["strands_a"]), key=ev["strands_a"].count
+            )
+            dominant_strand_b = max(
+                set(ev["strands_b"]), key=ev["strands_b"].count
+            )
+            mapqs = ev["mapqs"] if ev["mapqs"] else [0]
             junctions.append({
-                "chr_a": chr_a, "pos_a": med_a,
-                "chr_b": chr_b, "pos_b": med_b,
+                "chr_a": chr_a, "pos_a": med_a, "strand_a": dominant_strand_a,
+                "chr_b": chr_b, "pos_b": med_b, "strand_b": dominant_strand_b,
                 "n_reads": n_reads,
+                "n_split": len(ev["split_reads"]),
+                "n_disc": len(ev["disc_reads"]),
+                "mean_mapq": float(np.mean(mapqs)),
+                "min_mapq": min(mapqs),
             })
 
         if not junctions:
-            return pd.DataFrame()
+            return pd.DataFrame(), []
 
         self.logger.info(
-            f"CeccDNA: {len(junctions)} cross-chr junctions "
+            f"CeccDNA early: {len(junctions)} cross-chr junctions "
             f"(≥{min_junction_reads} reads)"
         )
+
+        # Step 2b: Collect ALL junction breakpoint regions for exclusion zones
+        # Each cross-chr junction indicates a potential CeccDNA fragment boundary
+        all_cecc_fragments = []
+        for j in junctions:
+            all_cecc_fragments.append(
+                (j["chr_a"], max(0, j["pos_a"] - 500), j["pos_a"] + 500)
+            )
+            all_cecc_fragments.append(
+                (j["chr_b"], max(0, j["pos_b"] - 500), j["pos_b"] + 500)
+            )
 
         # Step 3: Build junction graph using union-find
         parent = {}
@@ -649,31 +1082,11 @@ class NGSCircleDetect:
             root = find(node_a)
             components[root].append(j)
 
-        # Build existing circle lookup for filtering CeccDNA FP
-        existing_by_chr = defaultdict(list)
-        if existing_circles is not None and not existing_circles.empty:
-            for _, row in existing_circles.iterrows():
-                existing_by_chr[row["chr"]].append(
-                    (int(row["start"]), int(row["end"]))
-                )
-            for c in existing_by_chr:
-                existing_by_chr[c].sort()
-
-        def _frag_overlaps_existing(chrom, start, end):
-            """Check if a fragment overlaps any existing Uecc/Mecc detection."""
-            for s, e in existing_by_chr.get(chrom, []):
-                if s >= end:
-                    break
-                if e <= start:
-                    continue
-                ov = min(e, end) - max(s, start)
-                if ov / max(end - start, 1) > 0.3:
-                    return True
-            return False
-
-        # Step 5: Build CeccDNA candidates with filtering
+        # Step 5: Build CeccDNA candidates with strand closure validation
         results = []
+        all_cecc_fragments = []
         cecc_idx = 1
+
         for comp_junctions in components.values():
             fragments = defaultdict(list)
             total_reads = 0
@@ -686,17 +1099,13 @@ class NGSCircleDetect:
             if len(chroms) < 2:
                 continue
 
-            if total_reads < min_total_reads:
-                continue
-
             # Build fragment list with padding
             frag_list = []
             oversized = False
             for chrom, positions in fragments.items():
                 frag_start = min(positions) - 200
                 frag_end = max(positions) + 200
-                frag_size = frag_end - frag_start
-                if frag_size > max_fragment_size:
+                if frag_end - frag_start > max_fragment_size:
                     oversized = True
                     break
                 frag_list.append((chrom, max(0, frag_start), frag_end))
@@ -709,16 +1118,50 @@ class NGSCircleDetect:
             if total_length > max_total_size:
                 continue
 
-            # Filter: if ALL fragments overlap existing Uecc/Mecc, this is
-            # likely a repetitive region (MeccDNA/NUMT) not a real CeccDNA
-            if existing_by_chr and all(
-                _frag_overlaps_existing(c, s, e) for c, s, e in frag_list
-            ):
+            # Collect fragments for exclusion zones BEFORE read threshold
+            # (liberal: even low-evidence components mark exclusion zones)
+            all_cecc_fragments.extend(frag_list)
+
+            if total_reads < min_total_reads:
                 continue
 
+            # Strand closure: even number of strand flips = valid circle
+            n_strand_flips = sum(
+                1 for j in comp_junctions if j["strand_a"] != j["strand_b"]
+            )
+            strand_closure = (n_strand_flips % 2 == 0)
             n_junctions = len(comp_junctions)
+
+            # Strict filter for CeccDNA output
+            if total_reads < min_output_reads:
+                continue
+            if n_junctions < min_output_junctions:
+                continue
+
             rep_chr, rep_start, rep_end = frag_list[0]
             frag_str = ";".join(f"{c}:{s}-{e}" for c, s, e in frag_list)
+
+            # Score with soft strand closure penalty
+            base_score = min(1.0, total_reads / 20.0)
+            if not strand_closure:
+                base_score *= 0.7
+
+            # Compute LR features
+            junction_reads = [j["n_reads"] for j in comp_junctions]
+            mean_rpj = float(np.mean(junction_reads))
+            min_rpj = min(junction_reads)
+            n_split_total = sum(j.get("n_split", 0) for j in comp_junctions)
+            n_disc_total = sum(j.get("n_disc", 0) for j in comp_junctions)
+            sdr = n_split_total / max(n_split_total + n_disc_total, 1)
+            log_treads = float(np.log10(max(total_reads, 1)))
+            frag_lengths = [e - s for _, s, e in frag_list]
+            mmfr = max(frag_lengths) / max(min(frag_lengths), 1)
+            log_tlen = float(np.log10(max(total_length, 1)))
+            # MAPQ features
+            junc_mapqs = [j.get("mean_mapq", 0) for j in comp_junctions]
+            junc_min_mapqs = [j.get("min_mapq", 0) for j in comp_junctions]
+            mean_junc_mapq = float(np.mean(junc_mapqs))
+            min_junc_mapq = min(junc_min_mapqs)
 
             eid = f"NGS_Cecc{cecc_idx:05d}"
             cecc_idx += 1
@@ -731,7 +1174,7 @@ class NGSCircleDetect:
                 "length": total_length,
                 "eccdna_type": "Cecc",
                 "state": "Confirmed",
-                "score": round(min(1.0, total_reads / 20.0), 4),
+                "score": round(base_score, 4),
                 "n_backjump": 0,
                 "n_backjump_low": 0,
                 "n_discordant": total_reads,
@@ -741,6 +1184,47 @@ class NGSCircleDetect:
                 "n_chromosomes": len(chroms),
                 "n_junctions": n_junctions,
                 "fragments": frag_str,
+                "mean_reads_per_junction": round(mean_rpj, 3),
+                "min_reads_per_junction": min_rpj,
+                "split_disc_ratio": round(sdr, 4),
+                "log_total_reads": round(log_treads, 4),
+                "max_min_frag_ratio": round(mmfr, 3),
+                "log_total_length": round(log_tlen, 4),
+                "strand_closure": int(strand_closure),
+                "n_strand_flips": n_strand_flips,
+                "mean_junction_mapq": round(mean_junc_mapq, 1),
+                "min_junction_mapq": min_junc_mapq,
             })
 
-        return pd.DataFrame(results)
+        return pd.DataFrame(results), all_cecc_fragments
+
+    # ── Exclusion zone builder ────────────────────────────────────────
+
+    @staticmethod
+    def _build_exclusion_zones(
+        cecc_fragments: list, padding: int = 200,
+    ) -> dict:
+        """Merge CeccDNA fragment intervals with padding into exclusion zones.
+
+        Returns:
+            dict of chr -> list of (start, end) merged intervals.
+        """
+        if not cecc_fragments:
+            return {}
+
+        by_chr = defaultdict(list)
+        for chrom, start, end in cecc_fragments:
+            by_chr[chrom].append((max(0, start - padding), end + padding))
+
+        merged = {}
+        for chrom, intervals in by_chr.items():
+            intervals.sort()
+            result = [intervals[0]]
+            for s, e in intervals[1:]:
+                if s <= result[-1][1]:
+                    result[-1] = (result[-1][0], max(result[-1][1], e))
+                else:
+                    result.append((s, e))
+            merged[chrom] = result
+
+        return merged
