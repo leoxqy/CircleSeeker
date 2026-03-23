@@ -41,10 +41,13 @@ Key features:
 from __future__ import annotations
 
 import argparse
+import math
+import re
 import shutil
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 
 from circleseeker.utils.logging import get_logger
@@ -59,6 +62,134 @@ from circleseeker.modules.ecc_output_formatter import (
     generate_cecc_bedpe,
     generate_fasta_files,
 )
+
+
+# ── MeccDNA ONT LR model coefficients (trained on ara rep1 10X) ────
+# Features derived at packaging time from summary, reads, and regions tables.
+MECC_ONT_FEATURE_NAMES = [
+    "mean_mapq",           # mean mapping quality of supporting reads
+    "n_candidate_sites",   # number of candidate genomic sites
+    "confidence",          # pipeline confidence score
+    "mean_match_degree",   # mean match degree of reads
+    "copy_number",         # estimated copy number
+    "log_length",          # log10(eccDNA length)
+]
+_MECC_ONT_MODEL_COEFS = np.array([
+    -0.7251,   # mean_mapq          (low mapq -> multi-copy -> TP)
+    -0.9180,   # n_candidate_sites  (fewer sites -> more confident -> TP)
+    -0.3572,   # confidence         (inverted: high conf often FP in ONT)
+    +0.8749,   # mean_match_degree  (high match -> TP)
+    +0.2493,   # copy_number        (high CN -> TP)
+    +0.4574,   # log_length         (longer -> TP)
+])
+_MECC_ONT_MODEL_INTERCEPT = 2.7477
+_MECC_ONT_SCALER_MEAN = np.array([
+    13.1908, 3.4677, 0.3386, 98.4415, 6.4218, 2.807,
+])
+_MECC_ONT_SCALER_STD = np.array([
+    17.8667, 1.7339, 0.3409, 1.8683, 4.386, 0.2644,
+])
+_MECC_ONT_DEFAULT_THRESHOLD = 0.81
+
+
+def _sigmoid(x: float) -> float:
+    return 1.0 / (1.0 + math.exp(-x)) if x > -500 else 0.0
+
+
+def score_mecc_ont_lr(
+    summary_df: pd.DataFrame,
+    reads_df: pd.DataFrame,
+    regions_df: pd.DataFrame,
+    threshold: float = _MECC_ONT_DEFAULT_THRESHOLD,
+) -> pd.DataFrame:
+    """Apply MeccDNA ONT LR model to score and filter Mecc candidates.
+
+    Low-scoring Mecc entries are demoted to Uecc (not deleted).
+    Features are derived from summary, reads, and regions tables.
+
+    Args:
+        summary_df: Summary table (one row per eccDNA).
+        reads_df: Read-level table with identity, mapq, match_degree columns.
+        regions_df: Regions table with one row per genomic site.
+        threshold: LR probability threshold; Mecc with score < threshold
+            are demoted to Uecc.
+
+    Returns:
+        Updated summary_df with demoted entries re-typed as Uecc.
+    """
+    logger = get_logger("ecc_packager")
+
+    if summary_df.empty or threshold <= 0.0:
+        return summary_df
+
+    mecc_mask = summary_df["type"] == "Mecc"
+    n_mecc = int(mecc_mask.sum())
+    if n_mecc == 0:
+        return summary_df
+
+    summary_df = summary_df.copy()
+
+    # --- Aggregate read-level features for each Mecc eccDNA ---
+    mecc_ids = set(summary_df.loc[mecc_mask, "eccDNA_id"])
+
+    read_features: dict[str, dict[str, float]] = {}
+    if not reads_df.empty:
+        mecc_reads = reads_df[reads_df["eccDNA_id"].isin(mecc_ids)].copy()
+        if not mecc_reads.empty:
+            for col in ("mapq", "match_degree"):
+                mecc_reads[col] = pd.to_numeric(mecc_reads[col], errors="coerce")
+            agg = mecc_reads.groupby("eccDNA_id").agg(
+                mean_mapq=("mapq", "mean"),
+                mean_match_degree=("match_degree", "mean"),
+            )
+            read_features = agg.to_dict("index")
+
+    # --- Count candidate sites from regions table ---
+    site_counts: dict[str, int] = {}
+    if not regions_df.empty:
+        mecc_regions = regions_df[regions_df["eccDNA_id"].isin(mecc_ids)]
+        if not mecc_regions.empty:
+            site_counts = mecc_regions.groupby("eccDNA_id").size().to_dict()
+
+    # --- Build feature matrix for Mecc rows ---
+    mecc_idx = summary_df.index[mecc_mask]
+    n = len(mecc_idx)
+    features = np.zeros((n, len(MECC_ONT_FEATURE_NAMES)))
+
+    for j, idx in enumerate(mecc_idx):
+        row = summary_df.loc[idx]
+        ecc_id = row["eccDNA_id"]
+        rf = read_features.get(ecc_id, {})
+
+        length_val = float(row.get("length", 1) or 1)
+        features[j, 0] = rf.get("mean_mapq", 0.0)                # mean_mapq
+        features[j, 1] = float(site_counts.get(ecc_id, 2))       # n_candidate_sites
+        features[j, 2] = float(row.get("confidence", 0) or 0)    # confidence
+        features[j, 3] = rf.get("mean_match_degree", 0.0)        # mean_match_degree
+        features[j, 4] = float(row.get("copy_number", 1) or 1)   # copy_number
+        features[j, 5] = np.log10(max(length_val, 1.0))          # log_length
+
+    # --- Standardize and score ---
+    normed = (features - _MECC_ONT_SCALER_MEAN) / np.maximum(_MECC_ONT_SCALER_STD, 1e-6)
+    logits = normed @ _MECC_ONT_MODEL_COEFS + _MECC_ONT_MODEL_INTERCEPT
+    scores = np.array([_sigmoid(float(l)) for l in logits])
+
+    # --- Demote low-score Mecc → Uecc ---
+    demoted_count = 0
+    for j, idx in enumerate(mecc_idx):
+        if scores[j] < threshold:
+            summary_df.at[idx, "type"] = "Uecc"
+            demoted_count += 1
+
+    if demoted_count:
+        logger.info(
+            "MeccDNA ONT LR filter: demoted %d/%d low-score Mecc -> Uecc (threshold=%.2f)",
+            demoted_count, n_mecc, threshold,
+        )
+    else:
+        logger.debug("MeccDNA ONT LR filter: all %d Mecc passed (threshold=%.2f)", n_mecc, threshold)
+
+    return summary_df
 
 
 # ---------------------------- CLI ---------------------------- #
@@ -200,6 +331,135 @@ def load_fasta(fasta_path: Path) -> dict[str, str]:
     return seqs
 
 
+# -------------------- CeccDNA QC filter ---------------------- #
+
+
+def _filter_cecc_qc(
+    unified_df: pd.DataFrame,
+    cecc_df: Optional[pd.DataFrame],
+    inferred_chimeric_df: Optional[pd.DataFrame],
+    *,
+    min_confirmed_length: int = 1400,
+    max_inferred_segments: int = 5,
+    logger=None,
+) -> tuple[pd.DataFrame, Optional[pd.DataFrame], Optional[pd.DataFrame]]:
+    """Apply quality-control filters to CeccDNA entries.
+
+    Addresses two empirically observed FP modes in ONT CeccBuild:
+
+    1. **Small Confirmed Cecc from NUMT/homology artifacts** — Short reads
+       from MeccDNA or background that happen to split-align across
+       chromosomes due to nuclear-organellar homology (NUMTs/NUPTs).
+       These produce Confirmed CeccDNA with very short total length.
+       Filter: remove Confirmed CeccDNA with ``length < min_confirmed_length``.
+
+    2. **Mega-cluster Inferred Cecc** — The SplitReads inference engine
+       occasionally aggregates many unrelated cross-chr signals into a
+       single chimeric call with an implausibly large number of fragments.
+       Filter: remove Inferred CeccDNA with ``segment_count > max_inferred_segments``.
+
+    Args:
+        unified_df: Unified eccDNA table (one row per eccDNA).
+        cecc_df: CeccDNA segments core CSV (may be None).
+        inferred_chimeric_df: Inferred chimeric CSV (may be None).
+        min_confirmed_length: Minimum total length for Confirmed CeccDNA.
+        max_inferred_segments: Maximum segment count for Inferred CeccDNA.
+        logger: Optional logger.
+
+    Returns:
+        (unified_df, cecc_df, inferred_chimeric_df) with FP entries removed.
+    """
+    if logger is None:
+        logger = get_logger("ecc_packager")
+
+    removed_ids: set[str] = set()
+
+    # --- Rule 1: Confirmed CeccDNA minimum length ---
+    if min_confirmed_length > 0:
+        mask_confirmed_cecc = (
+            (unified_df.get("eccDNA_type", unified_df.get("type", "")) == "CeccDNA")
+            & (unified_df.get("State", unified_df.get("state", "")) == "Confirmed")
+        )
+        if mask_confirmed_cecc.any():
+            length_col = "Length" if "Length" in unified_df.columns else "length"
+            if length_col in unified_df.columns:
+                too_short = mask_confirmed_cecc & (
+                    pd.to_numeric(unified_df[length_col], errors="coerce").fillna(0)
+                    < min_confirmed_length
+                )
+                short_ids = set(unified_df.loc[too_short, "eccDNA_id"].astype(str))
+                if short_ids:
+                    removed_ids |= short_ids
+                    logger.info(
+                        "CeccDNA QC: removed %d Confirmed CeccDNA with length < %d: %s",
+                        len(short_ids),
+                        min_confirmed_length,
+                        ", ".join(sorted(short_ids)),
+                    )
+
+    # --- Rule 2: Inferred CeccDNA maximum segments ---
+    if max_inferred_segments > 0:
+        mask_inferred_cecc = (
+            (unified_df.get("eccDNA_type", unified_df.get("type", "")) == "CeccDNA")
+            & (unified_df.get("State", unified_df.get("state", "")) == "Inferred")
+        )
+        if mask_inferred_cecc.any():
+            # seg_total may be in unified_df or need to be inferred from cecc_df
+            seg_col = None
+            for candidate in ("Seg_total", "seg_total", "segment_count", "n_segments"):
+                if candidate in unified_df.columns:
+                    seg_col = candidate
+                    break
+
+            if seg_col is not None:
+                too_many = mask_inferred_cecc & (
+                    pd.to_numeric(unified_df[seg_col], errors="coerce").fillna(0)
+                    > max_inferred_segments
+                )
+                mega_ids = set(unified_df.loc[too_many, "eccDNA_id"].astype(str))
+            elif inferred_chimeric_df is not None and "eccDNA_id" in inferred_chimeric_df.columns:
+                # Compute seg_total from inferred chimeric table
+                seg_counts = inferred_chimeric_df.groupby("eccDNA_id").size()
+                mega_ids_series = seg_counts[seg_counts > max_inferred_segments].index
+                inferred_ids = set(unified_df.loc[mask_inferred_cecc, "eccDNA_id"].astype(str))
+                mega_ids = set(str(i) for i in mega_ids_series) & inferred_ids
+            else:
+                mega_ids = set()
+
+            if mega_ids:
+                removed_ids |= mega_ids
+                logger.info(
+                    "CeccDNA QC: removed %d Inferred CeccDNA with segments > %d: %s",
+                    len(mega_ids),
+                    max_inferred_segments,
+                    ", ".join(sorted(mega_ids)),
+                )
+
+    # --- Apply removal ---
+    if not removed_ids:
+        return unified_df, cecc_df, inferred_chimeric_df
+
+    n_before = len(unified_df)
+    unified_df = unified_df[~unified_df["eccDNA_id"].astype(str).isin(removed_ids)].copy()
+    n_after = len(unified_df)
+    logger.info(
+        "CeccDNA QC total: removed %d entries from unified table (%d -> %d)",
+        n_before - n_after,
+        n_before,
+        n_after,
+    )
+
+    if cecc_df is not None and "eccDNA_id" in cecc_df.columns:
+        cecc_df = cecc_df[~cecc_df["eccDNA_id"].astype(str).isin(removed_ids)].copy()
+
+    if inferred_chimeric_df is not None and "eccDNA_id" in inferred_chimeric_df.columns:
+        inferred_chimeric_df = inferred_chimeric_df[
+            ~inferred_chimeric_df["eccDNA_id"].astype(str).isin(removed_ids)
+        ].copy()
+
+    return unified_df, cecc_df, inferred_chimeric_df
+
+
 # ---------------------- Core packaging ----------------------- #
 
 
@@ -300,6 +560,16 @@ def run(args: argparse.Namespace) -> int:
         if inferred_chimeric_df.empty:
             inferred_chimeric_df = None
 
+    # ── CeccDNA quality-control filter ──
+    unified_df, cecc_df, inferred_chimeric_df = _filter_cecc_qc(
+        unified_df,
+        cecc_df,
+        inferred_chimeric_df,
+        min_confirmed_length=1400,
+        max_inferred_segments=5,
+        logger=logger,
+    )
+
     # Generate regions table (include inferred data)
     regions_df = generate_regions_table(
         uecc_df, mecc_df, cecc_df,
@@ -312,6 +582,79 @@ def run(args: argparse.Namespace) -> int:
 
     # Generate reads table
     reads_df = generate_reads_table(uecc_df, mecc_df, cecc_df)
+
+    # ── MeccDNA ONT LR quality-control filter ──
+    # Score Mecc entries using read-level features (mapq, match_degree) and
+    # region-level features (candidate site count).  Low-scoring Mecc are
+    # demoted to Uecc.  The model was trained on ONT data, so only apply when
+    # the reads table contains the ONT-specific `eccDNA_copy_number` column
+    # (present in ONT pipeline output but not NGS).  NGS already runs its
+    # own Mecc LR filter in ngs_circle_detect.
+    _is_ont_reads = (
+        not reads_df.empty
+        and "eccDNA_copy_number" in reads_df.columns
+        and "mapq" in reads_df.columns
+        and "match_degree" in reads_df.columns
+    )
+    if _is_ont_reads and (summary_df["type"] == "Mecc").any():
+        summary_df = score_mecc_ont_lr(
+            summary_df, reads_df, regions_df,
+            threshold=_MECC_ONT_DEFAULT_THRESHOLD,
+        )
+
+    # ── Coordinate-level NMS dedup for Cecc and Mecc ──
+    # At higher coverage, the same eccDNA is detected multiple times with
+    # slightly shifted coordinates.  cd-hit catches identical sequences but
+    # misses coordinate-shifted duplicates.  Apply NMS: sort by read_count
+    # descending, remove entries whose fragments overlap a kept entry by >50%.
+    for etype in ("Cecc", "Mecc"):
+        mask = summary_df["type"] == etype
+        if mask.sum() <= 1:
+            continue
+        sub = summary_df[mask].copy()
+        # Parse regions for each detection
+        det_regions = []
+        for idx, row in sub.iterrows():
+            frags = []
+            loc = str(row.get("location", ""))
+            for m in re.finditer(r"(\w+):(\d+)-(\d+)", loc):
+                frags.append((m.group(1), int(m.group(2)), int(m.group(3))))
+            if not frags:
+                c, s, e = str(row.get("chr", "")), row.get("start", 0), row.get("end", 0)
+                if c and c != "multi":
+                    try:
+                        frags = [(c, int(s), int(e))]
+                    except (ValueError, TypeError):
+                        pass
+            det_regions.append((idx, frags, int(row.get("read_count", 1))))
+        # NMS: sort by read_count desc, keep non-overlapping
+        det_regions.sort(key=lambda x: -x[2])
+        keep_idx = []
+        for idx, frags, rc in det_regions:
+            is_dup = False
+            for k_idx, k_frags, _ in keep_idx:
+                for ci, si, ei in frags:
+                    for cj, sj, ej in k_frags:
+                        if ci == cj:
+                            ovl = max(0, min(ei, ej) - max(si, sj))
+                            min_len = min(ei - si, ej - sj)
+                            if min_len > 0 and ovl / min_len > 0.5:
+                                is_dup = True
+                                break
+                    if is_dup:
+                        break
+                if is_dup:
+                    break
+            if not is_dup:
+                keep_idx.append((idx, frags, rc))
+        n_removed = mask.sum() - len(keep_idx)
+        if n_removed > 0:
+            remove_idx = set(sub.index) - {k[0] for k in keep_idx}
+            summary_df = summary_df.drop(index=remove_idx).reset_index(drop=True)
+            logger.info(
+                f"{etype} NMS dedup: removed {n_removed} coordinate-overlapping "
+                f"detections, kept {len(keep_idx)}"
+            )
 
     # Save CSV files
     summary_df.to_csv(out_dir / f"{sample}_eccDNA_summary.csv", index=False)

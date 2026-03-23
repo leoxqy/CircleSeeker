@@ -798,6 +798,23 @@ def prepare_inferred_simple(df: pd.DataFrame, redundant_ids: Collection[str]) ->
     if filtered.empty:
         return pd.DataFrame()
 
+    # QC: require minimum split-read support for Inferred eccDNA
+    # Inferred detections with read_count < 3 have ~75% FP rate
+    min_inferred_reads = 3
+    if "num_split_reads" in filtered.columns:
+        before_n = len(filtered)
+        filtered = filtered[filtered["num_split_reads"] >= min_inferred_reads].copy()
+        n_removed = before_n - len(filtered)
+        if n_removed > 0:
+            import logging
+            logging.getLogger(__name__).info(
+                f"Inferred simple QC: removed {n_removed}/{before_n} entries "
+                f"with num_split_reads < {min_inferred_reads}"
+            )
+
+    if filtered.empty:
+        return pd.DataFrame()
+
     # Build regions column from coordinates
     filtered["Regions"] = filtered.apply(
         lambda r: f"{r['chr']}:{int(r['start0'])}-{int(r['end0'])}", axis=1
