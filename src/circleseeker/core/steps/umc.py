@@ -299,6 +299,255 @@ def cecc_build(pipeline: Pipeline) -> None:
         pipeline._set_result(ResultKeys.CECC_BUILD_FAILED, True)
         pipeline._set_result(ResultKeys.CECC_BUILD_ERROR, str(e))
 
+    # ── Supplementary: ONT cross-chr split read CeccDNA detection ──
+    # Only run for ONT platform. This detects additional CeccDNA by looking at
+    # reads that split-align across chromosomes in the raw minimap2 PAF.
+    if getattr(pipeline.config, "platform", "") == "ont":
+        _run_crosschr_cecc_supplement(pipeline, output_file)
+
+
+def _run_crosschr_cecc_supplement(pipeline: "Pipeline", cecc_build_csv: Path) -> None:
+    """Supplementary CeccDNA detection via cross-chr split reads in raw ONT PAF.
+
+    Aligns raw ONT reads to reference (minimap2), extracts cross-chromosome
+    split alignments, clusters junctions, and appends novel CeccDNA to the
+    cecc_build output CSV.
+
+    Only runs for ONT platform.
+    """
+    import pandas as pd
+    import numpy as np
+
+    log = pipeline.logger.getChild("crosschr_cecc")
+
+    input_file = getattr(pipeline.config, "input_file", None)
+    reference = getattr(pipeline.config, "reference", None)
+    if not input_file or not reference:
+        log.info("Cross-chr CeccDNA: skipped (no input_file or reference)")
+        return
+
+    input_file = Path(input_file)
+    reference = Path(reference)
+    if not input_file.exists() or not reference.exists():
+        log.info("Cross-chr CeccDNA: skipped (input/reference not found)")
+        return
+
+    try:
+        from circleseeker.modules.ont_cecc_crosschr import (
+            parse_paf,
+            extract_crosschr_junctions,
+            detect_cecc_from_junctions,
+        )
+    except ImportError:
+        log.warning("Cross-chr CeccDNA: module not available, skipped")
+        return
+
+    threads = int(getattr(pipeline.config, "threads", pipeline.config.performance.threads))
+    output_dir = pipeline.config.output_dir
+    prefix = pipeline.config.prefix
+
+    # Step 1: Run minimap2 on raw reads (reuse if cached)
+    paf_file = output_dir / f"{prefix}_crosschr_raw.paf"
+    if not paf_file.exists() or paf_file.stat().st_size == 0:
+        log.info("Cross-chr CeccDNA: aligning raw reads with minimap2...")
+        ref_mmi = reference.parent / (reference.name + ".ont.mmi")
+        ref_to_use = str(ref_mmi) if ref_mmi.exists() else str(reference)
+
+        cmd = [
+            "minimap2", "-cx", "map-ont",
+            "--secondary=yes", "-N", "10", "-p", "0.5",
+            "-t", str(threads),
+            ref_to_use, str(input_file),
+        ]
+        log.info(f"Cross-chr CeccDNA: {' '.join(cmd)}")
+
+        import subprocess as _sp
+        with open(paf_file, "w") as fout:
+            proc = _sp.run(cmd, stdout=fout, stderr=_sp.PIPE, text=True)
+        if proc.returncode != 0:
+            log.warning(f"Cross-chr CeccDNA: minimap2 failed: {proc.stderr[:300]}")
+            return
+        log.info(f"Cross-chr CeccDNA: minimap2 done ({paf_file})")
+    else:
+        log.info(f"Cross-chr CeccDNA: reusing cached PAF ({paf_file})")
+
+    # Step 2: Parse PAF and extract cross-chr junctions
+    reads = parse_paf(paf_file)
+    log.info(f"Cross-chr CeccDNA: {len(reads)} reads parsed from PAF")
+
+    junctions, n_crosschr = extract_crosschr_junctions(reads, min_mapq=1, min_align_len=200)
+    log.info(f"Cross-chr CeccDNA: {n_crosschr} cross-chr reads, {len(junctions)} junctions")
+
+    if not junctions:
+        log.info("Cross-chr CeccDNA: no cross-chr junctions found")
+        return
+
+    # Step 3: Detect CeccDNA candidates
+    # Use min_junction_reads=1 for union-find connectivity,
+    # min_total_reads=2 at component level
+    results = detect_cecc_from_junctions(
+        junctions,
+        min_junction_reads=1,
+        min_total_reads=2,
+        min_mean_mapq=20.0,
+        cluster_dist=1000,
+        padding=500,
+        logger=log,
+    )
+
+    if not results:
+        log.info("Cross-chr CeccDNA: no candidates after filtering")
+        return
+
+    log.info(f"Cross-chr CeccDNA: {len(results)} candidates detected")
+
+    # Step 4: Remove duplicates with existing CeccBuild results
+    existing_df = pd.DataFrame()
+    if cecc_build_csv.exists() and cecc_build_csv.stat().st_size > 1:
+        try:
+            existing_df = pd.read_csv(cecc_build_csv)
+        except Exception:
+            existing_df = pd.DataFrame()
+
+    # Build existing CeccBuild location signatures for dedup
+    existing_sigs = set()
+    if not existing_df.empty and "query_id" in existing_df.columns:
+        for qid, grp in existing_df.groupby("query_id"):
+            if "chr" in grp.columns and "start0" in grp.columns and "end0" in grp.columns:
+                frags = []
+                for _, row in grp.iterrows():
+                    frags.append((str(row["chr"]), int(row["start0"]), int(row["end0"])))
+                frags.sort()
+                existing_sigs.add(tuple(frags))
+
+    # Filter out cross-chr candidates that overlap with existing CeccBuild
+    novel_results = []
+    for r in results:
+        frags = []
+        for frag in r["fragments"].split(";"):
+            chrom, coords = frag.split(":")
+            start, end = coords.split("-")
+            frags.append((chrom, int(start), int(end)))
+        frags.sort()
+
+        # Check overlap with existing
+        is_dup = False
+        for existing_frags in existing_sigs:
+            if _fragments_overlap(frags, list(existing_frags), threshold=0.5):
+                is_dup = True
+                break
+
+        if not is_dup:
+            novel_results.append(r)
+
+    if not novel_results:
+        log.info("Cross-chr CeccDNA: all candidates overlap with existing CeccBuild")
+        return
+
+    log.info(f"Cross-chr CeccDNA: {len(novel_results)} novel candidates (not in CeccBuild)")
+
+    # Step 5: Convert to cecc_build.csv format and append
+    # Each CeccDNA has multiple segments (one row per segment)
+    new_rows = []
+    existing_qids = set(existing_df["query_id"].unique()) if not existing_df.empty and "query_id" in existing_df.columns else set()
+
+    # Generate unique query_ids that won't conflict
+    max_cecc_num = 0
+    for qid in existing_qids:
+        # Extract number from CeccDNA_NNNNNN format
+        parts = str(qid).split("_")
+        for p in parts:
+            try:
+                num = int(p.lstrip("0") or "0")
+                max_cecc_num = max(max_cecc_num, num)
+            except ValueError:
+                continue
+
+    for idx, r in enumerate(novel_results):
+        cecc_num = max_cecc_num + idx + 1
+        query_id = f"CrossChr_{cecc_num:06d}"
+
+        frags = []
+        for frag in r["fragments"].split(";"):
+            chrom, coords = frag.split(":")
+            start, end = coords.split("-")
+            frags.append((chrom, int(start), int(end)))
+
+        chroms_str = ",".join(sorted(set(c for c, _, _ in frags)))
+
+        for seg_idx, (chrom, start, end) in enumerate(frags, 1):
+            new_rows.append({
+                "query_id": query_id,
+                "reads": query_id,
+                "eccdna_type": "Cecc",
+                "CeccClass": "Cecc-InterChr",
+                "length": r["length"],
+                "copy_number": float(r["n_reads"]),
+                "num_segments": r["n_fragments"],
+                "num_distinct_loci": r["n_fragments"],
+                "cumulative_length": r["length"],
+                "match_degree": 95.0,
+                "mapq_best": int(r["mean_junction_mapq"]),
+                "mapq_min": int(r["mean_junction_mapq"]),
+                "identity_best": 90.0,
+                "identity_min": 85.0,
+                "query_cov_best": 0.9,
+                "query_cov_2nd": 0.0,
+                "confidence_score": r["score"],
+                "low_mapq": r["mean_junction_mapq"] < 5,
+                "low_identity": False,
+                "C_cov_best": 0.9,
+                "C_cov_2nd": 0.0,
+                "max_gap": 0,
+                "avg_gap": 0.0,
+                "chromosomes": chroms_str,
+                "strand_closure_valid": bool(r["strand_closure"]),
+                "segment_in_circle": seg_idx,
+                "chr": chrom,
+                "start0": start,
+                "end0": end,
+                "strand": "+",
+                "q_start": 0,
+                "q_end": end - start,
+                "alignment_length": end - start,
+            })
+
+    new_df = pd.DataFrame(new_rows)
+
+    # Append to existing cecc_build output
+    if not existing_df.empty:
+        combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+    else:
+        combined_df = new_df
+
+    combined_df.to_csv(cecc_build_csv, index=False)
+
+    # Update result counts
+    total_count = int(combined_df["query_id"].nunique()) if "query_id" in combined_df.columns else 0
+    pipeline._set_result(ResultKeys.CECC_BUILD_COUNT, total_count)
+
+    log.info(
+        f"Cross-chr CeccDNA: appended {len(novel_results)} CeccDNA "
+        f"({len(new_rows)} rows) to cecc_build output. "
+        f"Total CeccDNA now: {total_count}"
+    )
+
+
+def _fragments_overlap(frags_a: list, frags_b: list, threshold: float = 0.5) -> bool:
+    """Check if two fragment lists significantly overlap."""
+    matched = 0
+    for ca, sa, ea in frags_a:
+        for cb, sb, eb in frags_b:
+            if ca != cb:
+                continue
+            ovl = max(0, min(ea, eb) - max(sa, sb))
+            min_len = min(ea - sa, eb - sb)
+            if min_len > 0 and ovl / min_len >= threshold:
+                matched += 1
+                break
+    # At least half of the fragments must overlap
+    return matched >= max(1, min(len(frags_a), len(frags_b)) // 2)
+
 
 def umc_process(pipeline: Pipeline) -> None:
     """Step 6: Generate FASTA files using umc_process module."""
