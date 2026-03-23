@@ -104,6 +104,37 @@ CECC_FEATURE_NAMES = [
     "mean_junction_mapq", "min_junction_mapq",
 ]
 
+# ── MeccDNA LR model coefficients (trained on ara rep1-3) ──────────
+MECC_FEATURE_NAMES = [
+    "n_backjump", "n_backjump_low", "bj_ratio", "n_reads", "log_length",
+    "rpk", "n_discordant", "disc_ratio", "n_softclip", "score",
+    "n_genomic_loci",
+]
+_MECC_MODEL_COEFS = np.array([
+    -0.1216,   # n_backjump
+    +0.0368,   # n_backjump_low
+    -0.1664,   # bj_ratio
+    -0.0619,   # n_reads
+    -0.0785,   # log_length
+    +0.0162,   # rpk
+    -0.0619,   # n_discordant
+    -0.0765,   # disc_ratio
+    -0.0177,   # n_softclip
+    -0.0597,   # score
+    -0.1005,   # n_genomic_loci
+])
+_MECC_MODEL_INTERCEPT = 0.2021
+_MECC_SCALER_MEAN = np.array([
+    1.1944, 5.4023, 0.1158, 6.9921, 2.7810,
+    11.5876, 0.5695, 0.0358, 2.4994, 0.5361,
+    4.2588,
+])
+_MECC_SCALER_STD = np.array([
+    3.5275, 4.3459, 0.2427, 6.3784, 0.2668,
+    9.9181, 3.0086, 0.1462, 6.9089, 0.1015,
+    4.4005,
+])
+
 
 def _sigmoid(x: float) -> float:
     return 1.0 / (1.0 + math.exp(-x)) if x > -500 else 0.0
@@ -123,6 +154,7 @@ class NGSDetectConfig:
     max_circle_size: int = 100000
     score_threshold: float = 0.3  # default threshold (0.3 → F1≈0.915)
     cecc_score_threshold: float = 0.50  # CeccDNA LR threshold
+    mecc_score_threshold: float = 0.32  # MeccDNA LR threshold
     threads: int = 4
     minimap2_preset: str = "sr"
 
@@ -219,6 +251,8 @@ class NGSCircleDetect:
             if results:
                 um_df = pd.DataFrame(results)
                 um_df = self.reclassify_mecc(um_df)
+                um_df = self._score_mecc_lr(um_df)
+                um_df = self._dedup_mecc_by_sequence(um_df)
 
         # Step 7: Reclassify Uecc in CeccDNA exclusion zones
         # Disabled: low precision reclassification hurts CeccDNA Prec target (>=90%)
@@ -955,6 +989,183 @@ class NGSCircleDetect:
             )
 
         return cecc_df[mask].reset_index(drop=True)
+
+    def _score_mecc_lr(self, um_df: pd.DataFrame) -> pd.DataFrame:
+        """Apply MeccDNA LR model to score and filter Mecc candidates.
+
+        Only filters Mecc detections; Uecc pass through unchanged.
+        Derived features (bj_ratio, log_length, rpk, disc_ratio) are
+        computed on the fly from existing columns.
+        """
+        if um_df.empty:
+            return um_df
+
+        threshold = self.config.mecc_score_threshold
+        if threshold <= 0.0:
+            return um_df
+
+        mecc_mask = um_df["eccdna_type"] == "Mecc"
+        if not mecc_mask.any():
+            return um_df
+
+        um_df = um_df.copy()
+        # Compute derived features for ALL rows (cheap, avoids index issues)
+        n_bj = um_df["n_backjump"].fillna(0)
+        n_bj_lo = um_df["n_backjump_low"].fillna(0)
+        um_df["bj_ratio"] = n_bj / (n_bj + n_bj_lo).clip(lower=1)
+        um_df["log_length"] = np.log10(um_df["length"].fillna(1).clip(lower=1))
+        um_df["rpk"] = um_df["n_reads"].fillna(0) / (um_df["length"].fillna(1) / 1000).clip(lower=0.001)
+        um_df["disc_ratio"] = um_df["n_discordant"].fillna(0) / um_df["n_reads"].fillna(1).clip(lower=1)
+
+        # Extract features for Mecc rows
+        mecc_df = um_df[mecc_mask]
+        features = np.zeros((len(mecc_df), len(MECC_FEATURE_NAMES)))
+        for i, col in enumerate(MECC_FEATURE_NAMES):
+            if col in mecc_df.columns:
+                features[:, i] = mecc_df[col].fillna(0).values
+
+        normed = (features - _MECC_SCALER_MEAN) / np.maximum(_MECC_SCALER_STD, 1e-6)
+        logits = normed @ _MECC_MODEL_COEFS + _MECC_MODEL_INTERCEPT
+        scores = np.array([_sigmoid(float(l)) for l in logits])
+
+        um_df.loc[mecc_mask, "score_mecc_lr"] = np.round(scores, 4)
+
+        # Demote low-score Mecc to Uecc (not delete — they may be real Uecc)
+        low_score = mecc_mask & (um_df["score_mecc_lr"].fillna(1.0) < threshold)
+        n_demoted = int(low_score.sum())
+        if n_demoted:
+            um_df.loc[low_score, "eccdna_type"] = "Uecc"
+            self.logger.info(
+                f"MeccDNA LR filter: demoted {n_demoted}/{int(mecc_mask.sum())} "
+                f"low-score Mecc → Uecc (threshold={threshold})"
+            )
+
+        return um_df
+
+    def _dedup_mecc_by_sequence(
+        self, um_df: pd.DataFrame, similarity: float = 0.9
+    ) -> pd.DataFrame:
+        """Deduplicate MeccDNA by sequence similarity using cd-hit-est.
+
+        Multiple Mecc detections from different genomic loci of the same
+        multi-copy eccDNA are clustered by sequence similarity. Within each
+        cluster, the representative with the highest evidence is kept;
+        others are dropped (they are redundant copies, not distinct eccDNA).
+
+        Uecc detections pass through unchanged.
+        """
+        if um_df.empty:
+            return um_df
+
+        mecc_mask = um_df["eccdna_type"] == "Mecc"
+        if mecc_mask.sum() <= 1:
+            return um_df
+
+        import subprocess
+        import tempfile
+        import shutil
+
+        if not shutil.which("cd-hit-est"):
+            self.logger.warning("cd-hit-est not found, skipping Mecc dedup")
+            return um_df
+
+        mecc_df = um_df[mecc_mask].copy()
+        ref_fasta = pysam.FastaFile(str(self.reference))
+        tmpdir = Path(tempfile.mkdtemp())
+
+        # Write Mecc sequences
+        fa_path = tmpdir / "mecc_seqs.fasta"
+        valid_ids = set()
+        with open(fa_path, "w") as f:
+            for idx, row in mecc_df.iterrows():
+                try:
+                    seq = ref_fasta.fetch(
+                        str(row["chr"]), int(row["start"]), int(row["end"])
+                    )
+                    if len(seq) >= 50:
+                        f.write(f">{idx}\n{seq}\n")
+                        valid_ids.add(idx)
+                except (ValueError, KeyError):
+                    continue
+        ref_fasta.close()
+
+        if len(valid_ids) <= 1:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            return um_df
+
+        # Run cd-hit-est
+        out_path = tmpdir / "mecc_clustered"
+        cmd = (
+            f"cd-hit-est -i {fa_path} -o {out_path} "
+            f"-c {similarity} -n 8 -d 0 -M 0 -T {self.config.threads} "
+            f"-g 1 -s 0.8 -aS 0.8 > /dev/null 2>&1"
+        )
+        try:
+            subprocess.run(cmd, shell=True, timeout=120)
+        except (subprocess.TimeoutExpired, Exception) as e:
+            self.logger.warning(f"cd-hit-est failed: {e}, skipping Mecc dedup")
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            return um_df
+
+        # Parse clusters
+        clstr_path = Path(f"{out_path}.clstr")
+        if not clstr_path.exists():
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            return um_df
+
+        clusters = []  # list of lists of DataFrame indices
+        current_cluster = []
+        with open(clstr_path) as f:
+            for line in f:
+                if line.startswith(">Cluster"):
+                    if current_cluster:
+                        clusters.append(current_cluster)
+                    current_cluster = []
+                else:
+                    # Parse: "0\t500nt, >12345... *" or "0\t500nt, >12345... at 95.00%"
+                    parts = line.strip().split(">")
+                    if len(parts) >= 2:
+                        idx_str = parts[1].split("...")[0].strip()
+                        try:
+                            current_cluster.append(int(idx_str))
+                        except ValueError:
+                            continue
+            if current_cluster:
+                clusters.append(current_cluster)
+
+        # For each cluster with >1 member, keep the best representative
+        drop_indices = set()
+        for cluster in clusters:
+            if len(cluster) <= 1:
+                continue
+            # Score: n_backjump_low + n_reads (prefer most evidence)
+            best_idx = None
+            best_score = -1
+            for idx in cluster:
+                if idx not in mecc_df.index:
+                    continue
+                row = mecc_df.loc[idx]
+                s = float(row.get("n_backjump_low", 0)) + float(row.get("n_reads", 0))
+                if s > best_score:
+                    best_score = s
+                    best_idx = idx
+            for idx in cluster:
+                if idx != best_idx and idx in mecc_df.index:
+                    drop_indices.add(idx)
+
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+        if drop_indices:
+            n_before = int(mecc_mask.sum())
+            um_df = um_df.drop(index=drop_indices).reset_index(drop=True)
+            n_after = (um_df["eccdna_type"] == "Mecc").sum()
+            self.logger.info(
+                f"MeccDNA sequence dedup (cd-hit-est {similarity:.0%}): "
+                f"{n_before} → {n_after} Mecc "
+                f"({n_before - n_after} redundant copies removed)"
+            )
+
+        return um_df
 
     # ── CeccDNA detection (early — runs before Uecc/Mecc) ──────────────
 
