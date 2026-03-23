@@ -111,28 +111,28 @@ MECC_FEATURE_NAMES = [
     "n_genomic_loci",
 ]
 _MECC_MODEL_COEFS = np.array([
-    -0.1216,   # n_backjump
-    +0.0368,   # n_backjump_low
-    -0.1664,   # bj_ratio
-    -0.0619,   # n_reads
-    -0.0785,   # log_length
-    +0.0162,   # rpk
-    -0.0619,   # n_discordant
-    -0.0765,   # disc_ratio
-    -0.0177,   # n_softclip
-    -0.0597,   # score
-    -0.1005,   # n_genomic_loci
+    +0.0000,   # n_backjump  (zero: pre-filtered by reclassify)
+    +0.0172,   # n_backjump_low
+    +0.0000,   # bj_ratio    (zero: pre-filtered by reclassify)
+    -0.0087,   # n_reads
+    -0.0509,   # log_length
+    +0.0722,   # rpk
+    -0.0768,   # n_discordant
+    -0.0783,   # disc_ratio
+    -0.0581,   # n_softclip
+    -0.0219,   # score
+    +0.0000,   # n_genomic_loci (zero: pre-filtered by reclassify)
 ])
-_MECC_MODEL_INTERCEPT = 0.2021
+_MECC_MODEL_INTERCEPT = 0.0597
 _MECC_SCALER_MEAN = np.array([
-    1.1944, 5.4023, 0.1158, 6.9921, 2.7810,
-    11.5876, 0.5695, 0.0358, 2.4994, 0.5361,
-    4.2588,
+    0.0000, 5.4627, 0.0000, 5.7808, 2.7843,
+    9.7194, 0.3618, 0.0360, 1.4161, 0.5140,
+    0.0000,
 ])
 _MECC_SCALER_STD = np.array([
-    3.5275, 4.3459, 0.2427, 6.3784, 0.2668,
-    9.9181, 3.0086, 0.1462, 6.9089, 0.1015,
-    4.4005,
+    1.0000, 3.6858, 1.0000, 3.8904, 0.2509,
+    7.1771, 1.5782, 0.1491, 4.0225, 0.0602,
+    1.0000,
 ])
 
 
@@ -154,7 +154,7 @@ class NGSDetectConfig:
     max_circle_size: int = 100000
     score_threshold: float = 0.3  # default threshold (0.3 → F1≈0.915)
     cecc_score_threshold: float = 0.43  # CeccDNA LR threshold (val Prec=86%)
-    mecc_score_threshold: float = 0.32  # MeccDNA LR threshold
+    mecc_score_threshold: float = 0.50  # MeccDNA LR threshold (post-fix, 90% Prec target)
     threads: int = 4
     minimap2_preset: str = "sr"
 
@@ -757,13 +757,12 @@ class NGSCircleDetect:
             n_loci = mecc_loci_count.get(eid, 0)
             n_bj_hi = int(r.get("n_backjump", 0))
             n_bj_lo = int(r.get("n_backjump_low", 0))
-            # >=3 loci: confident Mecc (strong multi-copy evidence)
-            # ==2 loci: only Mecc if low-MAPQ backjump dominates.
-            #   If high-MAPQ backjumps dominate (n_bj_hi > n_bj_lo),
-            #   the circle maps uniquely → likely Uecc in paralogous region.
-            if n_loci >= 3:
-                confident_mecc_ids.add(eid)
-            elif n_loci == 2 and n_bj_lo > n_bj_hi:
+            # Multi-loci from minimap2 can reflect sequence homology (not
+            # true multi-copy eccDNA), especially in repeat-rich genomes like
+            # human.  True Mecc backjumps are low-MAPQ (ambiguous mapping);
+            # any high-MAPQ backjump means the reads map uniquely → Uecc in
+            # a paralogous region.  Require n_bj_hi == 0 for all loci counts.
+            if n_loci >= 2 and n_bj_hi == 0 and n_bj_lo > 0:
                 confident_mecc_ids.add(eid)
 
         mask_to_mecc = circles_df["eccDNA_id"].isin(confident_mecc_ids)
@@ -772,8 +771,18 @@ class NGSCircleDetect:
             circles_df.loc[mask_to_mecc, "eccDNA_id"].map(mecc_loci_count)
         )
 
-        # 1 locus or unconfident 2-locus → Uecc
+        # Demote non-confident Mecc that were aligned (original logic)
         demote_ids = (all_aligned - confident_mecc_ids) | (mecc_ids - confident_mecc_ids)
+        # Also demote ANY Mecc with high-MAPQ backjump — these map uniquely,
+        # so even if minimap2 didn't re-align them, they are Uecc.
+        has_hi_bj = set(
+            circles_df.loc[
+                (circles_df["eccdna_type"] == "Mecc")
+                & (circles_df["n_backjump"].fillna(0) > 0),
+                "eccDNA_id",
+            ]
+        )
+        demote_ids = demote_ids | has_hi_bj
         mask_to_uecc = (
             (circles_df["eccDNA_id"].isin(demote_ids))
             & (circles_df["eccdna_type"] == "Mecc")
@@ -1065,7 +1074,15 @@ class NGSCircleDetect:
         import tempfile
         import shutil
 
-        if not shutil.which("cd-hit-est"):
+        cdhit_bin = shutil.which("cd-hit-est")
+        if not cdhit_bin:
+            # Try to find cd-hit-est in the same conda env as the running Python
+            import os, sys as _sys
+            py_bin_dir = os.path.dirname(_sys.executable)
+            candidate = os.path.join(py_bin_dir, "cd-hit-est")
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                cdhit_bin = candidate
+        if not cdhit_bin:
             self.logger.warning("cd-hit-est not found, skipping Mecc dedup")
             return um_df
 
@@ -1096,7 +1113,7 @@ class NGSCircleDetect:
         # Run cd-hit-est
         out_path = tmpdir / "mecc_clustered"
         cmd = (
-            f"cd-hit-est -i {fa_path} -o {out_path} "
+            f"{cdhit_bin} -i {fa_path} -o {out_path} "
             f"-c {similarity} -n 8 -d 0 -M 0 -T {self.config.threads} "
             f"-g 1 -s 0.8 -aS 0.8 > /dev/null 2>&1"
         )
