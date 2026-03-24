@@ -606,47 +606,77 @@ def run(args: argparse.Namespace) -> int:
     # At higher coverage, the same eccDNA is detected multiple times with
     # slightly shifted coordinates.  cd-hit catches identical sequences but
     # misses coordinate-shifted duplicates.  Apply NMS: sort by read_count
-    # descending, remove entries whose fragments overlap a kept entry by >50%.
+    # descending, remove entries whose fragments overlap a kept entry.
+    #
+    # Overlap logic differs by type:
+    #   Mecc: ANY fragment overlap > 50% → duplicate (single-region eccDNA)
+    #   Cecc: ALL fragments must overlap → duplicate (different CeccDNA can
+    #         legitimately share one fragment but differ on others)
+    def _parse_frags(row):
+        frags = []
+        loc = str(row.get("location", ""))
+        for m in re.finditer(r"(\w+):(\d+)-(\d+)", loc):
+            frags.append((m.group(1), int(m.group(2)), int(m.group(3))))
+        if not frags:
+            c = str(row.get("chr", ""))
+            if c and c != "multi":
+                try:
+                    frags = [(c, int(row["start"]), int(row["end"]))]
+                except (ValueError, TypeError):
+                    pass
+        return frags
+
+    def _frag_overlap(f1, f2):
+        """Overlap fraction between two fragments (0 if diff chr)."""
+        c1, s1, e1 = f1
+        c2, s2, e2 = f2
+        if c1 != c2:
+            return 0.0
+        ovl = max(0, min(e1, e2) - max(s1, s2))
+        min_len = min(e1 - s1, e2 - s2)
+        return ovl / min_len if min_len > 0 else 0.0
+
     for etype in ("Cecc", "Mecc"):
         mask = summary_df["type"] == etype
         if mask.sum() <= 1:
             continue
         sub = summary_df[mask].copy()
-        # Parse regions for each detection
-        det_regions = []
-        for idx, row in sub.iterrows():
-            frags = []
-            loc = str(row.get("location", ""))
-            for m in re.finditer(r"(\w+):(\d+)-(\d+)", loc):
-                frags.append((m.group(1), int(m.group(2)), int(m.group(3))))
-            if not frags:
-                c, s, e = str(row.get("chr", "")), row.get("start", 0), row.get("end", 0)
-                if c and c != "multi":
-                    try:
-                        frags = [(c, int(s), int(e))]
-                    except (ValueError, TypeError):
-                        pass
-            det_regions.append((idx, frags, int(row.get("read_count", 1))))
-        # NMS: sort by read_count desc, keep non-overlapping
+        det_regions = [(idx, _parse_frags(row), int(row.get("read_count", 1)))
+                       for idx, row in sub.iterrows()]
         det_regions.sort(key=lambda x: -x[2])
+
         keep_idx = []
         for idx, frags, rc in det_regions:
+            if not frags:
+                keep_idx.append((idx, frags, rc))
+                continue
             is_dup = False
             for k_idx, k_frags, _ in keep_idx:
-                for ci, si, ei in frags:
-                    for cj, sj, ej in k_frags:
-                        if ci == cj:
-                            ovl = max(0, min(ei, ej) - max(si, sj))
-                            min_len = min(ei - si, ej - sj)
-                            if min_len > 0 and ovl / min_len > 0.5:
+                if not k_frags:
+                    continue
+                if etype == "Cecc":
+                    # ALL fragments of the new entry must overlap a kept fragment
+                    n_matched = 0
+                    for ci, si, ei in frags:
+                        for cj, sj, ej in k_frags:
+                            if _frag_overlap((ci, si, ei), (cj, sj, ej)) > 0.5:
+                                n_matched += 1
+                                break
+                    is_dup = (n_matched == len(frags))
+                else:
+                    # Mecc: ANY fragment overlap is enough
+                    for ci, si, ei in frags:
+                        for cj, sj, ej in k_frags:
+                            if _frag_overlap((ci, si, ei), (cj, sj, ej)) > 0.5:
                                 is_dup = True
                                 break
-                    if is_dup:
-                        break
+                        if is_dup:
+                            break
                 if is_dup:
                     break
             if not is_dup:
                 keep_idx.append((idx, frags, rc))
+
         n_removed = mask.sum() - len(keep_idx)
         if n_removed > 0:
             remove_idx = set(sub.index) - {k[0] for k in keep_idx}

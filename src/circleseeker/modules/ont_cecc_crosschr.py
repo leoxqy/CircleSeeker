@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 
-# ── Default thresholds (tuned on ara 10X ONT) ──────────────────────
+# ── Default thresholds ─────────────────────────────────────────────
 
 DEFAULT_MIN_MAPQ = 1            # per-alignment minimum MAPQ
 DEFAULT_MIN_ALIGN_LEN = 200     # per-alignment minimum length
@@ -39,6 +39,36 @@ DEFAULT_CLUSTER_DIST = 1000     # bp bin size for clustering
 DEFAULT_PADDING = 500           # fragment boundary padding
 DEFAULT_MAX_FRAGMENT_SIZE = 100000
 DEFAULT_MAX_TOTAL_SIZE = 500000
+
+# ── CrossChr CeccDNA LR quality-control model ─────────────────────
+# Trained on ara rep1 10X+30X combined (124 TP, 30 FP).
+# Key discriminators: n_junctions, strand_closure, mean_junction_mapq,
+# log_length, n_reads.  Coverage-adaptive via local_reads feature.
+import math as _math
+
+_CECC_CROSSCHR_FEATURE_NAMES = [
+    "n_reads", "n_junctions", "n_fragments", "n_chromosomes",
+    "mean_junction_mapq", "strand_closure", "log_length",
+    "ratio", "reads_per_junction", "local_reads",
+]
+_CECC_CROSSCHR_COEFS = np.array([
+    +0.0993, +0.1528, +0.0149, +0.0149, +0.1927,
+    +0.1566, +0.1718, -0.0073, +0.0100, +0.0342,
+])
+_CECC_CROSSCHR_INTERCEPT = 0.2906
+_CECC_CROSSCHR_SCALER_MEAN = np.array([
+    16.0195, 6.8701, 2.1299, 2.1299, 52.1513,
+    0.9286, 3.6968, 0.1285, 2.5806, 166.3442,
+])
+_CECC_CROSSCHR_SCALER_STD = np.array([
+    15.7243, 4.9592, 0.4218, 0.4218, 10.8337,
+    0.2575, 0.2112, 0.1122, 2.3641, 161.2461,
+])
+_CECC_CROSSCHR_THRESHOLD = 0.50  # Prec>=92%, Rec~90% on training set
+
+
+def _sigmoid(x: float) -> float:
+    return 1.0 / (1.0 + _math.exp(-x)) if x > -500 else 0.0
 
 
 # ── PAF parsing ──────────────────────────────────────────────────────
@@ -132,18 +162,27 @@ def detect_cecc_from_junctions(
     crosschr: list[tuple],
     min_junction_reads: int = 1,
     min_total_reads: int = DEFAULT_MIN_JUNCTION_READS,
+    min_junction_ratio: float = 0.02,
     min_mean_mapq: float = DEFAULT_MIN_MEAN_MAPQ,
     cluster_dist: int = DEFAULT_CLUSTER_DIST,
     max_fragment_size: int = DEFAULT_MAX_FRAGMENT_SIZE,
     max_total_size: int = DEFAULT_MAX_TOTAL_SIZE,
     padding: int = DEFAULT_PADDING,
+    local_coverage_index: Optional[dict] = None,
     logger: Optional[logging.Logger] = None,
 ) -> list[dict]:
     """Detect CeccDNA from cross-chr junctions using clustering + union-find.
 
     Filtering strategy:
     - min_junction_reads=1: keep all junctions for union-find connectivity
-    - min_total_reads: filter at the component level (total unique reads)
+    - min_total_reads: absolute minimum reads per component (floor = 2)
+    - min_junction_ratio: per-region adaptive filter.  For each component,
+      estimate local coverage at its fragment regions from
+      local_coverage_index.  Require:
+          n_junction_reads / n_local_reads >= min_junction_ratio
+      Real CeccDNA: junction reads ARE the local reads → ratio ≈ high
+      Noise (NUMT etc.): few junction reads among many genomic reads → low
+      This is coverage-adaptive without needing global coverage estimation.
     - min_mean_mapq: filter at the component level (mean MAPQ across junctions)
     """
     log = logger or logging.getLogger(__name__)
@@ -247,7 +286,7 @@ def detect_cecc_from_junctions(
 
         total_reads = len(total_reads_set)
 
-        # Component-level read count filter
+        # Absolute minimum read count filter
         if total_reads < min_total_reads:
             continue
 
@@ -292,6 +331,16 @@ def detect_cecc_from_junctions(
         if mean_junc_mapq < min_mean_mapq:
             continue
 
+        # Compute local coverage for LR model feature
+        local_reads = 0
+        if local_coverage_index:
+            for chrom, frag_start, frag_end in frag_list:
+                chrom_bins = local_coverage_index.get(chrom, {})
+                for b in range(frag_start // 1000, frag_end // 1000 + 1):
+                    local_reads += chrom_bins.get(b, 0)
+        ratio = total_reads / local_reads if local_reads > 0 else 1.0
+        rpj = total_reads / max(n_junctions, 1)
+
         eid = f"CrossChrCecc{cecc_idx:05d}"
         cecc_idx += 1
 
@@ -314,7 +363,33 @@ def detect_cecc_from_junctions(
             "score": round(base_score, 4),
             "mean_junction_mapq": round(mean_junc_mapq, 1),
             "read_names": sorted(total_reads_set),
+            # LR features (for scoring below)
+            "ratio": round(ratio, 4),
+            "reads_per_junction": round(rpj, 3),
+            "local_reads": local_reads,
+            "log_length": round(float(np.log10(max(total_length, 1))), 4),
         })
+
+    log.info(f"ONT cross-chr: {len(results)} candidates before LR filter")
+
+    # ── LR quality-control filter ──
+    # Score each candidate with the trained model.  Remove low-scoring ones.
+    if results:
+        n_before = len(results)
+        filtered = []
+        for r in results:
+            feats = np.array([r.get(f, 0) for f in _CECC_CROSSCHR_FEATURE_NAMES], dtype=float)
+            normed = (feats - _CECC_CROSSCHR_SCALER_MEAN) / np.maximum(_CECC_CROSSCHR_SCALER_STD, 1e-6)
+            logit = float(np.dot(normed, _CECC_CROSSCHR_COEFS) + _CECC_CROSSCHR_INTERCEPT)
+            lr_score = _sigmoid(logit)
+            r["lr_score"] = round(lr_score, 4)
+            if lr_score >= _CECC_CROSSCHR_THRESHOLD:
+                filtered.append(r)
+        n_removed = n_before - len(filtered)
+        if n_removed:
+            log.info(f"ONT cross-chr LR filter: removed {n_removed}/{n_before} "
+                     f"(threshold={_CECC_CROSSCHR_THRESHOLD}), kept {len(filtered)}")
+        results = filtered
 
     log.info(f"ONT cross-chr: detected {len(results)} CeccDNA candidates")
     return results
@@ -391,6 +466,24 @@ def run_ont_cecc_crosschr(
     reads = parse_paf(paf_file)
     log.info(f"ONT cross-chr: {len(reads)} reads with alignments")
 
+    # Step 2b: Build local coverage index from PAF alignments
+    # For each 1kb genomic bin, count how many unique reads have their
+    # PRIMARY alignment overlapping that bin.  This allows per-region
+    # adaptive filtering: real CeccDNA junction reads dominate their
+    # fragment regions, while NUMT noise is a small fraction of the
+    # background reads at those positions.
+    local_cov_index = defaultdict(lambda: defaultdict(int))  # chrom -> bin -> count
+    for qname, segments in reads.items():
+        if not segments:
+            continue
+        # Use the best (longest) alignment as proxy for primary
+        best = max(segments, key=lambda s: s["tend"] - s["tstart"])
+        chrom = best["tname"]
+        for b in range(best["tstart"] // 1000, best["tend"] // 1000 + 1):
+            local_cov_index[chrom][b] += 1
+    log.info(f"ONT cross-chr: built local coverage index "
+             f"({sum(len(v) for v in local_cov_index.values())} bins)")
+
     # Step 3: Extract junctions
     junctions, n_crosschr = extract_crosschr_junctions(
         reads, min_mapq=min_mapq, min_align_len=min_align_len,
@@ -399,7 +492,7 @@ def run_ont_cecc_crosschr(
 
     # Step 4: Detect CeccDNA
     # Use min_junction_reads=1 for union-find (preserve connectivity),
-    # filter by min_total_reads at the component level
+    # filter by min_total_reads + per-region ratio at the component level
     results = detect_cecc_from_junctions(
         junctions,
         min_junction_reads=1,
@@ -407,6 +500,7 @@ def run_ont_cecc_crosschr(
         min_mean_mapq=min_mean_mapq,
         cluster_dist=cluster_dist,
         padding=padding,
+        local_coverage_index=dict(local_cov_index),
         logger=log,
     )
 
