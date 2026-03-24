@@ -602,13 +602,17 @@ def run(args: argparse.Namespace) -> int:
             threshold=_MECC_ONT_DEFAULT_THRESHOLD,
         )
 
-    # ── Coordinate-level NMS dedup for Cecc and Mecc ──
+    # ── Coordinate-level NMS dedup for Cecc and Mecc (ONT only) ──
     # At higher coverage, the same eccDNA is detected multiple times with
     # slightly shifted coordinates.  cd-hit catches identical sequences but
     # misses coordinate-shifted duplicates.  Apply NMS: sort by read_count
     # descending, remove entries whose fragments overlap a kept entry.
     #
-    # Overlap logic differs by type:
+    # HiFi is excluded: its MeccDNA entries list multiple candidate sites
+    # (alternative genomic loci), and NMS incorrectly merges distinct eccDNA
+    # that share a candidate site (e.g., NUMT homology).  CD-HIT is sufficient
+    # for HiFi dedup.
+    #
     #   Mecc: ANY fragment overlap > 50% → duplicate (single-region eccDNA)
     #   Cecc: ALL fragments must overlap → duplicate (different CeccDNA can
     #         legitimately share one fragment but differ on others)
@@ -636,7 +640,13 @@ def run(args: argparse.Namespace) -> int:
         min_len = min(e1 - s1, e2 - s2)
         return ovl / min_len if min_len > 0 else 0.0
 
+    _run_nms = _is_ont_reads  # NMS only for ONT; HiFi cd-hit is sufficient
+    if not _run_nms:
+        logger.info("NMS dedup skipped (not ONT platform)")
+
     for etype in ("Cecc", "Mecc"):
+        if not _run_nms:
+            break
         mask = summary_df["type"] == etype
         if mask.sum() <= 1:
             continue

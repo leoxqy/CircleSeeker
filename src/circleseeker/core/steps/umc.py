@@ -299,27 +299,29 @@ def cecc_build(pipeline: Pipeline) -> None:
         pipeline._set_result(ResultKeys.CECC_BUILD_FAILED, True)
         pipeline._set_result(ResultKeys.CECC_BUILD_ERROR, str(e))
 
-    # ── Supplementary: ONT cross-chr split read CeccDNA detection ──
-    # Only run for ONT platform. This detects additional CeccDNA by looking at
+    # ── Supplementary: cross-chr split read CeccDNA detection ──
+    # For ONT and HiFi platforms. Detects additional CeccDNA by looking at
     # reads that split-align across chromosomes in the raw minimap2 PAF.
-    if getattr(pipeline.config, "platform", "") == "ont":
+    platform = getattr(pipeline.config, "platform", "")
+    if platform in ("ont", "hifi"):
         _run_crosschr_cecc_supplement(pipeline, output_file)
 
 
 def _run_crosschr_cecc_supplement(pipeline: "Pipeline", cecc_build_csv: Path) -> None:
-    """Supplementary CeccDNA detection via cross-chr split reads in raw ONT PAF.
+    """Supplementary CeccDNA detection via cross-chr split reads in raw PAF.
 
-    Aligns raw ONT reads to reference (minimap2), extracts cross-chromosome
+    Aligns raw reads to reference (minimap2), extracts cross-chromosome
     split alignments, clusters junctions, and appends novel CeccDNA to the
     cecc_build output CSV.
 
-    Only runs for ONT platform.
+    Supports ONT (midpoint+padding) and HiFi (alignment-boundary-based).
     """
     import pandas as pd
     import numpy as np
 
     log = pipeline.logger.getChild("crosschr_cecc")
 
+    platform = getattr(pipeline.config, "platform", "")
     input_file = getattr(pipeline.config, "input_file", None)
     reference = getattr(pipeline.config, "reference", None)
     if not input_file or not reference:
@@ -337,6 +339,7 @@ def _run_crosschr_cecc_supplement(pipeline: "Pipeline", cecc_build_csv: Path) ->
             parse_paf,
             extract_crosschr_junctions,
             detect_cecc_from_junctions,
+            _detect_cecc_boundary_based,
         )
     except ImportError:
         log.warning("Cross-chr CeccDNA: module not available, skipped")
@@ -346,15 +349,24 @@ def _run_crosschr_cecc_supplement(pipeline: "Pipeline", cecc_build_csv: Path) ->
     output_dir = pipeline.config.output_dir
     prefix = pipeline.config.prefix
 
+    # Platform-specific minimap2 preset
+    minimap2_preset = "map-hifi" if platform == "hifi" else "map-ont"
+
     # Step 1: Run minimap2 on raw reads (reuse if cached)
     paf_file = output_dir / f"{prefix}_crosschr_raw.paf"
     if not paf_file.exists() or paf_file.stat().st_size == 0:
-        log.info("Cross-chr CeccDNA: aligning raw reads with minimap2...")
-        ref_mmi = reference.parent / (reference.name + ".ont.mmi")
+        log.info(f"Cross-chr CeccDNA: aligning raw reads with minimap2 ({minimap2_preset})...")
+        # Find reference index
+        if platform == "hifi":
+            ref_mmi = reference.parent / (reference.name + ".map_hifi.mmi")
+            if not ref_mmi.exists():
+                ref_mmi = reference.parent / (reference.name + ".ont.mmi")
+        else:
+            ref_mmi = reference.parent / (reference.name + ".ont.mmi")
         ref_to_use = str(ref_mmi) if ref_mmi.exists() else str(reference)
 
         cmd = [
-            "minimap2", "-cx", "map-ont",
+            "minimap2", "-cx", minimap2_preset,
             "--secondary=yes", "-N", "10", "-p", "0.5",
             "-t", str(threads),
             ref_to_use, str(input_file),
@@ -371,29 +383,52 @@ def _run_crosschr_cecc_supplement(pipeline: "Pipeline", cecc_build_csv: Path) ->
     else:
         log.info(f"Cross-chr CeccDNA: reusing cached PAF ({paf_file})")
 
-    # Step 2: Parse PAF and extract cross-chr junctions
+    # Step 2: Parse PAF
     reads = parse_paf(paf_file)
     log.info(f"Cross-chr CeccDNA: {len(reads)} reads parsed from PAF")
 
-    junctions, n_crosschr = extract_crosschr_junctions(reads, min_mapq=1, min_align_len=200)
-    log.info(f"Cross-chr CeccDNA: {n_crosschr} cross-chr reads, {len(junctions)} junctions")
+    # Step 3: Detect CeccDNA candidates (platform-specific)
+    from collections import defaultdict
 
-    if not junctions:
-        log.info("Cross-chr CeccDNA: no cross-chr junctions found")
-        return
+    if platform == "hifi":
+        # HiFi: use boundary-based detection (precise alignment coordinates)
+        local_cov_index = defaultdict(lambda: defaultdict(int))
+        for qname, segments in reads.items():
+            if not segments:
+                continue
+            best = max(segments, key=lambda s: s["tend"] - s["tstart"])
+            chrom = best["tname"]
+            for b in range(best["tstart"] // 1000, best["tend"] // 1000 + 1):
+                local_cov_index[chrom][b] += 1
 
-    # Step 3: Detect CeccDNA candidates
-    # Use min_junction_reads=1 for union-find connectivity,
-    # min_total_reads=2 at component level
-    results = detect_cecc_from_junctions(
-        junctions,
-        min_junction_reads=1,
-        min_total_reads=2,
-        min_mean_mapq=20.0,
-        cluster_dist=1000,
-        padding=500,
-        logger=log,
-    )
+        results = _detect_cecc_boundary_based(
+            reads,
+            min_mapq=1,
+            min_align_len=200,
+            min_total_reads=2,
+            min_mean_mapq=20.0,
+            cluster_dist=1000,
+            local_coverage_index=dict(local_cov_index),
+            logger=log,
+        )
+    else:
+        # ONT: use midpoint+padding approach
+        junctions, n_crosschr = extract_crosschr_junctions(reads, min_mapq=1, min_align_len=200)
+        log.info(f"Cross-chr CeccDNA: {n_crosschr} cross-chr reads, {len(junctions)} junctions")
+
+        if not junctions:
+            log.info("Cross-chr CeccDNA: no cross-chr junctions found")
+            return
+
+        results = detect_cecc_from_junctions(
+            junctions,
+            min_junction_reads=1,
+            min_total_reads=2,
+            min_mean_mapq=20.0,
+            cluster_dist=1000,
+            padding=500,
+            logger=log,
+        )
 
     if not results:
         log.info("Cross-chr CeccDNA: no candidates after filtering")
