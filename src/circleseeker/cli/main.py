@@ -40,6 +40,7 @@ from .common_options import (
     prefix_option,
     config_option,
     platform_option,
+    r2_option,
     threads_option,
     keep_tmp_option,
     turbo_option,
@@ -121,6 +122,7 @@ def _print_advanced_help(ctx: click.Context, _param: click.Parameter, value: boo
 @prefix_option
 @config_option
 @platform_option
+@r2_option
 @threads_option
 @keep_tmp_option
 @turbo_option
@@ -173,6 +175,7 @@ def cli(
     prefix: Optional[str],
     config: Optional[Path],
     platform: Optional[str],
+    r2_file: Optional[Path],
     threads: Optional[int],
     keep_tmp: bool,
     turbo: bool,
@@ -241,6 +244,7 @@ def cli(
             turbo=turbo,
             fast_align=fast_align,
             platform=platform,
+            r2_file=r2_file,
             start_from=start_from,
             stop_at=stop_at,
             resume=resume,

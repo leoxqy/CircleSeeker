@@ -62,7 +62,7 @@ def _detect_sequence_file_format(path: Path) -> str:
 # Three sensitivity presets: relaxed (high recall), balanced (default), strict (high precision)
 
 PresetName = Literal["relaxed", "balanced", "strict"]
-PlatformName = Literal["hifi", "ont"]
+PlatformName = Literal["hifi", "ont", "ngs"]
 
 PRESETS: dict[PresetName, dict[str, dict[str, Any]]] = {
     # ------------------------------------------------

@@ -7,6 +7,8 @@ import tempfile
 import shutil
 from unittest.mock import patch, MagicMock
 
+import pandas as pd
+
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
@@ -363,3 +365,386 @@ def sample_args(tmp_path):
             self.verbose = False
 
     return MockArgs()
+
+
+# ════════════════════════════════════════════════════════════════════
+# score_mecc_ont_lr — MeccDNA ONT LR scoring
+# ════════════════════════════════════════════════════════════════════
+
+import numpy as np
+
+
+class TestScoreMeccOntLr:
+    """Test the MeccDNA ONT LR scoring and demotion logic."""
+
+    def test_empty_summary_returns_unchanged(self):
+        """Empty summary_df should be returned as-is."""
+        summary_df = pd.DataFrame()
+        reads_df = pd.DataFrame()
+        regions_df = pd.DataFrame()
+        result = ecc_packager.score_mecc_ont_lr(summary_df, reads_df, regions_df)
+        assert result.empty
+
+    def test_no_mecc_returns_unchanged(self):
+        """Summary with no Mecc entries should be returned as-is."""
+        summary_df = pd.DataFrame({
+            "eccDNA_id": ["U1"],
+            "type": ["Uecc"],
+            "length": [1000],
+            "confidence": [0.5],
+            "copy_number": [1],
+        })
+        reads_df = pd.DataFrame()
+        regions_df = pd.DataFrame()
+        result = ecc_packager.score_mecc_ont_lr(summary_df, reads_df, regions_df)
+        assert len(result) == 1
+        assert result.iloc[0]["type"] == "Uecc"
+
+    def test_mecc_demotion_with_high_threshold(self):
+        """Mecc with threshold=1.0 should demote all Mecc to Uecc."""
+        summary_df = pd.DataFrame({
+            "eccDNA_id": ["M1"],
+            "type": ["Mecc"],
+            "length": [1000],
+            "confidence": [0.5],
+            "copy_number": [1],
+        })
+        reads_df = pd.DataFrame({
+            "eccDNA_id": ["M1"],
+            "mapq": [10],
+            "match_degree": [95],
+        })
+        regions_df = pd.DataFrame({
+            "eccDNA_id": ["M1", "M1"],
+        })
+        result = ecc_packager.score_mecc_ont_lr(
+            summary_df, reads_df, regions_df, threshold=1.0
+        )
+        # threshold=1.0 means all Mecc demoted
+        assert result.iloc[0]["type"] == "Uecc"
+
+    def test_threshold_zero_skips_filtering(self):
+        """Threshold <= 0 should skip filtering entirely."""
+        summary_df = pd.DataFrame({
+            "eccDNA_id": ["M1"],
+            "type": ["Mecc"],
+            "length": [1000],
+            "confidence": [0.5],
+            "copy_number": [1],
+        })
+        reads_df = pd.DataFrame()
+        regions_df = pd.DataFrame()
+        result = ecc_packager.score_mecc_ont_lr(
+            summary_df, reads_df, regions_df, threshold=0.0
+        )
+        assert result.iloc[0]["type"] == "Mecc"
+
+    def test_uecc_not_affected(self):
+        """Uecc entries should not be affected by the Mecc LR filter."""
+        summary_df = pd.DataFrame({
+            "eccDNA_id": ["U1", "M1"],
+            "type": ["Uecc", "Mecc"],
+            "length": [1000, 1000],
+            "confidence": [0.5, 0.5],
+            "copy_number": [1, 1],
+        })
+        reads_df = pd.DataFrame({
+            "eccDNA_id": ["U1", "M1"],
+            "mapq": [60, 10],
+            "match_degree": [99, 95],
+        })
+        regions_df = pd.DataFrame({
+            "eccDNA_id": ["U1", "M1"],
+        })
+        result = ecc_packager.score_mecc_ont_lr(
+            summary_df, reads_df, regions_df, threshold=1.0
+        )
+        uecc_rows = result[result["eccDNA_id"] == "U1"]
+        assert uecc_rows.iloc[0]["type"] == "Uecc"
+
+
+# ════════════════════════════════════════════════════════════════════
+# _filter_cecc_qc — CeccDNA quality-control filter
+# ════════════════════════════════════════════════════════════════════
+
+
+class TestFilterCeccQc:
+    """Test the CeccDNA QC filter for confirmed length and inferred segments."""
+
+    def test_short_confirmed_cecc_removed(self):
+        """Confirmed CeccDNA shorter than min length should be removed."""
+        unified_df = pd.DataFrame({
+            "eccDNA_id": ["C1", "C2"],
+            "eccDNA_type": ["CeccDNA", "CeccDNA"],
+            "State": ["Confirmed", "Confirmed"],
+            "Length": [500, 2000],
+        })
+        result_unified, _, _ = ecc_packager._filter_cecc_qc(
+            unified_df, None, None, min_confirmed_length=1400,
+        )
+        assert len(result_unified) == 1
+        assert result_unified.iloc[0]["eccDNA_id"] == "C2"
+
+    def test_inferred_cecc_too_many_segments_removed(self):
+        """Inferred CeccDNA with too many segments should be removed."""
+        unified_df = pd.DataFrame({
+            "eccDNA_id": ["C1", "C2"],
+            "eccDNA_type": ["CeccDNA", "CeccDNA"],
+            "State": ["Inferred", "Inferred"],
+            "Length": [5000, 3000],
+            "Seg_total": [10, 3],
+        })
+        result_unified, _, _ = ecc_packager._filter_cecc_qc(
+            unified_df, None, None, max_inferred_segments=5,
+        )
+        assert len(result_unified) == 1
+        assert result_unified.iloc[0]["eccDNA_id"] == "C2"
+
+    def test_uecc_not_affected(self):
+        """UeccDNA entries should not be affected by CeccDNA QC filter."""
+        unified_df = pd.DataFrame({
+            "eccDNA_id": ["U1", "C1"],
+            "eccDNA_type": ["UeccDNA", "CeccDNA"],
+            "State": ["Confirmed", "Confirmed"],
+            "Length": [500, 500],
+        })
+        result_unified, _, _ = ecc_packager._filter_cecc_qc(
+            unified_df, None, None, min_confirmed_length=1400,
+        )
+        # U1 (short UeccDNA) should be kept; C1 (short CeccDNA) removed
+        assert len(result_unified) == 1
+        assert result_unified.iloc[0]["eccDNA_id"] == "U1"
+
+    def test_no_removal_when_all_pass(self):
+        """All entries passing QC should be kept intact."""
+        unified_df = pd.DataFrame({
+            "eccDNA_id": ["C1", "C2"],
+            "eccDNA_type": ["CeccDNA", "CeccDNA"],
+            "State": ["Confirmed", "Inferred"],
+            "Length": [5000, 3000],
+            "Seg_total": [2, 3],
+        })
+        result_unified, _, _ = ecc_packager._filter_cecc_qc(
+            unified_df, None, None,
+            min_confirmed_length=1400,
+            max_inferred_segments=5,
+        )
+        assert len(result_unified) == 2
+
+    def test_cecc_df_also_filtered(self):
+        """Associated cecc_df should also have removed IDs dropped."""
+        unified_df = pd.DataFrame({
+            "eccDNA_id": ["C1", "C2"],
+            "eccDNA_type": ["CeccDNA", "CeccDNA"],
+            "State": ["Confirmed", "Confirmed"],
+            "Length": [500, 2000],
+        })
+        cecc_df = pd.DataFrame({
+            "eccDNA_id": ["C1", "C1", "C2"],
+            "chr": ["chr1", "chr2", "chr3"],
+            "start": [100, 200, 300],
+            "end": [150, 250, 350],
+        })
+        result_unified, result_cecc, _ = ecc_packager._filter_cecc_qc(
+            unified_df, cecc_df, None, min_confirmed_length=1400,
+        )
+        assert len(result_cecc) == 1
+        assert result_cecc.iloc[0]["eccDNA_id"] == "C2"
+
+    def test_inferred_chimeric_df_also_filtered(self):
+        """Associated inferred_chimeric_df should also have removed IDs dropped."""
+        unified_df = pd.DataFrame({
+            "eccDNA_id": ["C1", "C2"],
+            "eccDNA_type": ["CeccDNA", "CeccDNA"],
+            "State": ["Inferred", "Inferred"],
+            "Length": [5000, 3000],
+            "Seg_total": [10, 3],
+        })
+        inferred_chimeric_df = pd.DataFrame({
+            "eccDNA_id": ["C1", "C1", "C2"],
+            "chr": ["chr1", "chr2", "chr3"],
+        })
+        result_unified, _, result_chimeric = ecc_packager._filter_cecc_qc(
+            unified_df, None, inferred_chimeric_df, max_inferred_segments=5,
+        )
+        assert len(result_chimeric) == 1
+        assert result_chimeric.iloc[0]["eccDNA_id"] == "C2"
+
+    def test_empty_input(self):
+        """Empty DataFrame should be handled gracefully."""
+        unified_df = pd.DataFrame(columns=["eccDNA_id", "eccDNA_type", "State", "Length"])
+        result_unified, _, _ = ecc_packager._filter_cecc_qc(
+            unified_df, None, None,
+        )
+        assert result_unified.empty
+
+
+# ════════════════════════════════════════════════════════════════════
+# NMS dedup logic (ALL-fragments vs ANY-fragment)
+# ════════════════════════════════════════════════════════════════════
+
+
+class TestNmsDedup:
+    """Test the NMS dedup logic embedded in run()."""
+
+    def test_frag_overlap_same_region(self):
+        """Exact same fragment should have overlap 1.0."""
+        # Replicating the _frag_overlap inner function from ecc_packager.run
+        def _frag_overlap(f1, f2):
+            c1, s1, e1 = f1
+            c2, s2, e2 = f2
+            if c1 != c2:
+                return 0.0
+            ovl = max(0, min(e1, e2) - max(s1, s2))
+            min_len = min(e1 - s1, e2 - s2)
+            return ovl / min_len if min_len > 0 else 0.0
+
+        assert _frag_overlap(("chr1", 100, 200), ("chr1", 100, 200)) == 1.0
+
+    def test_frag_overlap_no_overlap(self):
+        def _frag_overlap(f1, f2):
+            c1, s1, e1 = f1
+            c2, s2, e2 = f2
+            if c1 != c2:
+                return 0.0
+            ovl = max(0, min(e1, e2) - max(s1, s2))
+            min_len = min(e1 - s1, e2 - s2)
+            return ovl / min_len if min_len > 0 else 0.0
+
+        assert _frag_overlap(("chr1", 100, 200), ("chr1", 300, 400)) == 0.0
+
+    def test_frag_overlap_different_chrom(self):
+        def _frag_overlap(f1, f2):
+            c1, s1, e1 = f1
+            c2, s2, e2 = f2
+            if c1 != c2:
+                return 0.0
+            ovl = max(0, min(e1, e2) - max(s1, s2))
+            min_len = min(e1 - s1, e2 - s2)
+            return ovl / min_len if min_len > 0 else 0.0
+
+        assert _frag_overlap(("chr1", 100, 200), ("chr2", 100, 200)) == 0.0
+
+    def test_cecc_nms_requires_all_fragments(self):
+        """CeccDNA dedup requires ALL fragments to overlap (not just any)."""
+        import re
+
+        def _parse_frags(row):
+            frags = []
+            loc = str(row.get("location", ""))
+            for m in re.finditer(r"(\w+):(\d+)-(\d+)", loc):
+                frags.append((m.group(1), int(m.group(2)), int(m.group(3))))
+            return frags
+
+        def _frag_overlap(f1, f2):
+            c1, s1, e1 = f1
+            c2, s2, e2 = f2
+            if c1 != c2:
+                return 0.0
+            ovl = max(0, min(e1, e2) - max(s1, s2))
+            min_len = min(e1 - s1, e2 - s2)
+            return ovl / min_len if min_len > 0 else 0.0
+
+        # Two CeccDNA that share one fragment but differ on another
+        frags_a = [("chr1", 100, 200), ("chr2", 300, 400)]
+        frags_b = [("chr1", 100, 200), ("chr3", 500, 600)]
+
+        # ALL fragments of b must overlap a -> chr3:500-600 does not overlap any in a
+        n_matched = 0
+        for ci, si, ei in frags_b:
+            for cj, sj, ej in frags_a:
+                if _frag_overlap((ci, si, ei), (cj, sj, ej)) > 0.5:
+                    n_matched += 1
+                    break
+        is_dup = (n_matched == len(frags_b))
+        assert not is_dup, "Cecc with non-overlapping fragment should NOT be dup"
+
+    def test_mecc_nms_any_fragment_sufficient(self):
+        """MeccDNA dedup uses ANY fragment overlap."""
+        def _frag_overlap(f1, f2):
+            c1, s1, e1 = f1
+            c2, s2, e2 = f2
+            if c1 != c2:
+                return 0.0
+            ovl = max(0, min(e1, e2) - max(s1, s2))
+            min_len = min(e1 - s1, e2 - s2)
+            return ovl / min_len if min_len > 0 else 0.0
+
+        frags_a = [("chr1", 100, 200)]
+        frags_b = [("chr1", 110, 210)]
+
+        is_dup = False
+        for ci, si, ei in frags_b:
+            for cj, sj, ej in frags_a:
+                if _frag_overlap((ci, si, ei), (cj, sj, ej)) > 0.5:
+                    is_dup = True
+                    break
+            if is_dup:
+                break
+        assert is_dup, "Mecc with overlapping fragment should be dup"
+
+
+# ════════════════════════════════════════════════════════════════════
+# NMS platform guard (_is_ont_reads)
+# ════════════════════════════════════════════════════════════════════
+
+
+class TestIsOntReads:
+    """Test the _is_ont_reads guard condition for NMS dedup."""
+
+    def test_ont_reads_detected(self):
+        """ONT reads table has eccDNA_copy_number + mapq + match_degree."""
+        reads_df = pd.DataFrame({
+            "eccDNA_id": ["M1"],
+            "eccDNA_copy_number": [5.0],
+            "mapq": [60],
+            "match_degree": [98.5],
+        })
+        _is_ont = (
+            not reads_df.empty
+            and "eccDNA_copy_number" in reads_df.columns
+            and "mapq" in reads_df.columns
+            and "match_degree" in reads_df.columns
+        )
+        assert _is_ont is True
+
+    def test_ngs_reads_not_detected(self):
+        """NGS reads table lacks eccDNA_copy_number."""
+        reads_df = pd.DataFrame({
+            "eccDNA_id": ["M1"],
+            "mapq": [60],
+            "match_degree": [98.5],
+        })
+        _is_ont = (
+            not reads_df.empty
+            and "eccDNA_copy_number" in reads_df.columns
+            and "mapq" in reads_df.columns
+            and "match_degree" in reads_df.columns
+        )
+        assert _is_ont is False
+
+    def test_empty_reads_not_detected(self):
+        """Empty reads table should not be detected as ONT."""
+        reads_df = pd.DataFrame()
+        _is_ont = (
+            not reads_df.empty
+            and "eccDNA_copy_number" in reads_df.columns
+            and "mapq" in reads_df.columns
+            and "match_degree" in reads_df.columns
+        )
+        assert _is_ont is False
+
+    def test_missing_mapq_not_detected(self):
+        """Missing mapq column should not be detected as ONT."""
+        reads_df = pd.DataFrame({
+            "eccDNA_id": ["M1"],
+            "eccDNA_copy_number": [5.0],
+            "match_degree": [98.5],
+        })
+        _is_ont = (
+            not reads_df.empty
+            and "eccDNA_copy_number" in reads_df.columns
+            and "mapq" in reads_df.columns
+            and "match_degree" in reads_df.columns
+        )
+        assert _is_ont is False

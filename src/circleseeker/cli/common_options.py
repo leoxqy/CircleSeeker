@@ -19,9 +19,20 @@ def platform_option(func: F) -> F:
     """Sequencing platform option."""
     return click.option(
         "--platform",
-        type=click.Choice(["hifi", "ont"], case_sensitive=False),
+        type=click.Choice(["hifi", "ont", "ngs"], case_sensitive=False),
         default=None,
-        help="Sequencing platform: hifi (default) or ont",
+        help="Sequencing platform: hifi (default), ont, or ngs (short-read paired-end)",
+    )(func)
+
+
+def r2_option(func: F) -> F:
+    """R2 FASTQ file option for NGS paired-end input."""
+    return click.option(
+        "--r2",
+        "r2_file",
+        type=click.Path(exists=True, path_type=Path),
+        default=None,
+        help="R2 FASTQ file for NGS paired-end mode (use with --platform ngs; R1 is provided via -i)",
     )(func)
 
 

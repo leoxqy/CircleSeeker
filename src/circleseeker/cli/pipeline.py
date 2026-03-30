@@ -49,10 +49,12 @@ class PipelineOptions:
     # Logging options from CLI (used to determine if config should override)
     noise: int = 0  # -n count
     debug: bool = False  # --debug flag
-    # Sequencing platform: hifi (default), ont
+    # Sequencing platform: hifi (default), ont, ngs
     platform: Optional[str] = None
     # Sensitivity preset: relaxed, balanced (default), strict
     preset: Optional[str] = None
+    # R2 FASTQ file for NGS paired-end mode (R1 is input_file)
+    r2_file: Optional[Path] = None
 
 
 def show_pipeline_steps() -> None:
@@ -96,7 +98,7 @@ def execute_pipeline(
     # Priority: CLI --platform > config file > default (hifi)
     if opts.platform:
         cfg.platform = opts.platform
-    if cfg.platform != "hifi":
+    if cfg.platform not in ("hifi", "ngs"):
         try:
             apply_platform_preset(cfg)
         except (ValueError, KeyError) as exc:
@@ -198,6 +200,13 @@ def execute_pipeline(
             cecc_cfg["fast_last"] = True
         else:
             cecc_cfg.fast_last = True
+
+    # ── NGS platform: independent execution path ──────────────────────
+    # NGS uses paired-end FASTQ (R1 via -i, R2 via --r2) and bypasses
+    # the HiFi/ONT long-read pipeline entirely.
+    if cfg.platform == "ngs":
+        _execute_ngs_pipeline(opts, cfg, input_file, reference, logger)
+        return
 
     # Validate configuration FIRST (fail fast on user errors like missing files)
     from circleseeker.exceptions import ConfigurationError
@@ -312,4 +321,129 @@ def execute_pipeline(
         print_formatted(formatter.cleanup_message())
     # Use user_output_dir for display (cfg.output_dir was changed to temp_dir by Pipeline)
     print_formatted(formatter.final_output_message(user_output_dir))
+    print_formatted(formatter.separator("="))
+
+
+def _execute_ngs_pipeline(
+    opts: PipelineOptions,
+    cfg: Config,
+    input_file: Optional[Path],
+    reference: Optional[Path],
+    logger: logging.Logger,
+) -> None:
+    """Execute the NGS (short-read paired-end) eccDNA detection pipeline.
+
+    This is a separate execution path from the HiFi/ONT long-read pipeline.
+    It validates NGS-specific inputs and delegates to NGSCircleDetect.
+    """
+    from circleseeker.utils.display import ConsoleFormatter, print_formatted
+
+    # ── Validate NGS-specific inputs ──────────────────────────────────
+    if not input_file:
+        click.echo(
+            "Error: --input (-i) is required for NGS mode (R1 FASTQ file)",
+            err=True,
+        )
+        sys.exit(EXIT_ERROR)
+
+    if not reference:
+        click.echo("Error: --reference (-r) is required for NGS mode", err=True)
+        sys.exit(EXIT_ERROR)
+
+    r2_file = opts.r2_file
+
+    # Determine input mode: paired-end FASTQ (R1+R2) or sorted BAM
+    is_bam_input = input_file.suffix.lower() in (".bam",)
+
+    if not is_bam_input and r2_file is None:
+        click.echo(
+            "Error: NGS mode requires paired-end FASTQ input.\n"
+            "  Provide R1 via -i and R2 via --r2:\n"
+            "    circleseeker --platform ngs -i R1.fq -r ref.fa --r2 R2.fq\n"
+            "  Or provide a sorted BAM file directly:\n"
+            "    circleseeker --platform ngs -i sorted.bam -r ref.fa",
+            err=True,
+        )
+        sys.exit(EXIT_ERROR)
+
+    if not reference.exists():
+        click.echo(f"Error: Reference file not found: {reference}", err=True)
+        sys.exit(EXIT_ERROR)
+
+    if not input_file.exists():
+        click.echo(f"Error: Input file not found: {input_file}", err=True)
+        sys.exit(EXIT_ERROR)
+
+    if r2_file is not None and not r2_file.exists():
+        click.echo(f"Error: R2 FASTQ file not found: {r2_file}", err=True)
+        sys.exit(EXIT_ERROR)
+
+    # ── Resolve output directory and prefix ───────────────────────────
+    output_dir = cfg.output_dir
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    prefix = cfg.prefix
+
+    # ── Handle dry run ────────────────────────────────────────────────
+    if opts.dry_run:
+        logger.info("Dry run mode - showing what would be executed:")
+        click.echo(f"\nNGS eccDNA detection pipeline")
+        click.echo(f"  Input (R1): {input_file}")
+        if r2_file:
+            click.echo(f"  Input (R2): {r2_file}")
+        else:
+            click.echo(f"  Input (BAM): {input_file}")
+        click.echo(f"  Reference:  {reference}")
+        click.echo(f"  Output to:  {output_dir.absolute()}")
+        click.echo(f"  Platform:   NGS")
+        click.echo(f"  Threads:    {cfg.threads}")
+        return
+
+    # ── Run NGS detection ─────────────────────────────────────────────
+    from circleseeker.modules.ngs_circle_detect import NGSCircleDetect, NGSDetectConfig
+
+    ngs_cfg = NGSDetectConfig(threads=cfg.threads)
+    detector = NGSCircleDetect(reference=reference, config=ngs_cfg, logger=logger)
+
+    # Print header
+    formatter = ConsoleFormatter()
+    print_formatted(formatter.header())
+
+    config_dict = {
+        "input_file": input_file.name,
+        "reference": reference.name,
+        "output_dir": str(output_dir.absolute()),
+        "platform": "NGS",
+        "threads": cfg.threads,
+    }
+    if r2_file:
+        config_dict["r2_file"] = r2_file.name
+    print_formatted(formatter.format_config(config_dict))
+    print_formatted(formatter.separator())
+    print_formatted(formatter.start_message())
+
+    if is_bam_input:
+        logger.info("NGS mode: detecting eccDNA from BAM: %s", input_file)
+        df = detector.run_from_bam(input_file, output_dir, prefix=prefix)
+    else:
+        logger.info(
+            "NGS mode: detecting eccDNA from FASTQ pair: %s, %s",
+            input_file,
+            r2_file,
+        )
+        df = detector.run_from_fastq(input_file, r2_file, output_dir, prefix=prefix)
+
+    # ── Report results ────────────────────────────────────────────────
+    print_formatted(formatter.separator())
+    n_total = len(df) if df is not None else 0
+    if n_total > 0:
+        type_counts = df["eccdna_type"].value_counts().to_dict() if "eccdna_type" in df.columns else {}
+        type_summary = ", ".join(f"{k}: {v}" for k, v in sorted(type_counts.items()))
+        print_formatted(f"  NGS detection complete: {n_total} eccDNA detected ({type_summary})")
+        out_csv = output_dir / f"{prefix}_ngs_circles.csv"
+        print_formatted(f"  Results saved to: {out_csv}")
+    else:
+        print_formatted("  NGS detection complete: 0 eccDNA detected")
+
     print_formatted(formatter.separator("="))

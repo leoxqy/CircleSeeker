@@ -9,11 +9,16 @@
 [![Python](https://img.shields.io/badge/python-≥3.9-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
 
-Comprehensive detection and characterization of extrachromosomal circular DNA (eccDNA) from PacBio HiFi sequencing data.
+Comprehensive detection and characterization of extrachromosomal circular DNA (eccDNA) from PacBio HiFi, Oxford Nanopore (ONT), and NGS paired-end sequencing data.
+
+## Key Features
+
+- **Three-platform support** -- HiFi long reads, ONT long reads, and NGS paired-end short reads
+- **Three eccDNA classes** -- Unique (Uecc), Multiple (Mecc), and Chimeric (Cecc) eccDNA
+- **Physics-informed NGS detection** -- Poisson-parameterized logistic regression model for short-read evidence scoring
+- **ML quality control** -- Machine-learning models for long-read Cecc/Mecc filtering and NMS deduplication on ONT
 
 ## eccDNA Classification
-
-CircleSeeker identifies and classifies eccDNA into three categories:
 
 | Type | Full Name | Description |
 |------|-----------|-------------|
@@ -71,65 +76,118 @@ pip install -e .
 ## Quick Start
 
 ```bash
-# Basic usage
-circleseeker -i reads.fasta -r reference.fa -o output_dir
+# HiFi long reads (default platform)
+circleseeker -i reads.fasta -r reference.fa -o output/
 
-# With common options
+# ONT long reads
+circleseeker --platform ont -i reads.fastq -r reference.fa -o output/
+
+# NGS paired-end short reads
+circleseeker --platform ngs -1 reads_R1.fq -2 reads_R2.fq -r reference.fa -o output/
+```
+
+### Common Options
+
+```bash
+# HiFi with turbo mode and 32 threads
 circleseeker \
     -i sample.hifi.fasta \
     -r hg38.fa \
     -o results \
     -p sample_name \
-    -t 16
-
-# High-performance mode (requires sufficient /dev/shm space)
-circleseeker \
-    -i sample.hifi.fasta \
-    -r hg38.fa \
-    -o results \
     -t 32 \
     --turbo
+
+# NGS with custom prefix
+circleseeker \
+    --platform ngs \
+    -1 sample_R1.fq.gz \
+    -2 sample_R2.fq.gz \
+    -r hg38.fa \
+    -o results \
+    -p sample_name \
+    -t 16
 ```
 
 ## Usage
 
 ### Required Arguments
 
-- `-i, --input PATH` - Input HiFi reads (FASTA format)
-- `-r, --reference PATH` - Reference genome (FASTA format)
+| Argument | Description |
+|----------|-------------|
+| `-i, --input PATH` | Input reads -- FASTA/FASTQ (HiFi / ONT) |
+| `-1 PATH` | Forward reads -- FASTQ (NGS paired-end) |
+| `-2 PATH` | Reverse reads -- FASTQ (NGS paired-end) |
+| `-r, --reference PATH` | Reference genome (FASTA format) |
 
 ### Optional Arguments
 
-- `-o, --output PATH` - Output directory (default: circleseeker_output)
-- `-p, --prefix TEXT` - Output file prefix (default: sample)
-- `-t, --threads INT` - Number of threads (default: 8)
-- `-c, --config PATH` - Configuration file (YAML format)
-- `-v, --verbose` - Increase verbosity (-v for INFO, -vv for DEBUG)
-- `-h, --help` - Show help message
-- `--keep-tmp` - Keep temporary files
-- `--turbo` - Enable turbo mode (use RAM-backed `/dev/shm` for faster I/O)
+| Argument | Description |
+|----------|-------------|
+| `--platform {hifi,ont,ngs}` | Sequencing platform (default: hifi) |
+| `-o, --output PATH` | Output directory (default: circleseeker_output) |
+| `-p, --prefix TEXT` | Output file prefix (default: sample) |
+| `-t, --threads INT` | Number of threads (default: 8) |
+| `-c, --config PATH` | Configuration file (YAML format) |
+| `-v, --verbose` | Increase verbosity (-v for INFO, -vv for DEBUG) |
+| `--keep-tmp` | Keep temporary files |
+| `--turbo` | Enable turbo mode (use RAM-backed `/dev/shm` for faster I/O) |
+| `--fast-align` | Use faster LAST alignment for CeccDNA (~3x speedup) |
+
+## Benchmark Results
+
+Performance evaluated on simulated eccDNA datasets with 90% reciprocal overlap matching criterion.
+
+### HiFi Long Reads
+
+| Genome | Coverage | F1 | Precision | Recall |
+|--------|----------|----|-----------|--------|
+| *A. thaliana* | 30X | 0.982 | -- | -- |
+| Human | 30X | 0.982 | -- | -- |
+
+### NGS Paired-End (3-replicate average)
+
+| Genome | Coverage | F1 | Precision | Recall |
+|--------|----------|----|-----------|--------|
+| *A. thaliana* | 30X | 0.897 | 92.2% | 87.5% |
+| Human | 30X | 0.920 | 95.5% | 88.7% |
+
+### Comparison with Existing Tools (NGS 30X)
+
+| Tool | *A. thaliana* F1 | Human F1 |
+|------|-------------------|----------|
+| **CircleSeeker** | **0.897** | **0.920** |
+| CircleMap | 0.758 | 0.823 |
 
 ## Pipeline Overview
 
-CircleSeeker implements a 16-step analysis pipeline organized into 5 phases, driven by two evidence-based callers:
+CircleSeeker selects a platform-specific pipeline based on the `--platform` flag.
 
-- **CtcReads**: Reads containing **Ctc** (**C**oncatemeric **t**andem **c**opies) signals
-- **CtcReads-Caller** (Steps 4–9): Produces **Confirmed** U/M/C eccDNA from CtcReads evidence
-- **SplitReads-Caller** (Steps 10–13): Produces **Inferred** eccDNA from split-read/junction evidence
+### HiFi / ONT Pipeline (Long Reads)
 
-### Architecture
+A 16-step pipeline organized into 5 phases, driven by two evidence-based callers:
+
+- **CtcReads-Caller** (Steps 4--9): Produces **Confirmed** U/M/C eccDNA from concatemeric tandem copy (Ctc) evidence
+- **SplitReads-Caller** (Steps 10--13): Produces **Inferred** eccDNA from split-read/junction evidence
+
+#### Architecture
 
 <p align="center">
   <img src="docs/images/architecture.jpg" width="700" alt="CircleSeeker Architecture">
 </p>
 
-- **Preprocessing** (Steps 1-3): Dependency checks, tandem repeat detection, circular candidate extraction
-- **CtcReads-Caller** (Steps 4-9): Alignment, U/M/C classification, deduplication — producing **Confirmed** eccDNA
-- **SplitReads-Caller** (Steps 10-13): Read filtering, split-read inference — producing **Inferred** eccDNA
-- **Integration** (Steps 14-15): Merges results and generates summary report
-- **Packaging** (Step 16): Organizes final output directory
+| Phase | Steps | Description |
+|-------|-------|-------------|
+| Preprocessing | 1--3 | Dependency checks, tandem repeat detection, circular candidate extraction |
+| CtcReads-Caller | 4--9 | Alignment, U/M/C classification, deduplication -- producing **Confirmed** eccDNA |
+| SplitReads-Caller | 10--13 | Read filtering, split-read inference -- producing **Inferred** eccDNA |
+| Integration | 14--15 | Merge results and generate summary report |
+| Packaging | 16 | Organize final output directory |
 
-### Phase 1: Preprocessing (Steps 1-3)
+<details>
+<summary>Detailed step table (click to expand)</summary>
+
+#### Phase 1: Preprocessing (Steps 1-3)
 
 | Step | Module | Description |
 |------|--------|-------------|
@@ -137,7 +195,7 @@ CircleSeeker implements a 16-step analysis pipeline organized into 5 phases, dri
 | 2 | tidehunter | Detect tandem repeats in HiFi reads |
 | 3 | tandem_to_ring | Convert tandem repeats to circular candidates |
 
-### Phase 2: CtcReads-Caller (Steps 4-9)
+#### Phase 2: CtcReads-Caller (Steps 4-9)
 
 | Step | Module | Description |
 |------|--------|-------------|
@@ -148,7 +206,7 @@ CircleSeeker implements a 16-step analysis pipeline organized into 5 phases, dri
 | 8 | cd_hit | Remove redundancy (99% identity threshold) |
 | 9 | ecc_dedup | Deduplicate and standardize coordinates |
 
-### Phase 3: SplitReads-Caller (Steps 10-13)
+#### Phase 3: SplitReads-Caller (Steps 10-13)
 
 | Step | Module | Description |
 |------|--------|-------------|
@@ -157,18 +215,28 @@ CircleSeeker implements a 16-step analysis pipeline organized into 5 phases, dri
 | 12 | ecc_inference | Detect eccDNA using SplitReads-Core (built-in) |
 | 13 | curate_inferred_ecc | Curate inferred eccDNA |
 
-### Phase 4: Integration (Steps 14-15)
+#### Phase 4: Integration (Steps 14-15)
 
 | Step | Module | Description |
 |------|--------|-------------|
 | 14 | ecc_unify | Merge confirmed and inferred results |
 | 15 | ecc_summary | Generate statistics and summaries |
 
-### Phase 5: Packaging (Step 16)
+#### Phase 5: Packaging (Step 16)
 
 | Step | Module | Description |
 |------|--------|-------------|
 | 16 | ecc_packager | Package final outputs |
+
+</details>
+
+### NGS Pipeline (Short Reads)
+
+A three-stage pipeline designed for paired-end short-read data:
+
+1. **Evidence Extraction** -- Align reads with BWA-MEM; extract split reads (back-jump junctions), discordant pairs, and soft-clipped reads from the BAM file
+2. **Candidate Scoring** -- Cluster breakpoint evidence into candidate eccDNA regions; score each candidate with a logistic regression model whose features include back-jump count, forward-jump count, discordant pair orientation, clip counts, and log-region-size (coefficients cross-validated across genomes)
+3. **Filtering and Output** -- Apply probability threshold and ML quality control to produce the final eccDNA call set
 
 ## Output Files
 
@@ -257,7 +325,7 @@ For a complete list of configuration options, see the [Configuration Reference](
 ## System Requirements
 
 - **Operating System**: Linux or macOS
-- **Python**: ≥3.9
+- **Python**: >=3.9
 - **Memory**: Minimum 16GB (32GB recommended)
 - **Storage**: ~50GB free space
 - **CPU**: 8+ cores recommended
@@ -268,26 +336,26 @@ For a complete list of configuration options, see the [Configuration Reference](
 
 | Package | Version | Description |
 |---------|---------|-------------|
-| pandas | ≥2.0 | Data manipulation |
-| numpy | ≥1.23 | Numerical computing |
-| biopython | ≥1.81 | Sequence handling |
-| pysam | ≥0.22 | BAM/SAM processing |
-| networkx | ≥3.0 | Graph algorithms |
-| intervaltree | ≥3.1 | Interval operations |
-| click | ≥8.1 | CLI framework |
-| pyyaml | ≥6.0 | Configuration parsing |
-| packaging | ≥23.0 | Version parsing utilities |
+| pandas | >=2.0 | Data manipulation |
+| numpy | >=1.23 | Numerical computing |
+| biopython | >=1.81 | Sequence handling |
+| pysam | >=0.22 | BAM/SAM processing |
+| networkx | >=3.0 | Graph algorithms |
+| intervaltree | >=3.1 | Interval operations |
+| click | >=8.1 | CLI framework |
+| pyyaml | >=6.0 | Configuration parsing |
+| packaging | >=23.0 | Version parsing utilities |
 
 ### External Tools (Required)
 
 | Tool | Version | Description |
 |------|---------|-------------|
-| TideHunter | ≥1.5.0 | Tandem repeat detection |
-| minimap2 | ≥2.24 | Sequence alignment and read mapping |
-| samtools | ≥1.17 | BAM file processing |
-| CD-HIT | ≥4.8.1 | Sequence clustering (cd-hit-est) |
-| LAST | ≥1250 | High-accuracy CeccDNA detection (lastal, lastdb, last-split) |
-| bedtools | ≥2.30 | Genomic interval operations (required by pybedtools) |
+| TideHunter | >=1.5.0 | Tandem repeat detection |
+| minimap2 | >=2.24 | Sequence alignment and read mapping |
+| samtools | >=1.17 | BAM file processing |
+| CD-HIT | >=4.8.1 | Sequence clustering (cd-hit-est) |
+| LAST | >=1250 | High-accuracy CeccDNA detection (lastal, lastdb, last-split) |
+| bedtools | >=2.30 | Genomic interval operations (required by pybedtools) |
 
 ### Additional Python Packages
 
@@ -302,6 +370,7 @@ For a complete list of configuration options, see the [Configuration Reference](
 |--------|-------------|
 | CtcReads-Core | TideHunter-based confirmed eccDNA detection |
 | SplitReads-Core | Built-in split-read inference inspired by [CReSIL](https://github.com/Peppermint-Lab/CReSIL), optimized for HiFi |
+| NGS-Circle-Detect | Logistic-regression-based eccDNA detection from short-read evidence |
 
 ## Troubleshooting
 
@@ -324,7 +393,7 @@ circleseeker -i test.fa -r ref.fa -o test_output
 
 ### Common Issues
 
-**FASTQ Input**: CircleSeeker requires FASTA format. Convert FASTQ first:
+**FASTQ Input (HiFi)**: The HiFi pipeline requires FASTA format. Convert FASTQ first:
 ```bash
 seqtk seq -A reads.fastq > reads.fasta
 ```

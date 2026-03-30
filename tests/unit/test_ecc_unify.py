@@ -1179,3 +1179,96 @@ class TestGenerateOverlapReport:
         report = generate_overlap_report(confirmed, None, None, set(), set())
         assert "No inferred simple eccDNA provided" in report
         assert "No inferred chimeric eccDNA provided" in report
+
+
+# ========== prepare_inferred_simple num_split_reads QC Tests ========== #
+
+
+class TestPrepareInferredSimpleSplitReadFilter:
+    """Test the num_split_reads >= 3 QC filter in prepare_inferred_simple."""
+
+    def test_filter_low_split_reads_removed(self):
+        """Entries with num_split_reads < 3 should be removed."""
+        df = pd.DataFrame({
+            "eccDNA_id": ["I1", "I2", "I3"],
+            "chr": ["chr1", "chr2", "chr3"],
+            "start0": [100, 300, 500],
+            "end0": [200, 400, 600],
+            "length": [100, 100, 100],
+            "strand": ["+", "+", "+"],
+            "num_split_reads": [1, 2, 3],
+        })
+        result = prepare_inferred_simple(df, redundant_ids=set())
+        assert len(result) == 1
+        assert result["eccDNA_id"].iloc[0] == "I3"
+
+    def test_filter_all_below_threshold_returns_empty(self):
+        """If all entries have num_split_reads < 3, return empty."""
+        df = pd.DataFrame({
+            "eccDNA_id": ["I1", "I2"],
+            "chr": ["chr1", "chr2"],
+            "start0": [100, 300],
+            "end0": [200, 400],
+            "length": [100, 100],
+            "strand": ["+", "+"],
+            "num_split_reads": [1, 2],
+        })
+        result = prepare_inferred_simple(df, redundant_ids=set())
+        assert result.empty
+
+    def test_filter_exactly_three_passes(self):
+        """num_split_reads == 3 should pass the filter."""
+        df = pd.DataFrame({
+            "eccDNA_id": ["I1"],
+            "chr": ["chr1"],
+            "start0": [100],
+            "end0": [200],
+            "length": [100],
+            "strand": ["+"],
+            "num_split_reads": [3],
+        })
+        result = prepare_inferred_simple(df, redundant_ids=set())
+        assert len(result) == 1
+
+    def test_filter_high_split_reads_passes(self):
+        """num_split_reads >> 3 should easily pass."""
+        df = pd.DataFrame({
+            "eccDNA_id": ["I1"],
+            "chr": ["chr1"],
+            "start0": [100],
+            "end0": [200],
+            "length": [100],
+            "strand": ["+"],
+            "num_split_reads": [50],
+        })
+        result = prepare_inferred_simple(df, redundant_ids=set())
+        assert len(result) == 1
+
+    def test_no_split_reads_column_bypasses_filter(self):
+        """Without num_split_reads column, filter is not applied."""
+        df = pd.DataFrame({
+            "eccDNA_id": ["I1"],
+            "chr": ["chr1"],
+            "start0": [100],
+            "end0": [200],
+            "length": [100],
+            "strand": ["+"],
+        })
+        result = prepare_inferred_simple(df, redundant_ids=set())
+        assert len(result) == 1
+
+    def test_filter_combined_with_redundant(self):
+        """Both redundancy and split-read filters should apply."""
+        df = pd.DataFrame({
+            "eccDNA_id": ["I1", "I2", "I3", "I4"],
+            "chr": ["chr1", "chr2", "chr3", "chr4"],
+            "start0": [100, 300, 500, 700],
+            "end0": [200, 400, 600, 800],
+            "length": [100, 100, 100, 100],
+            "strand": ["+", "+", "+", "+"],
+            "num_split_reads": [5, 1, 10, 2],
+        })
+        # I1 redundant, I2 low reads, I4 low reads
+        result = prepare_inferred_simple(df, redundant_ids={"I1"})
+        assert len(result) == 1
+        assert result["eccDNA_id"].iloc[0] == "I3"
