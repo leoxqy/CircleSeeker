@@ -812,9 +812,12 @@ class SplitReadsCore:
             "depth",
             "d_ovl",
         ]
-        merge_genomecov_df[["depth", "bg_start", "d_ovl"]] = merge_genomecov_df[["depth", "bg_start", "d_ovl"]].apply(
-            pd.to_numeric, errors="coerce"
-        )
+        # NOTE: bg_end MUST be numeric before the groupby-agg("max") below. The table is
+        # read with dtype=str, so a string bg_end makes agg("max") compare lexicographically
+        # ("99999" > "403001"), truncating any region that spans a power-of-ten boundary.
+        merge_genomecov_df[["depth", "bg_start", "bg_end", "d_ovl"]] = merge_genomecov_df[
+            ["depth", "bg_start", "bg_end", "d_ovl"]
+        ].apply(pd.to_numeric, errors="coerce")
 
         # Generate merge ID
         merge_genomecov_df["mergeid"] = (
